@@ -1,0 +1,160 @@
+import type { Order, Product, Store } from "@/features/commerce/types";
+
+export const mockStores: Store[] = [
+  {
+    id: "demo-store-outdoor",
+    ownerId: "demo_user_zendora",
+    name: "Northline Supply",
+    slug: "northline-supply",
+    description:
+      "A calm, focused storefront for founders selling premium everyday goods.",
+    currency: "USD",
+    themeColor: "#0f766e",
+    status: "active",
+    createdAt: "2026-04-12T10:00:00.000Z",
+    productCount: 4,
+    orderCount: 18,
+    revenueCents: 128640,
+    inventoryCount: 142,
+  },
+  {
+    id: "demo-store-studio",
+    ownerId: "demo_user_zendora",
+    name: "Aster Studio",
+    slug: "aster-studio",
+    description:
+      "A draft store for testing multiple brands under the same merchant account.",
+    currency: "USD",
+    themeColor: "#0284c7",
+    status: "draft",
+    createdAt: "2026-05-08T09:30:00.000Z",
+    productCount: 2,
+    orderCount: 0,
+    revenueCents: 0,
+    inventoryCount: 56,
+  },
+];
+
+export const mockProducts: Product[] = [
+  {
+    id: "demo-product-carry-pack",
+    storeId: "demo-store-outdoor",
+    name: "Field Carry Pack",
+    slug: "field-carry-pack",
+    description:
+      "Weather-resistant day pack with a structured laptop sleeve and clean travel pockets.",
+    priceCents: 12900,
+    currency: "USD",
+    inventoryCount: 32,
+    imageUrl:
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    createdAt: "2026-04-14T10:00:00.000Z",
+  },
+  {
+    id: "demo-product-trail-watch",
+    storeId: "demo-store-outdoor",
+    name: "Trail Watch",
+    slug: "trail-watch",
+    description:
+      "Low-profile field watch with sapphire glass, quick-release strap, and 10 ATM rating.",
+    priceCents: 21900,
+    currency: "USD",
+    inventoryCount: 11,
+    imageUrl:
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    createdAt: "2026-04-16T10:00:00.000Z",
+  },
+  {
+    id: "demo-product-hydra-bottle",
+    storeId: "demo-store-outdoor",
+    name: "Hydra Bottle",
+    slug: "hydra-bottle",
+    description:
+      "Insulated stainless bottle with a soft-touch finish and leakproof carry loop.",
+    priceCents: 4200,
+    currency: "USD",
+    inventoryCount: 6,
+    imageUrl:
+      "https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    createdAt: "2026-04-18T10:00:00.000Z",
+  },
+  {
+    id: "demo-product-sprint-shoe",
+    storeId: "demo-store-outdoor",
+    name: "Sprint Shoe",
+    slug: "sprint-shoe",
+    description:
+      "A lightweight trainer with breathable mesh and a responsive everyday midsole.",
+    priceCents: 9800,
+    currency: "USD",
+    inventoryCount: 93,
+    imageUrl:
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    createdAt: "2026-04-22T10:00:00.000Z",
+  },
+  {
+    id: "demo-product-calm-lamp",
+    storeId: "demo-store-studio",
+    name: "Calm Desk Lamp",
+    slug: "calm-desk-lamp",
+    description: "A warm desk lamp designed for tiny workspaces.",
+    priceCents: 7600,
+    currency: "USD",
+    inventoryCount: 18,
+    imageUrl:
+      "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=1200&q=80",
+    status: "draft",
+    createdAt: "2026-05-09T10:00:00.000Z",
+  },
+  {
+    id: "demo-product-ceramic-cup",
+    storeId: "demo-store-studio",
+    name: "Studio Ceramic Cup",
+    slug: "studio-ceramic-cup",
+    description: "Hand-finished cup for coffee, tea, and late product reviews.",
+    priceCents: 2800,
+    currency: "USD",
+    inventoryCount: 38,
+    imageUrl:
+      "https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?auto=format&fit=crop&w=1200&q=80",
+    status: "draft",
+    createdAt: "2026-05-10T10:00:00.000Z",
+  },
+];
+
+export const mockOrders: Order[] = [
+  {
+    id: "demo-order-1001",
+    storeId: "demo-store-outdoor",
+    customerName: "Mira Chen",
+    customerEmail: "mira@example.com",
+    status: "paid",
+    totalCents: 34800,
+    currency: "USD",
+    createdAt: "2026-05-25T13:20:00.000Z",
+  },
+  {
+    id: "demo-order-1002",
+    storeId: "demo-store-outdoor",
+    customerName: "Ari Patel",
+    customerEmail: "ari@example.com",
+    status: "fulfilled",
+    totalCents: 17100,
+    currency: "USD",
+    createdAt: "2026-05-29T09:40:00.000Z",
+  },
+  {
+    id: "demo-order-1003",
+    storeId: "demo-store-outdoor",
+    customerName: "Sam Rivera",
+    customerEmail: "sam@example.com",
+    status: "pending",
+    totalCents: 12900,
+    currency: "USD",
+    createdAt: "2026-06-02T16:12:00.000Z",
+  },
+];
