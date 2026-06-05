@@ -12,8 +12,9 @@ import {
   getStoreWorkspace,
   upsertProfileForUser,
 } from "@/features/commerce/data";
-import { productImageBucket, isSupabaseConfigured } from "@/lib/env";
+import { isSupabaseConfigured } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { uploadProductImageObject } from "@/lib/supabase/storage";
 import { toPriceCents } from "@/lib/utils";
 
 const storeSchema = z.object({
@@ -76,26 +77,7 @@ async function uploadProductImage(storeId: string, file: FormDataEntryValue | nu
     throw new Error("Product image must be smaller than 5MB.");
   }
 
-  const db = getSupabaseAdmin();
-  const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const safeExtension = extension.replace(/[^a-z0-9]/g, "") || "jpg";
-  const objectPath = `${storeId}/${crypto.randomUUID()}.${safeExtension}`;
-  const { error } = await db.storage.from(productImageBucket).upload(objectPath, file, {
-    cacheControl: "31536000",
-    contentType: file.type || "application/octet-stream",
-    upsert: false,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  const { data } = db.storage.from(productImageBucket).getPublicUrl(objectPath);
-
-  return {
-    imageUrl: data.publicUrl,
-    imagePath: objectPath,
-  };
+  return uploadProductImageObject(storeId, file);
 }
 
 export async function createStoreAction(
