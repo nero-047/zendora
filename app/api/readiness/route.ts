@@ -45,8 +45,8 @@ export async function GET() {
     envCheck(
       "supabase_admin",
       isSupabaseConfigured(),
-      "Supabase service role key is configured for server mutations.",
-      "Missing SUPABASE_SERVICE_ROLE_KEY for server mutations.",
+      "Supabase server key is configured for server mutations.",
+      "Missing SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY for server mutations.",
     ),
     envCheck(
       "supabase_storage_bucket_name",
@@ -59,8 +59,8 @@ export async function GET() {
       isSupabaseConfigured() || isSupabaseStorageS3Configured(),
       isSupabaseStorageS3Configured()
         ? "Storage uploads can use Supabase S3 credentials."
-        : "Storage uploads can use the Supabase service role key.",
-      "Missing storage upload provider: add SUPABASE_SERVICE_ROLE_KEY or complete Supabase S3 credentials.",
+        : "Storage uploads can use the Supabase server key.",
+      "Missing storage upload provider: add SUPABASE_SECRET_KEY, SUPABASE_SERVICE_ROLE_KEY, or complete Supabase S3 credentials.",
     ),
     envCheck(
       "clerk_auth",
@@ -98,15 +98,13 @@ export async function GET() {
         detail: sanitizeError(error),
       });
     }
-
   } else {
-    checks.push(
-      {
-        name: "supabase_schema",
-        ok: false,
-        detail: "Skipped because SUPABASE_SERVICE_ROLE_KEY is missing.",
-      },
-    );
+    checks.push({
+      name: "supabase_schema",
+      ok: false,
+      detail:
+        "Skipped because SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is missing.",
+    });
   }
 
   if (isSupabaseConfigured() || isSupabaseStorageS3Configured()) {
@@ -130,7 +128,7 @@ export async function GET() {
       name: "supabase_storage_bucket",
       ok: false,
       detail:
-        "Skipped because neither SUPABASE_SERVICE_ROLE_KEY nor complete Supabase S3 credentials are configured.",
+        "Skipped because neither a Supabase server key nor complete Supabase S3 credentials are configured.",
     });
   }
 

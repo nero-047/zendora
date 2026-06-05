@@ -2,12 +2,18 @@
   "name": "zendora",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "scripts": {
     "dev": "next dev",
     "check:env": "node scripts/check-env.mjs",
-    "check:deploy": "node scripts/check-env.mjs --production",
+    "check:deploy": "node scripts/check-env.mjs",
+    "check:integrations": "node scripts/check-env.mjs --strict",
     "build": "next build",
     "package:eb": "node scripts/package-eb.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:deploy": "node scripts/smoke.mjs --require-readiness",
     "start": "next start",
     "start:eb": "next start -p ${PORT:-3000}",
     "lint": "eslint"

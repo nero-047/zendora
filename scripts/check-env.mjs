@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = new Set(process.argv.slice(2));
-const production = args.has("--production");
+const strict = args.has("--strict") || args.has("--production");
 
 function loadDotEnvLocal() {
   const envPath = resolve(process.cwd(), ".env.local");
@@ -78,7 +78,7 @@ const checks = [
   },
 ];
 
-if (production) {
+if (strict) {
   const s3Keys = [
     "SUPABASE_STORAGE_S3_ACCESS_KEY_ID",
     "SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY",
@@ -87,9 +87,9 @@ if (production) {
 
   checks.push(
     {
-      name: "SUPABASE_SERVICE_ROLE_KEY",
-      ok: present("SUPABASE_SERVICE_ROLE_KEY"),
-      hint: "Supabase Dashboard -> Project Settings -> API keys -> service_role. Server-only.",
+      name: "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY",
+      ok: oneOf(["SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"]),
+      hint: "Supabase Dashboard -> Project Settings -> API keys -> secret key, or legacy service_role key. Server-only.",
     },
     {
       name: "CLERK_WEBHOOK_SIGNING_SECRET",
@@ -128,16 +128,16 @@ const missing = checks.filter((check) => !check.ok);
 
 if (missing.length === 0) {
   console.log(
-    production
-      ? "Production environment check passed."
+    strict
+      ? "Strict integration environment check passed."
       : "Base environment check passed.",
   );
   process.exit(0);
 }
 
 console.error(
-  production
-    ? "Production environment check failed. Missing:"
+  strict
+    ? "Strict integration environment check failed. Missing:"
     : "Base environment check failed. Missing:",
 );
 

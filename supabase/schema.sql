@@ -143,6 +143,7 @@ create policy "public product image reads"
 on storage.objects for select
 using (bucket_id = 'product-images');
 
--- Server mutations use SUPABASE_SERVICE_ROLE_KEY from Next.js Server Functions.
+-- Server mutations use SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY
+-- from Next.js Server Functions.
 -- If you later expose client-side Supabase writes, add Clerk JWT templates and RLS
 -- policies that compare auth.jwt()->>'sub' against clerk_user_id.

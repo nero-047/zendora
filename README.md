@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zendora
+
+Zendora is a Shopify-style MVP built as a personal portfolio project. It shows
+the core system thinking behind a multi-store commerce dashboard: Clerk auth,
+Supabase database/storage, Clerk webhooks for profile sync, product image
+uploads, public storefronts, and AWS Elastic Beanstalk deployment packaging.
+
+The app is intentionally demo-friendly. It can run with mock commerce data while
+server-only Supabase credentials are missing, then switch to real persistence
+when the strict integration env values are added.
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies and create your local env file:
+
+```bash
+npm install
+cp .env.example .env.local
+npm run check:deploy
+```
+
+Then run the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Integration Checks
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run check:deploy
+npm run check:integrations
+```
 
-## Learn More
+`check:deploy` verifies the base demo deploy env. `check:integrations` verifies
+the full Supabase server key, storage bucket, and Clerk webhook configuration.
 
-To learn more about Next.js, take a look at the following resources:
+Credential setup is documented in
+[docs/setup/credentials.md](docs/setup/credentials.md).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## AWS Elastic Beanstalk
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Zendora includes a `Buildfile`, `Procfile`, EB environment config, health check,
+and a source-bundle script:
 
-## Deploy on Vercel
+```bash
+npm run build
+npm run package:eb
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Upload `dist/zendora-eb-source.zip` or deploy with the EB CLI. Full instructions
+are in [docs/deployment/aws-elastic-beanstalk.md](docs/deployment/aws-elastic-beanstalk.md).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Verification
+
+```bash
+npm run lint
+npm run build
+npm audit --audit-level=moderate
+npm run smoke
+```

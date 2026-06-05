@@ -107,6 +107,13 @@ function mapStore(row: StoreRow, products: Product[], orders: Order[]): Store {
   };
 }
 
+function mapDemoStoreForUser(store: Store, userId: string): Store {
+  return {
+    ...store,
+    ownerId: userId,
+  };
+}
+
 function byStoreId<T extends { storeId: string }>(items: T[]) {
   const grouped = new Map<string, T[]>();
 
@@ -211,7 +218,7 @@ export async function markProfileDeleted(clerkUserId: string) {
 
 export async function listStoresForUser(userId: string): Promise<Store[]> {
   if (!isSupabaseConfigured()) {
-    return mockStores.filter((store) => store.ownerId === userId);
+    return mockStores.map((store) => mapDemoStoreForUser(store, userId));
   }
 
   const db = getSupabaseAdmin();
@@ -317,12 +324,12 @@ export async function getStoreWorkspace(
       (item) => item.id === storeId || item.slug === storeId,
     );
 
-    if (!store || store.ownerId !== userId) {
+    if (!store) {
       return null;
     }
 
     return {
-      store,
+      store: mapDemoStoreForUser(store, userId),
       products: mockProducts.filter((product) => product.storeId === store.id),
       orders: mockOrders.filter((order) => order.storeId === store.id),
     };

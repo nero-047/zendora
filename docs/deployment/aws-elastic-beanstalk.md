@@ -1,6 +1,8 @@
 # AWS Elastic Beanstalk Deployment
 
-Zendora is prepared for the Elastic Beanstalk Node.js platform.
+Zendora is prepared for a personal portfolio/demo deployment on the Elastic
+Beanstalk Node.js platform. The goal here is a clean, repeatable showcase
+deployment, not a million-user commerce production system.
 
 ## Platform
 
@@ -13,11 +15,15 @@ The app includes:
 - `Buildfile` to run `npm run build`
 - `Procfile` to run `npm run start:eb`
 - `.ebextensions/01_environment.config` for production runtime defaults
+- `NPM_USE_PRODUCTION=false` so EB installs build-time dev dependencies
 - `.platform/nginx/conf.d/10_uploads.conf` for 10 MB product image uploads
 - `/api/health` for a simple health endpoint
-- `/api/readiness` for production configuration and Supabase/Clerk readiness
-- `npm run check:deploy` to validate required production environment variables
+- `/api/readiness` for Supabase/Clerk integration readiness
+- `npm run check:deploy` to validate the base demo deployment variables
+- `npm run check:integrations` to validate full DB/storage/webhook variables
 - `npm run package:eb` to create `dist/zendora-eb-source.zip`
+- `npm run smoke` for a basic deployed-app smoke test
+- `npm run smoke:deploy` for strict readiness once all secrets are set
 
 ## Environment Properties
 
@@ -30,6 +36,7 @@ NEXT_PUBLIC_APP_URL=https://your-eb-or-custom-domain
 
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 SUPABASE_PRODUCT_IMAGE_BUCKET=product-images
 SUPABASE_STORAGE_S3_ACCESS_KEY_ID=
@@ -40,10 +47,12 @@ SUPABASE_STORAGE_S3_ENDPOINT=
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
 CLERK_WEBHOOK_SIGNING_SECRET=
+CLERK_TELEMETRY_DISABLED=1
+NEXT_PUBLIC_CLERK_TELEMETRY_DISABLED=1
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
 ```
 
 You can use `docs/deployment/elastic-beanstalk.env.example` as a copy/paste
@@ -58,21 +67,26 @@ Before deploying, run:
 npm run check:deploy
 ```
 
-This checks for all runtime credentials needed for production persistence,
-storage uploads, and Clerk webhook sync.
+This checks the base variables needed for the portfolio/demo deploy to start
+cleanly.
+
+For a quick portfolio demo, `/api/health` and `npm run smoke` are enough to
+confirm the app is alive and routes are responding. Use `/api/readiness` and
+`npm run check:integrations` plus `npm run smoke:deploy` when you want to prove
+the database, storage, and webhook configuration are also complete.
 
 ## Supabase Setup
 
 1. Open your Supabase project.
 2. Run `supabase/schema.sql` in the SQL Editor.
 3. Confirm the `product-images` bucket exists in Storage and is public.
-4. Copy the project URL, publishable key, and service role key into EB
-   environment properties.
+4. Copy the project URL, publishable key, and server-only secret key into EB
+   environment properties. A legacy `service_role` key also works.
 
 The S3-compatible storage access keys from Supabase are not used by the current
 code path unless you set the optional `SUPABASE_STORAGE_S3_*` variables. Without
 S3 variables, Zendora uploads product images through the Supabase Storage API
-with `SUPABASE_SERVICE_ROLE_KEY`.
+with `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`.
 
 If using the optional S3 upload provider:
 
@@ -119,6 +133,7 @@ eb setenv KEY=value KEY2=value2
 npm run check:deploy
 npm run package:eb
 eb deploy
+SMOKE_BASE_URL=https://your-eb-or-custom-domain npm run smoke
 ```
 
 Or upload a source bundle from the AWS console. Make sure the zip is created
@@ -150,3 +165,12 @@ the Supabase schema plus `product-images` bucket are reachable. This is useful
 for deployment debugging, but `/api/health` is better for the load balancer
 because it confirms the Next.js process is alive without depending on external
 services.
+
+## Official References
+
+- EB Node.js dependencies:
+  https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/nodejs-platform-dependencies.html
+- EB Buildfile and Procfile:
+  https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/platforms-linux-extend.build-proc.html
+- EB Node.js platform:
+  https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/create_deploy_nodejs.container.html

@@ -14,13 +14,14 @@ export function isClerkWebhookConfigured() {
 
 export function getSupabaseConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serverKey =
+    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !serviceRoleKey) {
+  if (!url || !serverKey) {
     return null;
   }
 
-  return { url, serviceRoleKey };
+  return { url, serverKey };
 }
 
 export function getSupabasePublicConfig() {
