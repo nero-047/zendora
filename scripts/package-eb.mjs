@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -33,6 +33,39 @@ const files = gitFiles.stdout
   .split("\0")
   .filter(Boolean)
   .filter((file) => file !== ".env.local" && !file.startsWith("dist/"));
+
+function collectGeneratedFiles(directory) {
+  if (!existsSync(directory)) {
+    return [];
+  }
+
+  const collected = [];
+  const entries = readdirSync(directory);
+
+  for (const entry of entries) {
+    const path = `${directory}/${entry}`;
+
+    if (path === ".next/cache") {
+      continue;
+    }
+
+    const stats = statSync(path);
+
+    if (stats.isDirectory()) {
+      collected.push(...collectGeneratedFiles(path));
+    } else if (stats.isFile()) {
+      collected.push(path);
+    }
+  }
+
+  return collected;
+}
+
+for (const file of collectGeneratedFiles(".next")) {
+  if (!files.includes(file)) {
+    files.push(file);
+  }
+}
 
 if (files.length === 0) {
   console.error("No source files found to package.");
