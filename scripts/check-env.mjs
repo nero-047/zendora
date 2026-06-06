@@ -1,35 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import nextEnv from "@next/env";
+
+const { loadEnvConfig } = nextEnv;
 
 const args = new Set(process.argv.slice(2));
 const strict = args.has("--strict") || args.has("--production");
-
-function loadDotEnvLocal() {
-  const envPath = resolve(process.cwd(), ".env.local");
-
-  if (!existsSync(envPath)) {
-    return;
-  }
-
-  const lines = readFileSync(envPath, "utf8").split(/\r?\n/);
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf("=");
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const rawValue = trimmed.slice(separatorIndex + 1).trim();
-    const value = rawValue.replace(/^['"]|['"]$/g, "");
-
-    if (!(key in process.env)) {
-      process.env[key] = value;
-    }
-  }
-}
 
 function present(key) {
   const value = process.env[key];
@@ -45,7 +19,7 @@ function anyOf(keys) {
   return keys.some((key) => Boolean(process.env[key]?.trim()));
 }
 
-loadDotEnvLocal();
+loadEnvConfig(process.cwd());
 
 const checks = [
   {

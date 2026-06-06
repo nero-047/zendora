@@ -45,7 +45,8 @@ Open your Supabase project dashboard.
 
 Zendora can upload product images through the normal Supabase Storage API when
 `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` is set. The S3 variables are
-optional.
+optional. The S3 access key ID and secret are not enough by themselves; Supabase
+also requires the region from the Storage S3 configuration page.
 
 ## Clerk
 

@@ -15,7 +15,7 @@
     "smoke": "node scripts/smoke.mjs",
     "smoke:deploy": "node scripts/smoke.mjs --require-readiness",
     "start": "next start",
-    "start:eb": "next start -p ${PORT:-3000}",
+    "start:eb": "next start -p ${PORT:-8080}",
     "lint": "eslint"
   },
   "engines": {
@@ -33,6 +33,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@next/env": "^16.2.7",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
