@@ -222,6 +222,14 @@ export type StoreNavigationMenu = {
   updatedAt: string;
 };
 
+export type StoreLaunchReadinessCheck = {
+  id: string;
+  label: string;
+  status: "passed" | "warning" | "blocking";
+  detail: string;
+  href?: string;
+};
+
 export type CustomerProfile = {
   id: string;
   storeId: string;
@@ -332,6 +340,7 @@ export type Order = {
   paymentProvider: string;
   paymentReference?: string;
   customerAccessToken?: string;
+  clientOrderKey?: string;
   subtotalCents: number;
   discountCode?: string;
   discountCents: number;
@@ -389,6 +398,8 @@ export type OrderRefund = {
   orderId: string;
   clerkUserId: string;
   amountCents: number;
+  giftCardCents: number;
+  paymentCents: number;
   reason: RefundReason;
   note?: string;
   restockedInventory: boolean;

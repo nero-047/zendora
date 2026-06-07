@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Package, ShoppingBag, Star } from "lucide-react";
+import { Package, Star } from "lucide-react";
 
 import { ProductDetailActions } from "@/features/commerce/components/product-detail-actions";
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import { getProductReviewSummary } from "@/features/commerce/reviews";
 import { getStoreSeoTitle, getStoreSocialImages } from "@/features/commerce/seo";
@@ -64,7 +68,7 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const { store, product, products, productReviews } = data;
+  const { store, product, products, productReviews, navigationMenus } = data;
   const reviews = productReviews.filter((review) => review.productId === product.id);
   const reviewSummary = getProductReviewSummary(reviews);
   const relatedProducts = products
@@ -78,16 +82,12 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Link className="secondary-button px-3 text-sm" href={`/stores/${store.slug}`}>
-          <ArrowLeft aria-hidden="true" size={16} />
-          {store.name}
-        </Link>
-        <Link className="primary-button px-3 text-sm" href={`/stores/${store.slug}/checkout`}>
-          <ShoppingBag aria-hidden="true" size={16} />
-          Checkout
-        </Link>
-      </nav>
+      <StorefrontHeader
+        backHref={`/stores/${store.slug}`}
+        backLabel={store.name}
+        menus={navigationMenus}
+        store={store}
+      />
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-12 pt-4 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
         <div className="hero-device p-3">
@@ -230,6 +230,7 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
           </div>
         </section>
       ) : null}
+      <StorefrontFooter menus={navigationMenus} />
     </main>
   );
 }

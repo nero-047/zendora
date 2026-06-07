@@ -109,6 +109,7 @@ export async function GET() {
         { error: storeNotificationColumnError },
         { error: storePolicyColumnError },
         { error: storePageColumnError },
+        { error: storeNavigationMenuColumnError },
         { error: productColumnError },
         { error: collectionColumnError },
         { error: collectionProductColumnError },
@@ -176,6 +177,12 @@ export async function GET() {
             { count: "exact", head: true },
           ),
         supabase
+          .from("store_navigation_menus")
+          .select(
+            "id, store_id, location, links, created_at, updated_at",
+            { count: "exact", head: true },
+          ),
+        supabase
           .from("products")
           .select("id, sku, category", { count: "exact", head: true }),
         supabase
@@ -199,7 +206,7 @@ export async function GET() {
         supabase
           .from("orders")
           .select(
-            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, order_source, internal_note, payment_status, payment_method, payment_provider, payment_reference, customer_access_token, subtotal_cents, discount_code, discount_cents, gift_card_code, gift_card_cents, shipping_cents, tax_cents, tax_rate_bps, total_cents, amount_due_cents, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
+            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, order_source, internal_note, payment_status, payment_method, payment_provider, payment_reference, customer_access_token, client_order_key, subtotal_cents, discount_code, discount_cents, gift_card_code, gift_card_cents, shipping_cents, tax_cents, tax_rate_bps, total_cents, amount_due_cents, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
             { count: "exact", head: true },
           ),
         supabase
@@ -247,7 +254,7 @@ export async function GET() {
         supabase
           .from("order_refunds")
           .select(
-            "id, store_id, order_id, clerk_user_id, amount_cents, reason, note, restocked_inventory",
+            "id, store_id, order_id, clerk_user_id, amount_cents, gift_card_cents, payment_cents, reason, note, restocked_inventory",
             { count: "exact", head: true },
           ),
         supabase
@@ -281,6 +288,7 @@ export async function GET() {
         storeNotificationColumnError ||
         storePolicyColumnError ||
         storePageColumnError ||
+        storeNavigationMenuColumnError ||
         productColumnError ||
         collectionColumnError ||
         collectionProductColumnError ||
@@ -304,7 +312,7 @@ export async function GET() {
         ok: !error,
         detail: error
           ? `Supabase schema is missing commerce columns: ${error.message}`
-          : "Supabase store, team, audit, notification, policy, storefront page, customer profile, catalog, collections, variants, abandoned checkout recovery, product reviews, gift cards, shipment fulfillments, refunds, return requests, payment transactions, inventory audit, customer order access, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
+          : "Supabase store, team, audit, notification, policy, storefront page, navigation menu, customer profile, catalog, collections, variants, abandoned checkout recovery, checkout idempotency, product reviews, gift cards, shipment fulfillments, refund tender splits, return requests, payment transactions, inventory audit, customer order access, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
       });
     } catch (error) {
       checks.push({

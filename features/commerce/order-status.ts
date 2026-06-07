@@ -42,15 +42,40 @@ const transitionOptions: Record<OrderStatus, OrderStatus[]> = {
   cancelled: ["cancelled"],
 };
 
-export function getOrderStatusOptions(status: OrderStatus) {
-  return transitionOptions[status];
+export function canCancelOrderPaymentStatus(
+  paymentStatus: PaymentStatus | null | undefined,
+) {
+  return (
+    !paymentStatus ||
+    paymentStatus === "pending" ||
+    paymentStatus === "authorized" ||
+    paymentStatus === "refunded" ||
+    paymentStatus === "voided"
+  );
+}
+
+export function getOrderStatusOptions(
+  status: OrderStatus,
+  paymentStatus?: PaymentStatus | null,
+) {
+  const options = transitionOptions[status];
+
+  if (
+    status === "paid" &&
+    !canCancelOrderPaymentStatus(paymentStatus)
+  ) {
+    return options.filter((option) => option !== "cancelled");
+  }
+
+  return options;
 }
 
 export function canTransitionOrderStatus(
   currentStatus: OrderStatus,
   nextStatus: OrderStatus,
+  paymentStatus?: PaymentStatus | null,
 ) {
-  return getOrderStatusOptions(currentStatus).includes(nextStatus);
+  return getOrderStatusOptions(currentStatus, paymentStatus).includes(nextStatus);
 }
 
 export function isRevenueOrderStatus(status: OrderStatus) {

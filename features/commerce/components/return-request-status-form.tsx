@@ -6,8 +6,8 @@ import { useActionState } from "react";
 import { initialActionState } from "@/features/commerce/action-state";
 import { updateReturnRequestStatusAction } from "@/features/commerce/actions";
 import {
+  getReturnRequestStatusOptions,
   returnRequestStatusLabels,
-  returnRequestStatuses,
 } from "@/features/commerce/returns";
 import type { OrderReturnRequest } from "@/features/commerce/types";
 
@@ -26,6 +26,7 @@ export function ReturnRequestStatusForm({
     updateReturnRequestStatusAction.bind(null, storeId, orderId, request.id),
     initialActionState,
   );
+  const statusOptions = getReturnRequestStatusOptions(request.status);
 
   return (
     <form action={formAction} className="mt-3 grid gap-3">
@@ -37,7 +38,7 @@ export function ReturnRequestStatusForm({
           disabled={pending}
           name="status"
         >
-          {returnRequestStatuses.map((status) => (
+          {statusOptions.map((status) => (
             <option key={status} value={status}>
               {returnRequestStatusLabels[status]}
             </option>

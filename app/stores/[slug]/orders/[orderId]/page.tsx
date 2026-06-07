@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  ArrowLeft,
   CheckCircle,
   CreditCard,
   FileText,
   MapPin,
   Package,
   RotateCcw,
-  ShoppingBag,
   Star,
   Truck,
 } from "lucide-react";
 
 import { ProductReviewForm } from "@/features/commerce/components/product-review-form";
 import { ReturnRequestForm } from "@/features/commerce/components/return-request-form";
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicOrderReceipt } from "@/features/commerce/data";
 import {
   getOrderLifecycleEvents,
@@ -34,12 +35,7 @@ import {
 } from "@/features/commerce/fulfillments";
 import { maskGiftCardCode } from "@/features/commerce/gift-cards";
 import {
-  getPolicyHref,
-  getPublishedPolicies,
-  storePolicyLabels,
-} from "@/features/commerce/policies";
-import {
-  canCustomerRequestReturn,
+  getCustomerReturnRequestEligibility,
   returnRequestReasonLabels,
   returnRequestStatusLabels,
 } from "@/features/commerce/returns";
@@ -106,7 +102,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
     notFound();
   }
 
-  const { store, order, policies, productReviews } = data;
+  const { store, order, navigationMenus, productReviews } = data;
   const token = readToken(searchParams.token) || "";
   const shipping = order.shippingAddress;
   const lifecycleEvents = getOrderLifecycleEvents(order);
@@ -116,24 +112,22 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
       new Date(b.processedAt || b.createdAt).getTime() -
       new Date(a.processedAt || a.createdAt).getTime(),
   );
-  const publishedPolicies = getPublishedPolicies(policies);
-  const canRequestReturn = canCustomerRequestReturn(order);
+  const returnEligibility = getCustomerReturnRequestEligibility(order);
+  const canRequestReturn = returnEligibility.eligible;
   const fulfillments = sortFulfillments(order.fulfillments).filter(
     (fulfillment) => fulfillment.status !== "cancelled",
   );
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
-        <Link className="secondary-button px-3 text-sm" href={`/stores/${store.slug}`}>
-          <ArrowLeft aria-hidden="true" size={16} />
-          {store.name}
-        </Link>
-        <Link className="primary-button px-3 text-sm" href={`/stores/${store.slug}`}>
-          <ShoppingBag aria-hidden="true" size={16} />
-          Continue shopping
-        </Link>
-      </nav>
+      <StorefrontHeader
+        action="continue"
+        backHref={`/stores/${store.slug}`}
+        backLabel={store.name}
+        maxWidthClassName="max-w-6xl"
+        menus={navigationMenus}
+        store={store}
+      />
 
       <section className="mx-auto grid max-w-6xl gap-5 px-4 pb-16 pt-4 sm:px-6 lg:grid-cols-[1fr_0.78fr]">
         <div className="grid gap-5">
@@ -430,8 +424,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
               />
               {!canRequestReturn ? (
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Returns are available after payment while no active return request
-                  is open.
+                  {returnEligibility.message}
                 </p>
               ) : null}
             </div>
@@ -526,19 +519,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
         </aside>
       </section>
 
-      {publishedPolicies.length > 0 ? (
-        <footer className="mx-auto flex max-w-6xl flex-wrap gap-3 px-4 pb-10 sm:px-6">
-          {publishedPolicies.map((policy) => (
-            <Link
-              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
-              href={getPolicyHref(store.slug, policy.type)}
-              key={policy.id}
-            >
-              {storePolicyLabels[policy.type]}
-            </Link>
-          ))}
-        </footer>
-      ) : null}
+      <StorefrontFooter maxWidthClassName="max-w-6xl" menus={navigationMenus} />
     </main>
   );
 }

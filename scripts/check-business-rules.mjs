@@ -92,6 +92,8 @@ const reviews = loadTsModule("features/commerce/reviews.ts");
 const giftCards = loadTsModule("features/commerce/gift-cards.ts");
 const fulfillments = loadTsModule("features/commerce/fulfillments.ts");
 const customers = loadTsModule("features/commerce/customers.ts");
+const navigation = loadTsModule("features/commerce/navigation.ts");
+const launchReadiness = loadTsModule("features/commerce/launch-readiness.ts");
 const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
@@ -145,6 +147,24 @@ const tests = [
         }),
         5000,
         "gift card redemption should not exceed order total",
+      );
+      assertEqual(
+        giftCards.calculateGiftCardRefundAmount({
+          alreadyRefundedGiftCardCents: 1000,
+          giftCardTenderCents: 2500,
+          refundAmountCents: 2000,
+        }),
+        1500,
+        "gift card refunds should only re-credit remaining gift card tender",
+      );
+      assertEqual(
+        giftCards.calculateGiftCardRefundAmount({
+          alreadyRefundedGiftCardCents: 2500,
+          giftCardTenderCents: 2500,
+          refundAmountCents: 2000,
+        }),
+        0,
+        "gift card refunds should not double re-credit tender",
       );
     },
   ],
@@ -360,39 +380,123 @@ const tests = [
     },
   ],
   [
-    "return requests require paid orders without active requests",
+    "return requests require paid orders inside the return window",
     () => {
+      const now = new Date("2026-06-01T12:00:00.000Z");
       const baseOrder = {
         status: "fulfilled",
         paymentStatus: "paid",
         refundableCents: 5000,
+        createdAt: "2026-05-01T12:00:00.000Z",
+        paidAt: "2026-05-02T12:00:00.000Z",
+        fulfilledAt: "2026-05-15T12:00:00.000Z",
+        fulfillments: [],
         returnRequests: [],
       };
 
       assertTrue(
-        returns.canCustomerRequestReturn(baseOrder),
+        returns.canCustomerRequestReturn(baseOrder, now),
         "fulfilled paid orders should accept return requests",
       );
+      assertEqual(
+        returns.getReturnRequestDeadline(baseOrder),
+        "2026-06-14T12:00:00.000Z",
+        "return windows should start from fulfillment when available",
+      );
+      assertEqual(
+        returns.getCustomerReturnRequestEligibility(baseOrder, now).message,
+        "Returns are available within 30 days while no active return request is open.",
+        "eligible returns should describe the 30-day active-request rule",
+      );
       assertFalse(
-        returns.canCustomerRequestReturn({
-          ...baseOrder,
-          status: "pending",
-        }),
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            status: "pending",
+          },
+          now,
+        ),
         "pending orders should not accept return requests",
       );
       assertFalse(
-        returns.canCustomerRequestReturn({
-          ...baseOrder,
-          refundableCents: 0,
-        }),
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            paymentStatus: "authorized",
+          },
+          now,
+        ),
+        "authorized but uncaptured orders should not accept return requests",
+      );
+      assertFalse(
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            refundableCents: 0,
+          },
+          now,
+        ),
         "fully refunded orders should not accept return requests",
       );
       assertFalse(
-        returns.canCustomerRequestReturn({
-          ...baseOrder,
-          returnRequests: [{ status: "requested" }],
-        }),
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            returnRequests: [{ status: "requested" }],
+          },
+          now,
+        ),
         "orders with active return requests should not accept duplicates",
+      );
+      assertFalse(
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            fulfilledAt: "2026-04-01T12:00:00.000Z",
+          },
+          now,
+        ),
+        "orders outside the return window should not accept requests",
+      );
+      assertTrue(
+        returns.canCustomerRequestReturn(
+          {
+            ...baseOrder,
+            returnRequests: [{ status: "resolved" }],
+          },
+          now,
+        ),
+        "resolved return requests should not block a new eligible request",
+      );
+    },
+  ],
+  [
+    "return request status transitions keep terminal states closed",
+    () => {
+      assertTrue(
+        returns.canTransitionReturnRequestStatus("requested", "approved"),
+        "requested returns should be approvable",
+      );
+      assertTrue(
+        returns.canTransitionReturnRequestStatus("requested", "rejected"),
+        "requested returns should be rejectable",
+      );
+      assertFalse(
+        returns.canTransitionReturnRequestStatus("requested", "resolved"),
+        "requested returns should require approval before resolution",
+      );
+      assertTrue(
+        returns.canTransitionReturnRequestStatus("approved", "resolved"),
+        "approved returns should be resolvable",
+      );
+      assertFalse(
+        returns.canTransitionReturnRequestStatus("resolved", "approved"),
+        "resolved returns should not reopen",
+      );
+      assertDeepEqual(
+        returns.getReturnRequestStatusOptions("rejected"),
+        ["rejected"],
+        "rejected returns should only allow note-only saves",
       );
     },
   ],
@@ -480,6 +584,58 @@ const tests = [
       assertEqual(summary.capturedCents, 10000, "captures should sum");
       assertEqual(summary.refundedCents, 2500, "failed refunds should be ignored");
       assertEqual(summary.netCapturedCents, 7500, "net captured should subtract refunds");
+      assertEqual(
+        payments.getPaymentCaptureAmountCents({
+          totalCents: 10000,
+          giftCardCents: 3000,
+          amountDueCents: 7000,
+        }),
+        7000,
+        "captures should use remaining amount due after gift cards",
+      );
+      assertEqual(
+        payments.getPaymentCaptureAmountCents({
+          totalCents: 10000,
+          giftCardCents: 10000,
+          amountDueCents: 0,
+        }),
+        0,
+        "fully gift-card-paid orders should not create extra captures",
+      );
+      assertEqual(
+        payments.getPaymentCaptureAmountCents({
+          totalCents: 10000,
+          giftCardCents: 2500,
+        }),
+        7500,
+        "legacy rows should fall back to total minus gift card tender",
+      );
+      assertEqual(
+        payments.getPaymentCaptureAmountCents({
+          totalCents: 10000,
+          amountDueCents: 12000,
+        }),
+        10000,
+        "captures should never exceed the order total",
+      );
+      assertEqual(
+        payments.getOrderAmountDueCents({
+          totalCents: 10000,
+          amountDueCents: 7000,
+          paymentStatus: "paid",
+        }),
+        0,
+        "paid orders should not show a remaining amount due",
+      );
+      assertEqual(
+        payments.getOrderAmountDueCents({
+          totalCents: 10000,
+          amountDueCents: 7000,
+          paymentStatus: "pending",
+        }),
+        7000,
+        "pending orders should show the remaining amount due",
+      );
     },
   ],
   [
@@ -831,6 +987,163 @@ const tests = [
         ],
         "cart normalization should merge product and variant lines",
       );
+      assertEqual(
+        businessRules.normalizeCheckoutSessionId(" checkout_1234567890 "),
+        "checkout_1234567890",
+        "checkout session ids should trim safe retry keys",
+      );
+      assertEqual(
+        businessRules.normalizeCheckoutSessionId("short"),
+        null,
+        "short checkout session ids should be rejected",
+      );
+      assertEqual(
+        businessRules.normalizeCheckoutSessionId("unsafe/session/key"),
+        null,
+        "unsafe checkout session ids should be rejected",
+      );
+    },
+  ],
+  [
+    "storefront navigation parses safe merchant menu links",
+    () => {
+      assertEqual(
+        navigation.normalizeNavigationHref("www.example.com"),
+        "https://www.example.com",
+        "www links should normalize to https",
+      );
+      assertEqual(
+        navigation.normalizeNavigationHref("//example.com"),
+        null,
+        "protocol-relative links should be rejected",
+      );
+
+      const parsed = navigation.parseNavigationMenuLines(
+        [
+          "Shop | /stores/demo",
+          "Support | mailto:support@example.com",
+          "Docs | https://example.com/docs",
+          "Shop | /stores/demo",
+          "Broken line",
+          "Unsafe | javascript:alert(1)",
+        ].join("\n"),
+      );
+
+      assertDeepEqual(
+        parsed.links,
+        [
+          { label: "Shop", href: "/stores/demo" },
+          { label: "Support", href: "mailto:support@example.com" },
+          { label: "Docs", href: "https://example.com/docs" },
+        ],
+        "navigation parser should keep valid unique links",
+      );
+      assertEqual(parsed.errors.length, 2, "invalid navigation lines should be reported");
+      assertDeepEqual(
+        navigation.sanitizeNavigationLinks([
+          { label: "  About  us ", href: " /about " },
+          { label: "Script", href: "javascript:alert(1)" },
+        ]),
+        [{ label: "About us", href: "/about" }],
+        "navigation rows should sanitize persisted JSON",
+      );
+    },
+  ],
+  [
+    "store launch readiness blocks incomplete storefront publishing",
+    () => {
+      const readyWorkspace = {
+        store: {
+          id: "store_ready",
+          name: "Ready Store",
+          description: "A complete storefront ready for buyer checkout.",
+          currency: "USD",
+          themeColor: "#0f766e",
+          seoTitle: "Ready Store",
+          seoDescription: "A complete storefront ready for buyer checkout.",
+          socialImageUrl: "https://example.com/social.jpg",
+          status: "draft",
+          shippingRateCents: 700,
+          freeShippingThresholdCents: 5000,
+          taxRateBps: 825,
+        },
+        products: [
+          {
+            id: "product_1",
+            name: "Field Pack",
+            slug: "field-pack",
+            description: "A durable everyday pack with enough stock to sell.",
+            imageUrl: "https://example.com/pack.jpg",
+            priceCents: 12900,
+            inventoryCount: 8,
+            status: "active",
+            variants: [],
+          },
+        ],
+        policies: ["refund", "shipping", "privacy", "terms"].map((type) => ({
+          type,
+          body: "Published policy content that is long enough for storefront display.",
+          status: "published",
+        })),
+        navigationMenus: [
+          {
+            location: "header",
+            links: [{ label: "Shop", href: "/stores/ready" }],
+          },
+          {
+            location: "footer",
+            links: [{ label: "Refund policy", href: "/stores/ready/policies/refund" }],
+          },
+        ],
+        shippingZones: [{ status: "active", countries: ["United States"] }],
+        collections: [{ status: "active", productCount: 1 }],
+        productReviews: [{ status: "approved" }],
+      };
+      const ready = launchReadiness.getStoreLaunchReadiness(readyWorkspace);
+
+      assertTrue(ready.canPublish, "ready stores should pass launch blockers");
+      assertEqual(ready.blockingCount, 0, "ready stores should have no blockers");
+      assertEqual(ready.completionPercent, 100, "ready stores should score 100%");
+
+      const incomplete = launchReadiness.getStoreLaunchReadiness({
+        ...readyWorkspace,
+        store: {
+          ...readyWorkspace.store,
+          description: "Short",
+          shippingRateCents: -1,
+        },
+        policies: [],
+        products: [
+          {
+            ...readyWorkspace.products[0],
+            imageUrl: "",
+            inventoryCount: 0,
+          },
+        ],
+      });
+
+      assertFalse(
+        incomplete.canPublish,
+        "incomplete stores should not pass launch blockers",
+      );
+      assertTrue(
+        incomplete.blockingChecks.some((check) => check.id === "identity"),
+        "short store descriptions should block launch",
+      );
+      assertTrue(
+        incomplete.blockingChecks.some(
+          (check) => check.id === "purchasable-products",
+        ),
+        "active products without image or stock should block launch",
+      );
+      assertTrue(
+        incomplete.blockingChecks.some((check) => check.id === "policies"),
+        "missing required policies should block launch",
+      );
+      assertTrue(
+        incomplete.blockingChecks.some((check) => check.id === "checkout-rates"),
+        "invalid checkout rates should block launch",
+      );
     },
   ],
   [
@@ -943,6 +1256,27 @@ const tests = [
       assertTrue(
         orderStatus.canTransitionOrderStatus("paid", "fulfilled"),
         "paid orders should be fulfillable",
+      );
+      assertFalse(
+        orderStatus.canTransitionOrderStatus("paid", "cancelled", "paid"),
+        "captured paid orders should not be cancelled before refund or void",
+      );
+      assertTrue(
+        orderStatus.canTransitionOrderStatus("paid", "cancelled", "refunded"),
+        "fully refunded paid orders can be cancelled",
+      );
+      assertDeepEqual(
+        orderStatus.getOrderStatusOptions("paid", "partially_refunded"),
+        ["paid", "fulfilled"],
+        "partially refunded paid orders should hide cancellation",
+      );
+      assertTrue(
+        orderStatus.canCancelOrderPaymentStatus("authorized"),
+        "authorized unpaid orders can be cancelled and voided",
+      );
+      assertFalse(
+        orderStatus.canCancelOrderPaymentStatus("partially_refunded"),
+        "partially refunded orders need completion before cancellation",
       );
       assertFalse(
         orderStatus.canTransitionOrderStatus("fulfilled", "cancelled"),

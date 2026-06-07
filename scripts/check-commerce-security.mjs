@@ -3,8 +3,10 @@ import ts from "typescript";
 
 const actionsPath = "features/commerce/actions.ts";
 const schemaPath = "supabase/schema.sql";
+const smokePath = "scripts/smoke.mjs";
 const sourceText = readFileSync(actionsPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
+const smokeText = readFileSync(smokePath, "utf8");
 
 const expectedGuards = new Map(
   Object.entries({
@@ -34,6 +36,7 @@ const expectedGuards = new Map(
     updateStorePoliciesAction: "manage_store_settings",
     createStorePageAction: "manage_store_settings",
     updateStorePageAction: "manage_store_settings",
+    updateStoreNavigationAction: "manage_store_settings",
     publishStoreAction: "manage_store_settings",
     pauseStoreAction: "manage_store_settings",
     createStoreInvitationAction: "manage_team",
@@ -51,6 +54,7 @@ const expectedAuditEvents = new Map(
     updateStorePoliciesAction: "store_policy_updated",
     createStorePageAction: "store_page_created",
     updateStorePageAction: "store_page_updated",
+    updateStoreNavigationAction: "store_navigation_updated",
     publishStoreAction: "store_published",
     pauseStoreAction: "store_paused",
     createProductAction: "product_created",
@@ -104,6 +108,11 @@ const expectedNotifications = new Map(
   }),
 );
 
+const expectedLaunchReadinessGuards = new Set([
+  "publishStoreAction",
+  "updateStoreAction",
+]);
+
 const sourceFile = ts.createSourceFile(
   actionsPath,
   sourceText,
@@ -133,8 +142,19 @@ if (!schemaText.includes("customer_access_token")) {
   failures.push(`${schemaPath} is missing customer_access_token for order receipts.`);
 }
 
+if (
+  !schemaText.includes("client_order_key") ||
+  !schemaText.includes("orders_store_client_order_key_unique_idx")
+) {
+  failures.push(`${schemaPath} is missing checkout idempotency columns or index.`);
+}
+
 if (!schemaText.includes("create table if not exists public.order_return_requests")) {
   failures.push(`${schemaPath} is missing order_return_requests.`);
+}
+
+if (!schemaText.includes("order_return_requests_active_order_unique_idx")) {
+  failures.push(`${schemaPath} is missing active return request uniqueness guard.`);
 }
 
 if (!schemaText.includes("create table if not exists public.abandoned_checkouts")) {
@@ -153,8 +173,16 @@ if (!schemaText.includes("create table if not exists public.gift_card_redemption
   failures.push(`${schemaPath} is missing gift_card_redemptions.`);
 }
 
+if (!schemaText.includes("gift_card_cents") || !schemaText.includes("payment_cents")) {
+  failures.push(`${schemaPath} is missing refund tender split columns.`);
+}
+
 if (!schemaText.includes("create table if not exists public.store_pages")) {
   failures.push(`${schemaPath} is missing store_pages.`);
+}
+
+if (!schemaText.includes("create table if not exists public.store_navigation_menus")) {
+  failures.push(`${schemaPath} is missing store_navigation_menus.`);
 }
 
 if (!schemaText.includes("create table if not exists public.order_fulfillments")) {
@@ -165,8 +193,84 @@ if (!schemaText.includes("create table if not exists public.customer_profiles"))
   failures.push(`${schemaPath} is missing customer_profiles.`);
 }
 
+const expectedSmokeRoutes = [
+  "/stores/northline-supply",
+  "/stores/northline-supply/products/field-carry-pack",
+  "/stores/northline-supply/collections/everyday-carry",
+  "/stores/northline-supply/checkout",
+  "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
+  "/stores/northline-supply/pages/about",
+  "/stores/northline-supply/policies/refund",
+];
+
+for (const route of expectedSmokeRoutes) {
+  if (!smokeText.includes(route)) {
+    failures.push(`${smokePath} is missing storefront smoke coverage for ${route}.`);
+  }
+}
+
 if (!sourceText.includes("createCustomerAccessToken()")) {
   failures.push("Checkout/manual order mutations must create customer access tokens.");
+}
+
+if (
+  !sourceText.includes("normalizeCheckoutSessionId(") ||
+  !sourceText.includes("getExistingCheckoutOrder(") ||
+  !sourceText.includes("client_order_key")
+) {
+  failures.push("Checkout mutation must enforce client order idempotency.");
+}
+
+if (
+  !sourceText.includes("rollbackInventoryReservationCount(") ||
+  !sourceText.includes("rollbackDiscountRedemptionReservation(") ||
+  !sourceText.includes("rollbackGiftCardReservation(")
+) {
+  failures.push("Checkout rollback must use concurrency-safe reservation helpers.");
+}
+
+if (
+  sourceText.includes(
+    ".update({ redemption_count: discount.row.redemption_count })",
+  ) ||
+  sourceText.includes(
+    ".update({ balance_cents: reservedGiftCard.balanceBeforeCents })",
+  ) ||
+  sourceText.includes("inventory_count: item.productInventoryCount")
+) {
+  failures.push("Checkout rollback must not reset inventory, discount, or gift-card state to stale snapshots.");
+}
+
+if (!sourceText.includes("getPaymentCaptureAmountCents(")) {
+  failures.push("Payment capture mutations must use amount-due capture calculation.");
+}
+
+if (!sourceText.includes("amount_due_cents: 0")) {
+  failures.push("Payment capture mutations must clear amount_due_cents.");
+}
+
+if (!sourceText.includes("calculateGiftCardRefundAmount(")) {
+  failures.push("Refund mutations must split gift-card and payment refunds.");
+}
+
+if (!sourceText.includes("getCustomerReturnRequestEligibility(")) {
+  failures.push("Return request mutations must enforce the shared eligibility policy.");
+}
+
+if (!sourceText.includes("canTransitionReturnRequestStatus(")) {
+  failures.push("Return request mutations must enforce safe status transitions.");
+}
+
+if (!sourceText.includes("A return request is already open for this order.")) {
+  failures.push("Return request mutation must handle duplicate active-request conflicts.");
+}
+
+if (
+  !sourceText.includes("canCancelOrderPaymentStatus(") ||
+  !sourceText.includes('payment_status = "voided"') ||
+  !sourceText.includes('type: "void"')
+) {
+  failures.push("Order cancellation must enforce payment safety and void open payments.");
 }
 
 function isExportedFunction(node) {
@@ -233,6 +337,13 @@ for (const statement of sourceFile.statements) {
 
   if (!bodyText.includes(`"${expectedPermission}"`)) {
     failures.push(`${actionName} must require ${expectedPermission}.`);
+  }
+
+  if (
+    expectedLaunchReadinessGuards.has(actionName) &&
+    !bodyText.includes("getStoreLaunchReadiness(")
+  ) {
+    failures.push(`${actionName} must enforce store launch readiness.`);
   }
 
   if (expectedAuditEvent) {

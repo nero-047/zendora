@@ -2,19 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Layers3, ShoppingBag, Sparkles } from "lucide-react";
+import { Layers3, Sparkles } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
-import {
-  getPolicyHref,
-  getPublishedPolicies,
-  storePolicyLabels,
-} from "@/features/commerce/policies";
-import {
-  getPublishedStorePages,
-  getStorePageHref,
-} from "@/features/commerce/store-pages";
 import {
   getStoreSeoDescription,
   getStoreSeoTitle,
@@ -60,23 +55,12 @@ export default async function PublicStorePage({
     notFound();
   }
 
-  const { store, products, collections, policies, customPages } = workspace;
+  const { store, products, collections, navigationMenus } = workspace;
   const heroProduct = products[0];
-  const publishedPolicies = getPublishedPolicies(policies);
-  const publishedPages = getPublishedStorePages(customPages);
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Link className="secondary-button px-3 text-sm" href="/">
-          <ArrowLeft aria-hidden="true" size={16} />
-          Zendora
-        </Link>
-        <Link className="primary-button px-3 text-sm" href="/dashboard">
-          <ShoppingBag aria-hidden="true" size={16} />
-          Merchant admin
-        </Link>
-      </nav>
+      <StorefrontHeader menus={navigationMenus} store={store} />
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-10 pt-8 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
         <div className="self-center">
@@ -138,28 +122,7 @@ export default async function PublicStorePage({
 
       <StorefrontCart products={products} storeSlug={store.slug} />
 
-      {publishedPolicies.length > 0 || publishedPages.length > 0 ? (
-        <footer className="mx-auto flex max-w-7xl flex-wrap gap-3 px-4 pb-10 sm:px-6 lg:px-8">
-          {publishedPages.map((page) => (
-            <Link
-              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
-              href={getStorePageHref(store.slug, page.slug)}
-              key={page.id}
-            >
-              {page.title}
-            </Link>
-          ))}
-          {publishedPolicies.map((policy) => (
-            <Link
-              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
-              href={getPolicyHref(store.slug, policy.type)}
-              key={policy.id}
-            >
-              {storePolicyLabels[policy.type]}
-            </Link>
-          ))}
-        </footer>
-      ) : null}
+      <StorefrontFooter menus={navigationMenus} />
     </main>
   );
 }

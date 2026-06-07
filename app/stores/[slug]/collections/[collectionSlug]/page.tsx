@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Layers3, ShoppingBag } from "lucide-react";
+import { Layers3 } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import {
   getStoreSeoDescription,
@@ -79,21 +82,17 @@ export default async function PublicCollectionPage({
     notFound();
   }
 
-  const { store, collection, products } = data;
+  const { store, collection, products, navigationMenus } = data;
   const heroImage = collection.imageUrl || products[0]?.imageUrl;
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Link className="secondary-button px-3 text-sm" href={`/stores/${store.slug}`}>
-          <ArrowLeft aria-hidden="true" size={16} />
-          {store.name}
-        </Link>
-        <Link className="primary-button px-3 text-sm" href={`/stores/${store.slug}/checkout`}>
-          <ShoppingBag aria-hidden="true" size={16} />
-          Checkout
-        </Link>
-      </nav>
+      <StorefrontHeader
+        backHref={`/stores/${store.slug}`}
+        backLabel={store.name}
+        menus={navigationMenus}
+        store={store}
+      />
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-10 pt-8 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8">
         <div className="self-center">
@@ -126,6 +125,7 @@ export default async function PublicCollectionPage({
       </section>
 
       <StorefrontCart products={products} storeSlug={store.slug} />
+      <StorefrontFooter menus={navigationMenus} />
     </main>
   );
 }

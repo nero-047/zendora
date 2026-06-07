@@ -12,9 +12,7 @@ import {
   Layers3,
   Mail,
   PackagePlus,
-  PauseCircle,
   Percent,
-  PlayCircle,
   ReceiptText,
   ShieldCheck,
   ShoppingBag,
@@ -30,9 +28,12 @@ import { CollectionForm } from "@/features/commerce/components/collection-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
 import { GiftCardForm } from "@/features/commerce/components/gift-card-form";
 import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
+import { StoreLaunchReadinessPanel } from "@/features/commerce/components/store-launch-readiness";
+import { StoreNavigationForm } from "@/features/commerce/components/store-navigation-form";
 import { StorePageForm } from "@/features/commerce/components/store-page-form";
 import { StorePoliciesForm } from "@/features/commerce/components/store-policies-form";
 import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
+import { StoreStatusControls } from "@/features/commerce/components/store-status-controls";
 import { TeamInviteForm } from "@/features/commerce/components/team-invite-form";
 import { ProductReviewStatusForm } from "@/features/commerce/components/product-review-status-form";
 import {
@@ -55,10 +56,9 @@ import {
   getOrderStatusOptions,
   orderStatusLabels,
 } from "@/features/commerce/order-status";
+import { getStoreLaunchReadiness } from "@/features/commerce/launch-readiness";
 import {
   dismissAbandonedCheckoutAction,
-  pauseStoreAction,
-  publishStoreAction,
   queueAbandonedCheckoutRecoveryAction,
   removeStoreMemberAction,
   revokeStoreInvitationAction,
@@ -101,6 +101,7 @@ export default async function StorePage({
     notifications,
     policies,
     customPages,
+    navigationMenus,
     membershipRole,
   } = workspace;
   const canManageTeam = canStoreRole(membershipRole, "manage_team");
@@ -122,6 +123,7 @@ export default async function StorePage({
   const publishedPageCount = customPages.filter(
     (page) => page.status === "published",
   ).length;
+  const launchReadiness = getStoreLaunchReadiness(workspace);
 
   return (
     <div className="grid gap-5">
@@ -165,21 +167,10 @@ export default async function StorePage({
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <form action={publishStoreAction.bind(null, store.id)}>
-            <button className="secondary-button px-3 text-sm" type="submit">
-              <PlayCircle aria-hidden="true" size={16} />
-              Publish
-            </button>
-          </form>
-          <form action={pauseStoreAction.bind(null, store.id)}>
-            <button className="secondary-button px-3 text-sm" type="submit">
-              <PauseCircle aria-hidden="true" size={16} />
-              Pause
-            </button>
-          </form>
-        </div>
+        <StoreStatusControls storeId={store.id} storeStatus={store.status} />
       </div>
+
+      <StoreLaunchReadinessPanel readiness={launchReadiness} />
 
       <section className="dashboard-grid">
         {[
@@ -217,6 +208,8 @@ export default async function StorePage({
         storeId={store.id}
         storeSlug={store.slug}
       />
+
+      <StoreNavigationForm menus={navigationMenus} storeId={store.id} />
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         {canManageTeam ? (

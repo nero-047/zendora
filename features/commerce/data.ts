@@ -10,6 +10,7 @@ import {
   mockDiscounts,
   mockGiftCards,
   mockInventoryAdjustments,
+  mockStoreNavigationMenus,
   mockOrderRefunds,
   mockOrders,
   mockProductReviews,
@@ -20,6 +21,7 @@ import {
   mockStores,
 } from "@/features/commerce/mock-data";
 import { isRevenueOrderStatus } from "@/features/commerce/order-status";
+import { getOrderAmountDueCents } from "@/features/commerce/payments";
 import type {
   AbandonedCheckout,
   AbandonedCheckoutLine,
@@ -35,6 +37,7 @@ import type {
   GiftCard,
   GiftCardRedemption,
   GiftCardStatus,
+  StoreNavigationMenuLocation,
   Order,
   OrderFulfillment,
   OrderFulfillmentStatus,
@@ -65,6 +68,7 @@ import type {
   StoreInvitation,
   StoreMember,
   StoreMembershipRole,
+  StoreNavigationMenu,
   StoreNotification,
   StorePage,
   StorePageStatus,
@@ -82,6 +86,10 @@ import {
   isSupabaseConfigured,
   isSupabasePublicConfigured,
 } from "@/lib/env";
+import {
+  mapNavigationMenuLocation,
+  sanitizeNavigationLinks,
+} from "@/features/commerce/navigation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getSupabasePublic } from "@/lib/supabase/public";
 import { isUuid, slugify } from "@/lib/utils";
@@ -209,6 +217,15 @@ type CustomerProfileRow = {
   updated_at: string;
 };
 
+type StoreNavigationMenuRow = {
+  id: string;
+  store_id: string;
+  location: StoreNavigationMenuLocation | string;
+  links: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
 type ProductRow = {
   id: string;
   store_id: string;
@@ -295,6 +312,7 @@ type OrderRow = {
   payment_provider: string | null;
   payment_reference: string | null;
   customer_access_token: string | null;
+  client_order_key: string | null;
   subtotal_cents: number | null;
   discount_code: string | null;
   discount_cents: number | null;
@@ -395,6 +413,8 @@ type OrderRefundRow = {
   order_id: string;
   clerk_user_id: string;
   amount_cents: number;
+  gift_card_cents: number | null;
+  payment_cents: number | null;
   reason: RefundReason;
   note: string | null;
   restocked_inventory: boolean;
@@ -572,6 +592,11 @@ function mapOrderRefund(row: OrderRefundRow): OrderRefund {
     orderId: row.order_id,
     clerkUserId: row.clerk_user_id,
     amountCents: row.amount_cents,
+    giftCardCents: row.gift_card_cents || 0,
+    paymentCents:
+      row.payment_cents && row.payment_cents > 0
+        ? row.payment_cents
+        : Math.max(0, row.amount_cents - (row.gift_card_cents || 0)),
     reason: row.reason,
     note: row.note || undefined,
     restockedInventory: row.restocked_inventory,
@@ -755,6 +780,12 @@ function mapOrder(
     (sum, refund) => sum + refund.amountCents,
     0,
   );
+  const amountDueCents = getOrderAmountDueCents({
+    amountDueCents: row.amount_due_cents,
+    giftCardCents: row.gift_card_cents,
+    paymentStatus: row.payment_status,
+    totalCents: row.total_cents,
+  });
 
   return {
     id: row.id,
@@ -781,6 +812,7 @@ function mapOrder(
     paymentProvider: row.payment_provider || "manual",
     paymentReference: row.payment_reference || undefined,
     customerAccessToken: row.customer_access_token || undefined,
+    clientOrderKey: row.client_order_key || undefined,
     subtotalCents:
       row.subtotal_cents && row.subtotal_cents > 0
         ? row.subtotal_cents
@@ -793,10 +825,7 @@ function mapOrder(
     taxCents: row.tax_cents || 0,
     taxRateBps: row.tax_rate_bps || 0,
     totalCents: row.total_cents,
-    amountDueCents:
-      row.amount_due_cents && row.amount_due_cents > 0
-        ? row.amount_due_cents
-        : Math.max(0, row.total_cents - (row.gift_card_cents || 0)),
+    amountDueCents,
     refundedCents,
     refundableCents: Math.max(0, row.total_cents - refundedCents),
     currency: row.currency,
@@ -1009,6 +1038,19 @@ function mapCustomerProfile(row: CustomerProfileRow): CustomerProfile {
     tags: row.tags || [],
     acceptsMarketing: Boolean(row.accepts_marketing),
     taxExempt: Boolean(row.tax_exempt),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapStoreNavigationMenu(
+  row: StoreNavigationMenuRow,
+): StoreNavigationMenu {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    location: mapNavigationMenuLocation(row.location),
+    links: sanitizeNavigationLinks(row.links),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1826,6 +1868,34 @@ async function loadStorePages(
   return ((data || []) as StorePageRow[]).map(mapStorePage);
 }
 
+async function loadStoreNavigationMenus(
+  storeIds: string[],
+  client?: SupabaseClient,
+): Promise<StoreNavigationMenu[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  const { data, error } = await db
+    .from("store_navigation_menus")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("location", { ascending: true });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as StoreNavigationMenuRow[]).map(
+    mapStoreNavigationMenu,
+  );
+}
+
 async function loadCustomerProfiles(
   storeIds: string[],
 ): Promise<CustomerProfile[]> {
@@ -1869,6 +1939,9 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
     ),
     customPages: mockStorePages.filter(
       (page) => page.storeId === store.id && page.status === "published",
+    ),
+    navigationMenus: mockStoreNavigationMenus.filter(
+      (menu) => menu.storeId === store.id,
     ),
     customerProfiles: [],
     shippingZones: mockShippingZones.filter(
@@ -1946,12 +2019,20 @@ async function loadPublicStorefrontFromClient(
   }
 
   const productRowsMapped = ((productRows || []) as ProductRow[]).map(mapProduct);
-  const [variants, shippingZones, policies, customPages, productReviews] =
+  const [
+    variants,
+    shippingZones,
+    policies,
+    customPages,
+    navigationMenus,
+    productReviews,
+  ] =
     await Promise.all([
       loadProductVariants([row.id], true, db),
       loadShippingZones([row.id], true, db),
       loadStorePolicies([row.id], true, db),
       loadStorePages([row.id], true, db),
+      loadStoreNavigationMenus([row.id], db),
       loadProductReviews([row.id], true, db),
     ]);
   const products = attachProductVariants(productRowsMapped, variants);
@@ -1979,6 +2060,7 @@ async function loadPublicStorefrontFromClient(
     notifications: [],
     policies,
     customPages,
+    navigationMenus,
     customerProfiles: [],
     shippingZones,
     products,
@@ -2193,6 +2275,9 @@ export async function getStoreWorkspace(
       notifications: [],
       policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
       customPages: mockStorePages.filter((page) => page.storeId === store.id),
+      navigationMenus: mockStoreNavigationMenus.filter(
+        (menu) => menu.storeId === store.id,
+      ),
       customerProfiles: mockCustomerProfiles.filter(
         (profile) => profile.storeId === store.id,
       ),
@@ -2270,6 +2355,7 @@ export async function getStoreWorkspace(
     notifications,
     policies,
     customPages,
+    navigationMenus,
     customerProfiles,
   ] =
     await Promise.all([
@@ -2288,6 +2374,7 @@ export async function getStoreWorkspace(
       loadStoreNotifications([storeId]),
       loadStorePolicies([storeId]),
       loadStorePages([storeId]),
+      loadStoreNavigationMenus([storeId]),
       loadCustomerProfiles([storeId]),
     ]);
 
@@ -2300,6 +2387,7 @@ export async function getStoreWorkspace(
     notifications,
     policies,
     customPages,
+    navigationMenus,
     customerProfiles,
     shippingZones,
     products,
@@ -2442,6 +2530,7 @@ export async function getPublicOrderReceipt(input: {
   store: Store;
   order: Order;
   policies: StorePolicy[];
+  navigationMenus: StoreNavigationMenu[];
   productReviews: ProductReview[];
 } | null> {
   const token = input.token?.trim();
@@ -2474,6 +2563,9 @@ export async function getPublicOrderReceipt(input: {
       store: mapDemoStoreForUser(store, store.ownerId),
       order,
       policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
+      navigationMenus: mockStoreNavigationMenus.filter(
+        (menu) => menu.storeId === store.id,
+      ),
       productReviews: mockProductReviews.filter(
         (review) => review.orderId === order.id,
       ),
@@ -2524,6 +2616,7 @@ export async function getPublicOrderReceipt(input: {
     returnRequests,
     paymentTransactions,
     policies,
+    navigationMenus,
     productReviews,
   ] = await Promise.all([
     loadOrderItems([input.orderId]),
@@ -2532,6 +2625,7 @@ export async function getPublicOrderReceipt(input: {
     loadOrderReturnRequests([input.orderId]),
     loadOrderPaymentTransactions([input.orderId]),
     loadStorePolicies([store.id]),
+    loadStoreNavigationMenus([store.id]),
     loadProductReviewsByOrder(input.orderId),
   ]);
   const order = mapOrder(
@@ -2547,6 +2641,7 @@ export async function getPublicOrderReceipt(input: {
     store: mapStore(store, [], [order]),
     order,
     policies,
+    navigationMenus,
     productReviews,
   };
 }

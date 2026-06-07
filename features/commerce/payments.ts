@@ -1,5 +1,6 @@
 import type {
   OrderPaymentTransaction,
+  PaymentStatus,
   PaymentTransactionStatus,
   PaymentTransactionType,
 } from "@/features/commerce/types";
@@ -49,4 +50,35 @@ export function summarizePaymentTransactions(
     voidedCents,
     netCapturedCents: Math.max(0, capturedCents - refundedCents),
   };
+}
+
+export function getPaymentCaptureAmountCents(input: {
+  amountDueCents?: number | null;
+  giftCardCents?: number | null;
+  totalCents: number;
+}) {
+  const totalCents = Math.max(0, input.totalCents);
+
+  if (typeof input.amountDueCents === "number" && input.amountDueCents >= 0) {
+    return Math.min(totalCents, input.amountDueCents);
+  }
+
+  return Math.max(0, totalCents - Math.max(0, input.giftCardCents || 0));
+}
+
+export function isPaymentCollectionOpen(status: PaymentStatus | null | undefined) {
+  return !status || status === "pending" || status === "authorized";
+}
+
+export function getOrderAmountDueCents(input: {
+  amountDueCents?: number | null;
+  giftCardCents?: number | null;
+  paymentStatus?: PaymentStatus | null;
+  totalCents: number;
+}) {
+  if (!isPaymentCollectionOpen(input.paymentStatus)) {
+    return 0;
+  }
+
+  return getPaymentCaptureAmountCents(input);
 }

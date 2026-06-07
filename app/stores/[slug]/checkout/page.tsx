@@ -1,17 +1,13 @@
+import { randomBytes } from "node:crypto";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CheckoutForm } from "@/features/commerce/components/checkout-form";
+import { StorefrontFooter } from "@/features/commerce/components/storefront-navigation";
 import {
   getPublicAbandonedCheckout,
   getPublicStorefront,
 } from "@/features/commerce/data";
-import {
-  getPolicyHref,
-  getPublishedPolicies,
-  storePolicyLabels,
-} from "@/features/commerce/policies";
 import {
   getStoreSeoDescription,
   getStoreSeoTitle,
@@ -69,8 +65,8 @@ export default async function StoreCheckoutPage({
         token: recoveryToken,
       })
     : null;
-  const { store, products, shippingZones, policies } = workspace;
-  const publishedPolicies = getPublishedPolicies(policies);
+  const { store, products, shippingZones, navigationMenus } = workspace;
+  const checkoutSessionId = randomBytes(16).toString("hex");
   const initialCart = recoveredCheckout?.checkout.lines.map((line) => ({
     productId: line.productId,
     variantId: line.productVariantId,
@@ -80,6 +76,7 @@ export default async function StoreCheckoutPage({
   return (
     <main className="liquid-bg min-h-screen">
       <CheckoutForm
+        checkoutSessionId={checkoutSessionId}
         freeShippingThresholdCents={store.freeShippingThresholdCents}
         initialCart={initialCart}
         initialCustomerEmail={recoveredCheckout?.checkout.customerEmail}
@@ -92,19 +89,7 @@ export default async function StoreCheckoutPage({
         storeSlug={store.slug}
         taxRateBps={store.taxRateBps}
       />
-      {publishedPolicies.length > 0 ? (
-        <footer className="mx-auto flex max-w-6xl flex-wrap gap-3 px-4 pb-10 sm:px-6">
-          {publishedPolicies.map((policy) => (
-            <Link
-              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
-              href={getPolicyHref(store.slug, policy.type)}
-              key={policy.id}
-            >
-              {storePolicyLabels[policy.type]}
-            </Link>
-          ))}
-        </footer>
-      ) : null}
+      <StorefrontFooter maxWidthClassName="max-w-6xl" menus={navigationMenus} />
     </main>
   );
 }

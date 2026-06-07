@@ -68,6 +68,65 @@ async function run() {
 
   checks.push("readiness");
 
+  const storefrontChecks = [
+    {
+      label: "storefront",
+      path: "/stores/northline-supply",
+      includes: ["Northline Supply", "Field Carry Pack", "Checkout"],
+    },
+    {
+      label: "product",
+      path: "/stores/northline-supply/products/field-carry-pack",
+      includes: ["Field Carry Pack", "Weather-resistant", "Add to cart"],
+    },
+    {
+      label: "collection",
+      path: "/stores/northline-supply/collections/everyday-carry",
+      includes: ["Everyday Carry", "Field Carry Pack"],
+    },
+    {
+      label: "checkout",
+      path: "/stores/northline-supply/checkout",
+      includes: ["Checkout", "Customer", "Delivery"],
+    },
+    {
+      label: "order receipt",
+      path: "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
+      includes: ["Order received", "Payment summary", "Request return"],
+    },
+    {
+      label: "store page",
+      path: "/stores/northline-supply/pages/about",
+      includes: ["About Northline", "Northline Supply"],
+    },
+    {
+      label: "store policy",
+      path: "/stores/northline-supply/policies/refund",
+      includes: ["Refund policy", "returns for unused items"],
+    },
+  ];
+
+  for (const check of storefrontChecks) {
+    const result = await request(check.path);
+    assert(
+      result.response.status === 200,
+      `${check.path} did not return 200. Status: ${result.response.status}`,
+    );
+    assert(
+      typeof result.body === "string",
+      `${check.path} did not return an HTML response.`,
+    );
+
+    for (const expectedText of check.includes) {
+      assert(
+        result.body.includes(expectedText),
+        `${check.path} did not render expected text: ${expectedText}`,
+      );
+    }
+
+    checks.push(check.label);
+  }
+
   console.log(
     `Smoke checks passed for ${baseUrl}: ${checks.join(", ")}${
       requireReadiness ? " (strict readiness)" : ""

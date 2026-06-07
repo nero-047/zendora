@@ -91,6 +91,10 @@ export default async function OrderDetailPage({
   const canConfirmPayment =
     order.status !== "cancelled" &&
     (order.paymentStatus === "pending" || order.paymentStatus === "authorized");
+  const orderStatusOptions = getOrderStatusOptions(
+    order.status,
+    order.paymentStatus,
+  );
   const productReviews = workspace.productReviews.filter(
     (review) => review.orderId === order.id,
   );
@@ -133,7 +137,7 @@ export default async function OrderDetailPage({
           className="mt-5 grid gap-2 sm:max-w-xl sm:grid-cols-[1fr_auto]"
         >
           <select className="field" defaultValue={order.status} name="status">
-            {getOrderStatusOptions(order.status).map((status) => (
+            {orderStatusOptions.map((status) => (
               <option key={status} value={status}>
                 {orderStatusLabels[status]}
               </option>
@@ -141,7 +145,7 @@ export default async function OrderDetailPage({
           </select>
           <button
             className="secondary-button px-4 text-sm"
-            disabled={getOrderStatusOptions(order.status).length === 1}
+            disabled={orderStatusOptions.length === 1}
             type="submit"
           >
             <CheckCircle aria-hidden="true" size={16} />
@@ -555,6 +559,20 @@ export default async function OrderDetailPage({
                   <p className="mt-2 text-xs text-slate-500">
                     {refund.restockedInventory ? "Inventory restocked" : "No restock"}
                   </p>
+                  {refund.giftCardCents > 0 || refund.paymentCents > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {refund.giftCardCents > 0 ? (
+                        <span className="status-pill">
+                          Gift card {formatCurrency(refund.giftCardCents, order.currency)}
+                        </span>
+                      ) : null}
+                      {refund.paymentCents > 0 ? (
+                        <span className="status-pill">
+                          Payment {formatCurrency(refund.paymentCents, order.currency)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {refund.note ? (
                     <p className="mt-2 rounded-[8px] bg-slate-50 p-3 text-sm text-slate-600">
                       {refund.note}

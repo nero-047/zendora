@@ -54,3 +54,21 @@ export function calculateGiftCardRedemptionAmount(input: {
 
   return Math.min(input.balanceCents, input.orderTotalCents);
 }
+
+export function calculateGiftCardRefundAmount(input: {
+  alreadyRefundedGiftCardCents: number;
+  giftCardTenderCents: number;
+  refundAmountCents: number;
+}) {
+  if (input.refundAmountCents <= 0 || input.giftCardTenderCents <= 0) {
+    return 0;
+  }
+
+  const remainingGiftCardTenderCents = Math.max(
+    0,
+    input.giftCardTenderCents -
+      Math.max(0, input.alreadyRefundedGiftCardCents),
+  );
+
+  return Math.min(input.refundAmountCents, remainingGiftCardTenderCents);
+}

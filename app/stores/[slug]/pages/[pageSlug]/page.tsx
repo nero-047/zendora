@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, ShoppingBag } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import { getStorePageDescription } from "@/features/commerce/store-pages";
 import {
@@ -36,6 +40,7 @@ async function loadStorePage(slug: string, pageSlug: string) {
     store: workspace.store,
     page,
     heroProduct: workspace.products[0],
+    navigationMenus: workspace.navigationMenus,
   };
 }
 
@@ -82,16 +87,13 @@ export default async function StoreCustomPage({
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Link className="secondary-button px-3 text-sm" href={`/stores/${data.store.slug}`}>
-          <ArrowLeft aria-hidden="true" size={16} />
-          Storefront
-        </Link>
-        <Link className="primary-button px-3 text-sm" href="/dashboard">
-          <ShoppingBag aria-hidden="true" size={16} />
-          Merchant admin
-        </Link>
-      </nav>
+      <StorefrontHeader
+        backHref={`/stores/${data.store.slug}`}
+        backLabel={data.store.name}
+        maxWidthClassName="max-w-5xl"
+        menus={data.navigationMenus}
+        store={data.store}
+      />
 
       <article className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6 lg:px-8">
         <div className="mb-5 flex items-center gap-2">
@@ -119,6 +121,10 @@ export default async function StoreCustomPage({
           Back to store
         </Link>
       </article>
+      <StorefrontFooter
+        maxWidthClassName="max-w-5xl"
+        menus={data.navigationMenus}
+      />
     </main>
   );
 }

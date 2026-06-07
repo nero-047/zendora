@@ -116,3 +116,13 @@ export function normalizeCartLines(lines: CheckoutLineInput[]) {
 
   return [...quantitiesByLine.values()];
 }
+
+export function normalizeCheckoutSessionId(value: string | undefined | null) {
+  const sessionId = value?.trim() || "";
+
+  if (!/^[a-zA-Z0-9_-]{16,96}$/.test(sessionId)) {
+    return null;
+  }
+
+  return sessionId;
+}

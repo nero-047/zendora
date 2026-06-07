@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, ShoppingBag } from "lucide-react";
+import { FileText } from "lucide-react";
 
+import {
+  StorefrontFooter,
+  StorefrontHeader,
+} from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import {
   getPublishedPolicies,
@@ -42,6 +45,7 @@ async function getStorePolicy(slug: string, policyType: string) {
   return {
     store: workspace.store,
     policy,
+    navigationMenus: workspace.navigationMenus,
   };
 }
 
@@ -76,7 +80,7 @@ export default async function StorePolicyPage({ params }: PolicyPageProps) {
     notFound();
   }
 
-  const { store, policy } = data;
+  const { store, policy, navigationMenus } = data;
   const paragraphs = policy.body
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
@@ -84,16 +88,13 @@ export default async function StorePolicyPage({ params }: PolicyPageProps) {
 
   return (
     <main className="liquid-bg min-h-screen">
-      <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5 sm:px-6">
-        <Link className="secondary-button px-3 text-sm" href={`/stores/${store.slug}`}>
-          <ArrowLeft aria-hidden="true" size={16} />
-          {store.name}
-        </Link>
-        <Link className="primary-button px-3 text-sm" href={`/stores/${store.slug}/checkout`}>
-          <ShoppingBag aria-hidden="true" size={16} />
-          Checkout
-        </Link>
-      </nav>
+      <StorefrontHeader
+        backHref={`/stores/${store.slug}`}
+        backLabel={store.name}
+        maxWidthClassName="max-w-5xl"
+        menus={navigationMenus}
+        store={store}
+      />
 
       <article className="mx-auto max-w-5xl px-4 pb-16 pt-6 sm:px-6">
         <div className="glass-panel p-5 sm:p-8">
@@ -114,6 +115,7 @@ export default async function StorePolicyPage({ params }: PolicyPageProps) {
           </p>
         </div>
       </article>
+      <StorefrontFooter maxWidthClassName="max-w-5xl" menus={navigationMenus} />
     </main>
   );
 }

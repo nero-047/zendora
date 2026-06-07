@@ -17,6 +17,7 @@ import type { Product, ShippingZone } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
 type CheckoutFormProps = {
+  checkoutSessionId: string;
   freeShippingThresholdCents: number;
   storeName: string;
   storeSlug: string;
@@ -68,6 +69,7 @@ function getShippingEstimate(input: {
 }
 
 export function CheckoutForm({
+  checkoutSessionId,
   freeShippingThresholdCents,
   storeName,
   storeSlug,
@@ -233,6 +235,11 @@ export function CheckoutForm({
         </div>
 
         <input name="cart" type="hidden" value={checkoutPayloadJson} />
+        <input
+          name="checkoutSessionId"
+          type="hidden"
+          value={checkoutSessionId}
+        />
         <input
           name="abandonedCheckoutToken"
           type="hidden"

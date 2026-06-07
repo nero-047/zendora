@@ -16,9 +16,15 @@ import {
   calculateShippingQuote,
   calculateTaxCents,
   normalizeCartLines,
+  normalizeCheckoutSessionId,
   parseShippingCountries,
 } from "@/features/commerce/business-rules";
 import { parseCustomerTags } from "@/features/commerce/customers";
+import {
+  parseNavigationMenuLines,
+  storeNavigationLocations,
+} from "@/features/commerce/navigation";
+import { getStoreLaunchReadiness } from "@/features/commerce/launch-readiness";
 import type {
   AuditEventAction,
   NotificationType,
@@ -43,9 +49,11 @@ import {
   upsertProfileForUser,
 } from "@/features/commerce/data";
 import {
+  canCancelOrderPaymentStatus,
   canTransitionOrderStatus,
   isRevenueOrderStatus,
 } from "@/features/commerce/order-status";
+import { getPaymentCaptureAmountCents } from "@/features/commerce/payments";
 import { storePolicyTypes } from "@/features/commerce/policies";
 import { storePageStatuses } from "@/features/commerce/store-pages";
 import {
@@ -58,7 +66,8 @@ import {
   type StorePermission,
 } from "@/features/commerce/permissions";
 import {
-  canCustomerRequestReturn,
+  canTransitionReturnRequestStatus,
+  getCustomerReturnRequestEligibility,
   returnRequestReasons,
   returnRequestStatuses,
 } from "@/features/commerce/returns";
@@ -67,6 +76,7 @@ import {
   productReviewStatuses,
 } from "@/features/commerce/reviews";
 import {
+  calculateGiftCardRefundAmount,
   calculateGiftCardRedemptionAmount,
   canRedeemGiftCard,
   giftCardStatuses,
@@ -194,6 +204,19 @@ const storePageSchema = z
     }
   });
 
+const storeNavigationSchema = z.object({
+  headerLinks: z
+    .string()
+    .trim()
+    .max(3000, "Keep header navigation under 3000 characters.")
+    .optional(),
+  footerLinks: z
+    .string()
+    .trim()
+    .max(3000, "Keep footer navigation under 3000 characters.")
+    .optional(),
+});
+
 const productUpdateSchema = productSchema.extend({
   status: z.enum(["draft", "active", "archived"]),
 });
@@ -273,6 +296,11 @@ const checkoutSchema = z.object({
     .trim()
     .min(16, "Checkout recovery token is invalid.")
     .max(96, "Checkout recovery token is invalid.")
+    .optional(),
+  checkoutSessionId: z
+    .string()
+    .trim()
+    .max(96, "Checkout session is invalid.")
     .optional(),
   cart: z.array(checkoutLineSchema).min(1, "Add at least one item."),
 });
@@ -593,6 +621,8 @@ type OrderLifecycleRow = {
   payment_provider: string | null;
   payment_reference: string | null;
   total_cents: number;
+  amount_due_cents: number | null;
+  gift_card_cents: number | null;
   currency: string;
   paid_at: string | null;
   fulfilled_at: string | null;
@@ -682,9 +712,27 @@ type OrderInputItem = {
 
 type ReservedInventory = {
   productId: string;
-  productInventoryCount: number;
+  quantity: number;
   productVariantId?: string;
-  variantInventoryCount?: number;
+};
+
+type ReservedDiscountRedemption = {
+  id: string;
+  redemptionCountBefore: number;
+};
+
+type ReservedGiftCard = {
+  id: string;
+  amountCents: number;
+  balanceBeforeCents: number;
+  balanceAfterCents: number;
+};
+
+type RecreditedGiftCard = {
+  id: string;
+  balanceBeforeCents: number;
+  balanceAfterCents: number;
+  amountCents: number;
 };
 
 function demoDisabledState(): ActionState {
@@ -723,6 +771,72 @@ function getCustomerOrderStatusHref(input: {
   const encodedToken = encodeURIComponent(input.token);
 
   return `/stores/${input.storeSlug}/orders/${encodedOrderId}?token=${encodedToken}`;
+}
+
+async function getExistingCheckoutOrder(input: {
+  customerEmail: string;
+  db: ReturnType<typeof getSupabaseAdmin>;
+  sessionId: string | null;
+  storeId: string;
+  storeSlug: string;
+}) {
+  if (!input.sessionId) {
+    return null;
+  }
+
+  const { data, error } = await input.db
+    .from("orders")
+    .select("id, customer_email, customer_access_token")
+    .eq("store_id", input.storeId)
+    .eq("client_order_key", input.sessionId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const order = data as {
+    id: string;
+    customer_access_token: string | null;
+    customer_email: string;
+  };
+
+  if (
+    order.customer_email.trim().toLowerCase() !==
+    input.customerEmail.trim().toLowerCase()
+  ) {
+    return {
+      status: "error" as const,
+      state: formError("This checkout session has already been used."),
+    };
+  }
+
+  if (!order.customer_access_token) {
+    return {
+      status: "error" as const,
+      state: formError("Existing order receipt is missing a customer token."),
+    };
+  }
+
+  return {
+    status: "success" as const,
+    state: {
+      status: "success" as const,
+      message: `Order ${order.id.slice(0, 8)} already received.`,
+      data: {
+        orderId: order.id,
+        orderStatusUrl: getCustomerOrderStatusHref({
+          storeSlug: input.storeSlug,
+          orderId: order.id,
+          token: order.customer_access_token,
+        }),
+      },
+    },
+  };
 }
 
 async function recordAuditEvent(input: {
@@ -866,12 +980,120 @@ async function deletePaymentTransaction(
   await db.from("order_payment_transactions").delete().eq("id", transactionId);
 }
 
+async function rollbackGiftCardRecredit(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  recredit: RecreditedGiftCard | null,
+) {
+  if (!recredit) {
+    return;
+  }
+
+  await db
+    .from("gift_cards")
+    .update({ balance_cents: recredit.balanceBeforeCents })
+    .eq("id", recredit.id)
+    .eq("balance_cents", recredit.balanceAfterCents);
+}
+
+async function rollbackInventoryReservationCount(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  table: "products" | "product_variants",
+  id: string | undefined,
+  quantity: number,
+) {
+  if (!id || quantity <= 0) {
+    return;
+  }
+
+  const { data } = await db
+    .from(table)
+    .select("inventory_count")
+    .eq("id", id)
+    .maybeSingle();
+  const currentInventory =
+    (data as ProductInventoryRow | VariantInventoryRow | null)?.inventory_count;
+
+  if (typeof currentInventory !== "number") {
+    return;
+  }
+
+  await db
+    .from(table)
+    .update({ inventory_count: currentInventory + quantity })
+    .eq("id", id)
+    .eq("inventory_count", currentInventory);
+}
+
+async function rollbackDiscountRedemptionReservation(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  reservation: ReservedDiscountRedemption | null,
+) {
+  if (!reservation) {
+    return;
+  }
+
+  const { data } = await db
+    .from("discount_codes")
+    .select("redemption_count")
+    .eq("id", reservation.id)
+    .maybeSingle();
+  const currentCount = (data as { redemption_count?: number } | null)
+    ?.redemption_count;
+
+  if (
+    typeof currentCount !== "number" ||
+    currentCount <= reservation.redemptionCountBefore
+  ) {
+    return;
+  }
+
+  await db
+    .from("discount_codes")
+    .update({ redemption_count: currentCount - 1 })
+    .eq("id", reservation.id)
+    .eq("redemption_count", currentCount);
+}
+
+async function rollbackGiftCardReservation(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  reservation: ReservedGiftCard | null,
+) {
+  if (!reservation || reservation.amountCents <= 0) {
+    return;
+  }
+
+  const { data } = await db
+    .from("gift_cards")
+    .select("balance_cents")
+    .eq("id", reservation.id)
+    .maybeSingle();
+  const currentBalance = (data as { balance_cents?: number } | null)
+    ?.balance_cents;
+
+  if (typeof currentBalance !== "number") {
+    return;
+  }
+
+  await db
+    .from("gift_cards")
+    .update({ balance_cents: currentBalance + reservation.amountCents })
+    .eq("id", reservation.id)
+    .eq("balance_cents", currentBalance);
+}
+
 function formError(message: string, errors?: ActionState["errors"]): ActionState {
   return {
     status: "error",
     message,
     errors,
   };
+}
+
+function isUniqueConstraintError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "23505" ||
+    Boolean(error.message?.toLowerCase().includes("duplicate"))
+  );
 }
 
 function optionalText(value: string | undefined) {
@@ -1625,17 +1847,18 @@ async function rollbackReservedInventory(
   items: ReservedInventory[],
 ) {
   for (const item of [...items].reverse()) {
-    if (item.productVariantId && item.variantInventoryCount !== undefined) {
-      await db
-        .from("product_variants")
-        .update({ inventory_count: item.variantInventoryCount })
-        .eq("id", item.productVariantId);
-    }
-
-    await db
-      .from("products")
-      .update({ inventory_count: item.productInventoryCount })
-      .eq("id", item.productId);
+    await rollbackInventoryReservationCount(
+      db,
+      "product_variants",
+      item.productVariantId,
+      item.quantity,
+    );
+    await rollbackInventoryReservationCount(
+      db,
+      "products",
+      item.productId,
+      item.quantity,
+    );
   }
 }
 
@@ -1719,10 +1942,12 @@ async function reserveOrderInventory(input: {
 
     if (error || !data) {
       if (item.variant && currentVariantInventory !== undefined) {
-        await input.db
-          .from("product_variants")
-          .update({ inventory_count: currentVariantInventory })
-          .eq("id", item.variant.id);
+        await rollbackInventoryReservationCount(
+          input.db,
+          "product_variants",
+          item.variant.id,
+          item.quantity,
+        );
       }
 
       await rollbackReservedInventory(input.db, reservedInventory);
@@ -1737,9 +1962,8 @@ async function reserveOrderInventory(input: {
 
     reservedInventory.push({
       productId: item.product.id,
-      productInventoryCount: productInventory,
+      quantity: item.quantity,
       productVariantId: item.variant?.id,
-      variantInventoryCount: item.variant?.inventoryCount,
     });
     productInventoryById.set(item.product.id, nextInventory);
   }
@@ -2109,6 +2333,32 @@ export async function updateStoreAction(
     });
   }
 
+  if (workspace.store.status !== "active" && parsed.data.status === "active") {
+    const launchReadiness = getStoreLaunchReadiness({
+      ...workspace,
+      store: {
+        ...workspace.store,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        currency: nextCurrency,
+        themeColor: parsed.data.themeColor,
+        status: parsed.data.status,
+        seoTitle: optionalText(parsed.data.seoTitle) || undefined,
+        seoDescription: optionalText(parsed.data.seoDescription) || undefined,
+        socialImageUrl: optionalText(parsed.data.socialImageUrl) || undefined,
+        shippingRateCents,
+        freeShippingThresholdCents,
+        taxRateBps,
+      },
+    });
+
+    if (!launchReadiness.canPublish) {
+      return formError("Resolve launch blockers before activating this store.", {
+        status: launchReadiness.blockingChecks.map((check) => check.detail),
+      });
+    }
+  }
+
   const db = getSupabaseAdmin();
   const { error } = await db
     .from("stores")
@@ -2435,6 +2685,87 @@ export async function updateStorePageAction(
   return {
     status: "success",
     message: `Page ${parsed.data.title} updated.`,
+  };
+}
+
+export async function updateStoreNavigationAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = storeNavigationSchema.safeParse({
+    headerLinks: formData.get("headerLinks") || undefined,
+    footerLinks: formData.get("footerLinks") || undefined,
+  });
+
+  if (!parsed.success) {
+    return formError(
+      "Check storefront navigation.",
+      parsed.error.flatten().fieldErrors,
+    );
+  }
+
+  const header = parseNavigationMenuLines(parsed.data.headerLinks || "");
+  const footer = parseNavigationMenuLines(parsed.data.footerLinks || "");
+  const errors: ActionState["errors"] = {};
+
+  if (header.errors.length > 0) {
+    errors.headerLinks = header.errors;
+  }
+
+  if (footer.errors.length > 0) {
+    errors.footerLinks = footer.errors;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return formError("Check storefront navigation.", errors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
+  const db = getSupabaseAdmin();
+  const menuPayload = storeNavigationLocations.map((location) => ({
+    store_id: storeId,
+    location,
+    links: location === "header" ? header.links : footer.links,
+  }));
+  const { error } = await db.from("store_navigation_menus").upsert(
+    menuPayload,
+    { onConflict: "store_id,location" },
+  );
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_navigation_updated",
+    resourceType: "store_navigation_menu",
+    resourceId: storeId,
+    summary: `${user.email} updated storefront navigation.`,
+    metadata: {
+      headerLinkCount: header.links.length,
+      footerLinkCount: footer.links.length,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: "Storefront navigation updated.",
   };
 }
 
@@ -3403,7 +3734,7 @@ export async function createManualOrderAction(
       tax_cents: taxCents,
       tax_rate_bps: workspace.store.taxRateBps,
       total_cents: totalCents,
-      amount_due_cents: totalCents,
+      amount_due_cents: parsed.data.paymentStatus === "paid" ? 0 : totalCents,
       currency: workspace.store.currency,
       paid_at: paidAt,
     })
@@ -3540,6 +3871,7 @@ export async function createCheckoutOrderAction(
     giftCardCode: formData.get("giftCardCode") || undefined,
     abandonedCheckoutToken:
       formData.get("abandonedCheckoutToken") || undefined,
+    checkoutSessionId: formData.get("checkoutSessionId") || undefined,
     cart: readCartPayload(formData.get("cart")),
   });
 
@@ -3561,6 +3893,29 @@ export async function createCheckoutOrderAction(
 
   if (!storefront) {
     return formError("This store is not accepting orders.");
+  }
+
+  const checkoutSessionId = normalizeCheckoutSessionId(
+    parsed.data.checkoutSessionId,
+  );
+
+  if (parsed.data.checkoutSessionId && !checkoutSessionId) {
+    return formError("Checkout session is invalid.", {
+      checkoutSessionId: ["Checkout session is invalid."],
+    });
+  }
+
+  const db = getSupabaseAdmin();
+  const existingCheckoutOrder = await getExistingCheckoutOrder({
+    customerEmail: parsed.data.customerEmail,
+    db,
+    sessionId: checkoutSessionId,
+    storeId: storefront.store.id,
+    storeSlug: storefront.store.slug,
+  });
+
+  if (existingCheckoutOrder) {
+    return existingCheckoutOrder.state;
   }
 
   const cartLines = normalizeCartLines(parsed.data.cart);
@@ -3638,7 +3993,6 @@ export async function createCheckoutOrderAction(
     return formError("Add at least one priced item before checkout.");
   }
 
-  const db = getSupabaseAdmin();
   const discount = await getCheckoutDiscount({
     code: normalizeDiscountCode(parsed.data.discountCode),
     storeId: storefront.store.id,
@@ -3693,14 +4047,8 @@ export async function createCheckoutOrderAction(
     }
   }
 
-  let discountRedemptionReserved = false;
-  let reservedGiftCard:
-    | {
-        id: string;
-        balanceBeforeCents: number;
-        balanceAfterCents: number;
-      }
-    | null = null;
+  let reservedDiscountRedemption: ReservedDiscountRedemption | null = null;
+  let reservedGiftCard: ReservedGiftCard | null = null;
 
   for (const item of orderItems) {
     const productInventory = productInventoryById.get(item.product.id);
@@ -3753,10 +4101,12 @@ export async function createCheckoutOrderAction(
 
     if (error || !data) {
       if (item.variant && currentVariantInventory !== undefined) {
-        await db
-          .from("product_variants")
-          .update({ inventory_count: currentVariantInventory })
-          .eq("id", item.variant.id);
+        await rollbackInventoryReservationCount(
+          db,
+          "product_variants",
+          item.variant.id,
+          item.quantity,
+        );
       }
 
       await rollbackReservedInventory(db, reservedInventory);
@@ -3768,9 +4118,8 @@ export async function createCheckoutOrderAction(
 
     reservedInventory.push({
       productId: item.product.id,
-      productInventoryCount: productInventory,
+      quantity: item.quantity,
       productVariantId: item.variant?.id,
-      variantInventoryCount: item.variant?.inventoryCount,
     });
     productInventoryById.set(item.product.id, nextInventory);
   }
@@ -3792,7 +4141,10 @@ export async function createCheckoutOrderAction(
       );
     }
 
-    discountRedemptionReserved = true;
+    reservedDiscountRedemption = {
+      id: discount.row.id,
+      redemptionCountBefore: discount.row.redemption_count,
+    };
   }
 
   if (giftCard.row && giftCardCents > 0) {
@@ -3809,12 +4161,10 @@ export async function createCheckoutOrderAction(
     if (error || !data) {
       await rollbackReservedInventory(db, reservedInventory);
 
-      if (discount.row && discountRedemptionReserved) {
-        await db
-          .from("discount_codes")
-          .update({ redemption_count: discount.row.redemption_count })
-          .eq("id", discount.row.id);
-      }
+      await rollbackDiscountRedemptionReservation(
+        db,
+        reservedDiscountRedemption,
+      );
 
       return formError(
         error?.message || "Gift card balance changed while checkout was in progress.",
@@ -3826,6 +4176,7 @@ export async function createCheckoutOrderAction(
 
     reservedGiftCard = {
       id: giftCard.row.id,
+      amountCents: giftCardCents,
       balanceBeforeCents: giftCard.row.balance_cents,
       balanceAfterCents,
     };
@@ -3853,6 +4204,7 @@ export async function createCheckoutOrderAction(
       payment_provider: getManualPaymentProvider(parsed.data.paymentMethod),
       payment_reference: null,
       customer_access_token: customerAccessToken,
+      client_order_key: checkoutSessionId,
       subtotal_cents: subtotalCents,
       discount_code: discount.code,
       discount_cents: discount.cents,
@@ -3872,18 +4224,21 @@ export async function createCheckoutOrderAction(
   if (orderError) {
     await rollbackReservedInventory(db, reservedInventory);
 
-    if (reservedGiftCard) {
-      await db
-        .from("gift_cards")
-        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
-        .eq("id", reservedGiftCard.id);
-    }
+    await rollbackGiftCardReservation(db, reservedGiftCard);
+    await rollbackDiscountRedemptionReservation(db, reservedDiscountRedemption);
 
-    if (discount.row && discountRedemptionReserved) {
-      await db
-        .from("discount_codes")
-        .update({ redemption_count: discount.row.redemption_count })
-        .eq("id", discount.row.id);
+    if (isUniqueConstraintError(orderError) && checkoutSessionId) {
+      const duplicateCheckoutOrder = await getExistingCheckoutOrder({
+        customerEmail: parsed.data.customerEmail,
+        db,
+        sessionId: checkoutSessionId,
+        storeId: storefront.store.id,
+        storeSlug: storefront.store.slug,
+      });
+
+      if (duplicateCheckoutOrder) {
+        return duplicateCheckoutOrder.state;
+      }
     }
 
     return formError(orderError.message);
@@ -3906,19 +4261,8 @@ export async function createCheckoutOrderAction(
     await db.from("orders").delete().eq("id", order.id);
     await rollbackReservedInventory(db, reservedInventory);
 
-    if (reservedGiftCard) {
-      await db
-        .from("gift_cards")
-        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
-        .eq("id", reservedGiftCard.id);
-    }
-
-    if (discount.row && discountRedemptionReserved) {
-      await db
-        .from("discount_codes")
-        .update({ redemption_count: discount.row.redemption_count })
-        .eq("id", discount.row.id);
-    }
+    await rollbackGiftCardReservation(db, reservedGiftCard);
+    await rollbackDiscountRedemptionReservation(db, reservedDiscountRedemption);
 
     return formError(itemError.message);
   }
@@ -3938,17 +4282,8 @@ export async function createCheckoutOrderAction(
     if (redemptionError) {
       await db.from("orders").delete().eq("id", order.id);
       await rollbackReservedInventory(db, reservedInventory);
-      await db
-        .from("gift_cards")
-        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
-        .eq("id", reservedGiftCard.id);
-
-      if (discount.row && discountRedemptionReserved) {
-        await db
-          .from("discount_codes")
-          .update({ redemption_count: discount.row.redemption_count })
-          .eq("id", discount.row.id);
-      }
+      await rollbackGiftCardReservation(db, reservedGiftCard);
+      await rollbackDiscountRedemptionReservation(db, reservedDiscountRedemption);
 
       return formError(redemptionError.message);
     }
@@ -4219,11 +4554,11 @@ export async function dismissAbandonedCheckoutAction(
   revalidatePath(`/stores/${workspace.store.slug}/checkout`);
 }
 
-export async function publishStoreAction(storeId: string) {
+export async function publishStoreAction(storeId: string): Promise<ActionState> {
   const user = await requireAppUser();
 
   if (!isSupabaseConfigured()) {
-    return;
+    return demoDisabledState();
   }
 
   const workspace = await assertStorePermission(
@@ -4231,6 +4566,14 @@ export async function publishStoreAction(storeId: string) {
     storeId,
     "manage_store_settings",
   );
+  const launchReadiness = getStoreLaunchReadiness(workspace);
+
+  if (!launchReadiness.canPublish) {
+    return formError("Resolve launch blockers before publishing this store.", {
+      status: launchReadiness.blockingChecks.map((check) => check.detail),
+    });
+  }
+
   const db = getSupabaseAdmin();
   const { error } = await db
     .from("stores")
@@ -4238,7 +4581,7 @@ export async function publishStoreAction(storeId: string) {
     .eq("id", storeId);
 
   if (error) {
-    throw error;
+    return formError(error.message);
   }
 
   await recordAuditEvent({
@@ -4258,13 +4601,18 @@ export async function publishStoreAction(storeId: string) {
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `${workspace.store.name} published.`,
+  };
 }
 
-export async function pauseStoreAction(storeId: string) {
+export async function pauseStoreAction(storeId: string): Promise<ActionState> {
   const user = await requireAppUser();
 
   if (!isSupabaseConfigured()) {
-    return;
+    return demoDisabledState();
   }
 
   const workspace = await assertStorePermission(
@@ -4279,7 +4627,7 @@ export async function pauseStoreAction(storeId: string) {
     .eq("id", storeId);
 
   if (error) {
-    throw error;
+    return formError(error.message);
   }
 
   await recordAuditEvent({
@@ -4299,6 +4647,11 @@ export async function pauseStoreAction(storeId: string) {
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `${workspace.store.name} paused.`,
+  };
 }
 
 export async function upsertCustomerProfileAction(
@@ -4408,7 +4761,7 @@ export async function updateOrderStatusAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "status, payment_status, payment_method, payment_provider, payment_reference, total_cents, currency, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
+      "status, payment_status, payment_method, payment_provider, payment_reference, total_cents, amount_due_cents, gift_card_cents, currency, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -4424,9 +4777,24 @@ export async function updateOrderStatusAction(
 
   const order = orderData as OrderLifecycleRow;
 
-  if (!canTransitionOrderStatus(order.status, parsed.data.status)) {
+  if (
+    !canTransitionOrderStatus(
+      order.status,
+      parsed.data.status,
+      order.payment_status,
+    )
+  ) {
     throw new Error(
       `Orders cannot move from ${order.status} to ${parsed.data.status}.`,
+    );
+  }
+
+  if (
+    parsed.data.status === "cancelled" &&
+    !canCancelOrderPaymentStatus(order.payment_status)
+  ) {
+    throw new Error(
+      "Refund or void captured payment before cancelling this order.",
     );
   }
 
@@ -4435,6 +4803,7 @@ export async function updateOrderStatusAction(
     status: z.infer<typeof orderStatusSchema>["status"];
     payment_status?: PaymentStatus;
     payment_provider?: string;
+    amount_due_cents?: number;
     paid_at?: string;
     fulfilled_at?: string;
     cancelled_at?: string;
@@ -4460,9 +4829,16 @@ export async function updateOrderStatusAction(
     updatePayload.payment_provider =
       order.payment_provider ||
       getManualPaymentProvider(order.payment_method || "manual_invoice");
+    updatePayload.amount_due_cents = 0;
   }
 
-  if (updatePayload.payment_status === "paid" && order.total_cents > 0) {
+  const captureAmountCents = getPaymentCaptureAmountCents({
+    amountDueCents: order.amount_due_cents,
+    giftCardCents: order.gift_card_cents,
+    totalCents: order.total_cents,
+  });
+
+  if (updatePayload.payment_status === "paid" && captureAmountCents > 0) {
     const transaction = await insertPaymentTransaction({
       db,
       storeId,
@@ -4475,12 +4851,14 @@ export async function updateOrderStatusAction(
         order.payment_provider ||
         getManualPaymentProvider(order.payment_method || "manual_invoice"),
       providerReference: order.payment_reference,
-      amountCents: order.total_cents,
+      amountCents: captureAmountCents,
       currency: order.currency,
       processedAt: updatePayload.paid_at || now,
       metadata: {
         source: "order_status_update",
         nextStatus: parsed.data.status,
+        totalCents: order.total_cents,
+        giftCardCents: order.gift_card_cents || 0,
       },
     });
 
@@ -4506,9 +4884,49 @@ export async function updateOrderStatusAction(
       updatePayload.cancelled_at = now;
     }
 
+    if (
+      !order.payment_status ||
+      order.payment_status === "pending" ||
+      order.payment_status === "authorized"
+    ) {
+      updatePayload.payment_status = "voided";
+      updatePayload.amount_due_cents = 0;
+    }
+
     if (!order.inventory_restocked_at) {
       restockedItems = await restockReservedInventory(db, storeId, orderId);
       updatePayload.inventory_restocked_at = now;
+    }
+
+    if (order.payment_status === "authorized" && captureAmountCents > 0) {
+      const transaction = await insertPaymentTransaction({
+        db,
+        storeId,
+        orderId,
+        clerkUserId: user.id,
+        type: "void",
+        paymentMethod: order.payment_method || "manual_invoice",
+        paymentProvider:
+          order.payment_provider ||
+          getManualPaymentProvider(order.payment_method || "manual_invoice"),
+        providerReference: order.payment_reference,
+        amountCents: captureAmountCents,
+        currency: order.currency,
+        processedAt: now,
+        metadata: {
+          source: "order_status_update",
+          nextStatus: parsed.data.status,
+          totalCents: order.total_cents,
+          giftCardCents: order.gift_card_cents || 0,
+        },
+      });
+
+      if (transaction.error) {
+        await rollbackRestockedInventory(db, storeId, restockedItems);
+        throw transaction.error;
+      }
+
+      paymentTransactionId = transaction.id;
     }
   }
 
@@ -4585,7 +5003,7 @@ export async function confirmOrderPaymentAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "customer_email, customer_name, status, payment_status, total_cents, currency, paid_at, cancelled_at",
+      "customer_email, customer_name, status, payment_status, total_cents, amount_due_cents, gift_card_cents, currency, paid_at, cancelled_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -4606,6 +5024,8 @@ export async function confirmOrderPaymentAction(
     | "status"
     | "payment_status"
     | "total_cents"
+    | "amount_due_cents"
+    | "gift_card_cents"
     | "currency"
     | "paid_at"
     | "cancelled_at"
@@ -4629,9 +5049,14 @@ export async function confirmOrderPaymentAction(
     optionalText(parsed.data.paymentProvider) ||
     getManualPaymentProvider(parsed.data.paymentMethod);
   const paymentReference = optionalText(parsed.data.paymentReference);
+  const captureAmountCents = getPaymentCaptureAmountCents({
+    amountDueCents: order.amount_due_cents,
+    giftCardCents: order.gift_card_cents,
+    totalCents: order.total_cents,
+  });
   let transactionId: string | null = null;
 
-  if (order.total_cents > 0) {
+  if (captureAmountCents > 0) {
     const transaction = await insertPaymentTransaction({
       db,
       storeId,
@@ -4641,12 +5066,14 @@ export async function confirmOrderPaymentAction(
       paymentMethod: parsed.data.paymentMethod,
       paymentProvider,
       providerReference: paymentReference,
-      amountCents: order.total_cents,
+      amountCents: captureAmountCents,
       currency: order.currency,
       processedAt: order.paid_at || now,
       metadata: {
         source: "payment_confirmation",
         nextStatus,
+        totalCents: order.total_cents,
+        giftCardCents: order.gift_card_cents || 0,
       },
     });
 
@@ -4665,6 +5092,7 @@ export async function confirmOrderPaymentAction(
       payment_method: parsed.data.paymentMethod,
       payment_provider: paymentProvider,
       payment_reference: paymentReference,
+      amount_due_cents: 0,
       paid_at: order.paid_at || now,
     })
     .eq("id", orderId)
@@ -4756,7 +5184,7 @@ export async function updateOrderFulfillmentAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "customer_email, customer_name, status, payment_status, payment_method, payment_provider, payment_reference, total_cents, currency, paid_at, fulfilled_at, cancelled_at",
+      "customer_email, customer_name, status, payment_status, payment_method, payment_provider, payment_reference, total_cents, amount_due_cents, gift_card_cents, currency, paid_at, fulfilled_at, cancelled_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -4780,6 +5208,8 @@ export async function updateOrderFulfillmentAction(
     | "payment_provider"
     | "payment_reference"
     | "total_cents"
+    | "amount_due_cents"
+    | "gift_card_cents"
     | "currency"
     | "paid_at"
     | "fulfilled_at"
@@ -4803,6 +5233,7 @@ export async function updateOrderFulfillmentAction(
     status?: z.infer<typeof orderStatusSchema>["status"];
     payment_status?: PaymentStatus;
     payment_provider?: string;
+    amount_due_cents?: number;
     paid_at?: string;
     fulfilled_at?: string;
   } = {
@@ -4837,6 +5268,7 @@ export async function updateOrderFulfillmentAction(
       updatePayload.payment_provider =
         order.payment_provider ||
         getManualPaymentProvider(order.payment_method || "manual_invoice");
+      updatePayload.amount_due_cents = 0;
     }
 
     if (!order.paid_at) {
@@ -4847,7 +5279,13 @@ export async function updateOrderFulfillmentAction(
       updatePayload.fulfilled_at = now;
     }
 
-    if (shouldCapturePayment && order.total_cents > 0) {
+    const captureAmountCents = getPaymentCaptureAmountCents({
+      amountDueCents: order.amount_due_cents,
+      giftCardCents: order.gift_card_cents,
+      totalCents: order.total_cents,
+    });
+
+    if (shouldCapturePayment && captureAmountCents > 0) {
       const transaction = await insertPaymentTransaction({
         db,
         storeId,
@@ -4860,12 +5298,14 @@ export async function updateOrderFulfillmentAction(
           order.payment_provider ||
           getManualPaymentProvider(order.payment_method || "manual_invoice"),
         providerReference: order.payment_reference,
-        amountCents: order.total_cents,
+        amountCents: captureAmountCents,
         currency: order.currency,
         processedAt: updatePayload.paid_at || now,
         metadata: {
           source: "fulfillment_update",
           markFulfilled: true,
+          totalCents: order.total_cents,
+          giftCardCents: order.gift_card_cents || 0,
         },
       });
 
@@ -5192,10 +5632,10 @@ export async function createReturnRequestAction(
     return formError("This order link is no longer valid.");
   }
 
-  if (!canCustomerRequestReturn(receipt.order)) {
-    return formError(
-      "This order is not eligible for a new return request right now.",
-    );
+  const eligibility = getCustomerReturnRequestEligibility(receipt.order);
+
+  if (!eligibility.eligible) {
+    return formError(eligibility.message);
   }
 
   if (!isSupabaseConfigured()) {
@@ -5220,6 +5660,10 @@ export async function createReturnRequestAction(
     .single();
 
   if (error) {
+    if (isUniqueConstraintError(error)) {
+      return formError("A return request is already open for this order.");
+    }
+
     return formError(error.message);
   }
 
@@ -5298,9 +5742,16 @@ export async function updateReturnRequestStatusAction(
     return formError("Return request not found.");
   }
 
+  if (
+    !canTransitionReturnRequestStatus(returnRequest.status, parsed.data.status)
+  ) {
+    return formError("This return request cannot move to that status.");
+  }
+
+  const now = new Date().toISOString();
   const resolvedAt =
     parsed.data.status === "rejected" || parsed.data.status === "resolved"
-      ? new Date().toISOString()
+      ? returnRequest.resolvedAt || now
       : null;
   const db = getSupabaseAdmin();
   const { error } = await db
@@ -5643,13 +6094,80 @@ export async function createRefundAction(
     return formError("Inventory was already restocked for this order.");
   }
 
+  const giftCardRefundCents = calculateGiftCardRefundAmount({
+    alreadyRefundedGiftCardCents: order.refunds.reduce(
+      (sum, refund) => sum + refund.giftCardCents,
+      0,
+    ),
+    giftCardTenderCents: order.giftCardCents,
+    refundAmountCents: amountCents,
+  });
+  const paymentRefundCents = amountCents - giftCardRefundCents;
   const db = getSupabaseAdmin();
+  let recreditedGiftCard: RecreditedGiftCard | null = null;
   let restockedItems: RestockedInventory[] = [];
+
+  if (giftCardRefundCents > 0) {
+    const { data: redemption, error: redemptionError } = await db
+      .from("gift_card_redemptions")
+      .select("gift_card_id")
+      .eq("store_id", storeId)
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (redemptionError || !redemption) {
+      return formError(
+        redemptionError?.message ||
+          "Gift card redemption is missing for this order.",
+      );
+    }
+
+    const redemptionRow = redemption as { gift_card_id: string };
+    const { data: giftCard, error: giftCardError } = await db
+      .from("gift_cards")
+      .select("id, balance_cents")
+      .eq("id", redemptionRow.gift_card_id)
+      .eq("store_id", storeId)
+      .maybeSingle();
+
+    if (giftCardError || !giftCard) {
+      return formError(
+        giftCardError?.message || "Gift card could not be re-credited.",
+      );
+    }
+
+    const giftCardRow = giftCard as { id: string; balance_cents: number };
+    const balanceAfterCents = giftCardRow.balance_cents + giftCardRefundCents;
+    const { data: updatedGiftCard, error: recreditError } = await db
+      .from("gift_cards")
+      .update({ balance_cents: balanceAfterCents })
+      .eq("id", giftCardRow.id)
+      .eq("store_id", storeId)
+      .eq("balance_cents", giftCardRow.balance_cents)
+      .select("id")
+      .maybeSingle();
+
+    if (recreditError || !updatedGiftCard) {
+      return formError(
+        recreditError?.message ||
+          "Gift card balance changed while refund was being saved.",
+      );
+    }
+
+    recreditedGiftCard = {
+      id: giftCardRow.id,
+      balanceBeforeCents: giftCardRow.balance_cents,
+      balanceAfterCents,
+      amountCents: giftCardRefundCents,
+    };
+  }
 
   if (parsed.data.restockInventory) {
     try {
       restockedItems = await restockReservedInventory(db, storeId, orderId);
     } catch (error) {
+      await rollbackGiftCardRecredit(db, recreditedGiftCard);
+
       return formError(
         error instanceof Error
           ? error.message
@@ -5673,6 +6191,7 @@ export async function createRefundAction(
 
     if (restockMarkError || !updatedOrder) {
       await rollbackRestockedInventory(db, storeId, restockedItems);
+      await rollbackGiftCardRecredit(db, recreditedGiftCard);
 
       return formError(
         restockMarkError?.message ||
@@ -5690,6 +6209,8 @@ export async function createRefundAction(
       order_id: orderId,
       clerk_user_id: user.id,
       amount_cents: amountCents,
+      gift_card_cents: giftCardRefundCents,
+      payment_cents: paymentRefundCents,
       reason: parsed.data.reason,
       note: optionalText(parsed.data.note),
       restocked_inventory: parsed.data.restockInventory,
@@ -5698,6 +6219,8 @@ export async function createRefundAction(
     .single();
 
   if (error) {
+    await rollbackGiftCardRecredit(db, recreditedGiftCard);
+
     if (parsed.data.restockInventory) {
       await rollbackRestockedInventory(db, storeId, restockedItems);
 
@@ -5714,28 +6237,33 @@ export async function createRefundAction(
     return formError(error.message);
   }
 
-  const refundTransaction = await insertPaymentTransaction({
-    db,
-    storeId,
-    orderId,
-    clerkUserId: user.id,
-    type: "refund",
-    paymentMethod: order.paymentMethod,
-    paymentProvider: order.paymentProvider,
-    providerReference: refund.id,
-    amountCents,
-    currency: order.currency,
-    processedAt: new Date().toISOString(),
-    metadata: {
-      source: "refund",
-      orderRefundId: refund.id,
-      reason: parsed.data.reason,
-      restockInventory: parsed.data.restockInventory,
-    },
-  });
+  const refundTransaction =
+    paymentRefundCents > 0
+      ? await insertPaymentTransaction({
+          db,
+          storeId,
+          orderId,
+          clerkUserId: user.id,
+          type: "refund",
+          paymentMethod: order.paymentMethod,
+          paymentProvider: order.paymentProvider,
+          providerReference: refund.id,
+          amountCents: paymentRefundCents,
+          currency: order.currency,
+          processedAt: new Date().toISOString(),
+          metadata: {
+            source: "refund",
+            orderRefundId: refund.id,
+            reason: parsed.data.reason,
+            restockInventory: parsed.data.restockInventory,
+            giftCardRefundCents,
+          },
+        })
+      : { id: null, error: null };
 
   if (refundTransaction.error) {
     await db.from("order_refunds").delete().eq("id", refund.id).eq("store_id", storeId);
+    await rollbackGiftCardRecredit(db, recreditedGiftCard);
 
     if (parsed.data.restockInventory) {
       await rollbackRestockedInventory(db, storeId, restockedItems);
@@ -5765,6 +6293,7 @@ export async function createRefundAction(
   if (paymentStatusError) {
     await deletePaymentTransaction(db, refundTransaction.id);
     await db.from("order_refunds").delete().eq("id", refund.id).eq("store_id", storeId);
+    await rollbackGiftCardRecredit(db, recreditedGiftCard);
 
     if (parsed.data.restockInventory) {
       await rollbackRestockedInventory(db, storeId, restockedItems);
@@ -5793,6 +6322,8 @@ export async function createRefundAction(
     metadata: {
       orderId,
       amountCents,
+      giftCardRefundCents,
+      paymentRefundCents,
       reason: parsed.data.reason,
       restockInventory: parsed.data.restockInventory,
       paymentStatus: nextPaymentStatus,
@@ -5813,6 +6344,8 @@ export async function createRefundAction(
     metadata: {
       orderId,
       amountCents,
+      giftCardRefundCents,
+      paymentRefundCents,
       reason: parsed.data.reason,
       paymentStatus: nextPaymentStatus,
       transactionId: refundTransaction.id,

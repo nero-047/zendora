@@ -126,6 +126,18 @@ alter table public.store_pages add column if not exists seo_description text;
 alter table public.store_pages add column if not exists status text not null default 'draft' check (status in ('draft', 'published'));
 alter table public.store_pages add column if not exists published_at timestamptz;
 
+create table if not exists public.store_navigation_menus (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  location text not null check (location in ('header', 'footer')),
+  links jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (store_id, location)
+);
+
+alter table public.store_navigation_menus add column if not exists links jsonb not null default '[]'::jsonb;
+
 create table if not exists public.shipping_zones (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -244,6 +256,7 @@ create table if not exists public.orders (
   payment_provider text not null default 'manual',
   payment_reference text,
   customer_access_token text,
+  client_order_key text,
   subtotal_cents integer not null default 0 check (subtotal_cents >= 0),
   discount_code text,
   discount_cents integer not null default 0 check (discount_cents >= 0),
@@ -282,6 +295,7 @@ alter table public.orders add column if not exists payment_method text not null 
 alter table public.orders add column if not exists payment_provider text not null default 'manual';
 alter table public.orders add column if not exists payment_reference text;
 alter table public.orders add column if not exists customer_access_token text;
+alter table public.orders add column if not exists client_order_key text;
 alter table public.orders add column if not exists subtotal_cents integer not null default 0 check (subtotal_cents >= 0);
 alter table public.orders add column if not exists discount_code text;
 alter table public.orders add column if not exists discount_cents integer not null default 0 check (discount_cents >= 0);
@@ -489,12 +503,16 @@ create table if not exists public.order_refunds (
   order_id uuid not null references public.orders(id) on delete cascade,
   clerk_user_id text not null references public.profiles(clerk_user_id) on delete restrict,
   amount_cents integer not null check (amount_cents > 0),
+  gift_card_cents integer not null default 0 check (gift_card_cents >= 0),
+  payment_cents integer not null default 0 check (payment_cents >= 0),
   reason text not null default 'other' check (reason in ('customer_request', 'damaged', 'fraud', 'other')),
   note text,
   restocked_inventory boolean not null default false,
   created_at timestamptz not null default now()
 );
 
+alter table public.order_refunds add column if not exists gift_card_cents integer not null default 0 check (gift_card_cents >= 0);
+alter table public.order_refunds add column if not exists payment_cents integer not null default 0 check (payment_cents >= 0);
 alter table public.order_refunds add column if not exists note text;
 alter table public.order_refunds add column if not exists restocked_inventory boolean not null default false;
 
@@ -602,6 +620,11 @@ create trigger store_pages_set_updated_at
 before update on public.store_pages
 for each row execute function public.set_updated_at();
 
+drop trigger if exists store_navigation_menus_set_updated_at on public.store_navigation_menus;
+create trigger store_navigation_menus_set_updated_at
+before update on public.store_navigation_menus
+for each row execute function public.set_updated_at();
+
 drop trigger if exists shipping_zones_set_updated_at on public.shipping_zones;
 create trigger shipping_zones_set_updated_at
 before update on public.shipping_zones
@@ -685,6 +708,8 @@ create index if not exists store_pages_store_id_status_idx
 on public.store_pages(store_id, status);
 create index if not exists store_pages_store_id_slug_idx
 on public.store_pages(store_id, slug);
+create index if not exists store_navigation_menus_store_id_location_idx
+on public.store_navigation_menus(store_id, location);
 create index if not exists shipping_zones_store_id_status_idx on public.shipping_zones(store_id, status);
 create index if not exists products_store_id_status_idx on public.products(store_id, status);
 create index if not exists products_store_id_category_idx on public.products(store_id, category);
@@ -709,6 +734,9 @@ create index if not exists orders_customer_email_idx on public.orders(customer_e
 create unique index if not exists orders_customer_access_token_unique_idx
 on public.orders(customer_access_token)
 where customer_access_token is not null and customer_access_token <> '';
+create unique index if not exists orders_store_client_order_key_unique_idx
+on public.orders(store_id, client_order_key)
+where client_order_key is not null and client_order_key <> '';
 create index if not exists customer_profiles_store_id_updated_at_idx
 on public.customer_profiles(store_id, updated_at desc);
 create index if not exists customer_profiles_email_idx
@@ -756,6 +784,9 @@ create index if not exists order_return_requests_store_id_status_idx
 on public.order_return_requests(store_id, status, created_at desc);
 create index if not exists order_return_requests_order_id_created_at_idx
 on public.order_return_requests(order_id, created_at desc);
+create unique index if not exists order_return_requests_active_order_unique_idx
+on public.order_return_requests(store_id, order_id)
+where status in ('requested', 'approved');
 create index if not exists order_payment_transactions_store_id_created_at_idx
 on public.order_payment_transactions(store_id, created_at desc);
 create index if not exists order_payment_transactions_order_id_created_at_idx
@@ -780,6 +811,7 @@ alter table public.store_audit_events enable row level security;
 alter table public.store_notifications enable row level security;
 alter table public.store_policies enable row level security;
 alter table public.store_pages enable row level security;
+alter table public.store_navigation_menus enable row level security;
 alter table public.shipping_zones enable row level security;
 alter table public.products enable row level security;
 alter table public.collections enable row level security;
@@ -836,6 +868,17 @@ using (
   and exists (
     select 1 from public.stores
     where stores.id = store_pages.store_id
+    and stores.status = 'active'
+  )
+);
+
+drop policy if exists "public active store navigation reads" on public.store_navigation_menus;
+create policy "public active store navigation reads"
+on public.store_navigation_menus for select
+using (
+  exists (
+    select 1 from public.stores
+    where stores.id = store_navigation_menus.store_id
     and stores.status = 'active'
   )
 );
