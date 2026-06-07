@@ -9,6 +9,7 @@ const csvExportPath = "features/commerce/csv-export.ts";
 const dataPath = "features/commerce/data.ts";
 const envPath = "lib/env.ts";
 const nextConfigPath = "next.config.ts";
+const packageEbPath = "scripts/package-eb.mjs";
 const requestGuardsPath = "lib/request-guards.ts";
 const schemaPath = "supabase/schema.sql";
 const smokePath = "scripts/smoke.mjs";
@@ -19,6 +20,7 @@ const csvExportText = readFileSync(csvExportPath, "utf8");
 const dataText = readFileSync(dataPath, "utf8");
 const envText = readFileSync(envPath, "utf8");
 const nextConfigText = readFileSync(nextConfigPath, "utf8");
+const packageEbText = readFileSync(packageEbPath, "utf8");
 const requestGuardsText = readFileSync(requestGuardsPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
 const smokeText = readFileSync(smokePath, "utf8");
@@ -217,6 +219,17 @@ if (
 }
 
 if (
+  !packageEbText.includes("isForbiddenBundleFile") ||
+  !packageEbText.includes('file === ".env"') ||
+  !packageEbText.includes('file.startsWith(".env.")') ||
+  !packageEbText.includes('file.startsWith("dist/")') ||
+  !packageEbText.includes('"git"') ||
+  !packageEbText.includes('"ls-files"')
+) {
+  failures.push(`${packageEbPath} must package tracked source while excluding env files and build artifacts.`);
+}
+
+if (
   !nextConfigText.includes("poweredByHeader: false") ||
   !nextConfigText.includes('"Content-Security-Policy"') ||
   !nextConfigText.includes("default-src 'self'") ||
@@ -403,12 +416,21 @@ const expectedSmokeRoutes = [
   "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
   "/stores/northline-supply/pages/about",
   "/stores/northline-supply/policies/refund",
+  "/dashboard/stores/missing-store",
 ];
 
 for (const route of expectedSmokeRoutes) {
   if (!smokeText.includes(route)) {
     failures.push(`${smokePath} is missing storefront smoke coverage for ${route}.`);
   }
+}
+
+if (
+  !smokeText.includes('label: "missing dashboard store"') ||
+  !smokeText.includes('excludes: ["Northline Supply", "Mira Chen", "Hydra Bottle"]') ||
+  !smokeText.includes('visibleBody.includes("noindex")')
+) {
+  failures.push(`${smokePath} must verify missing dashboard stores return 404 with noindex and without private demo data.`);
 }
 
 if (!sourceText.includes("createCustomerAccessToken()")) {

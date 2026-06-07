@@ -9,9 +9,14 @@ export default function NotFound() {
         <p className="mt-3 text-sm leading-6 text-slate-600">
           This route is not available in the current Zendora workspace.
         </p>
-        <Link className="primary-button mt-5 px-4" href="/">
-          Go home
-        </Link>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Link className="primary-button px-4 text-sm" href="/">
+            Go home
+          </Link>
+          <Link className="secondary-button px-4 text-sm" href="/dashboard">
+            Dashboard
+          </Link>
+        </div>
       </div>
     </main>
   );

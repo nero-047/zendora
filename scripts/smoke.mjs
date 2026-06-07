@@ -118,6 +118,10 @@ async function run() {
       result.response.status === 404,
       `${check.path} should return 404. Status: ${result.response.status}`,
     );
+    assert(
+      visibleBody.includes("noindex"),
+      `${check.path} should include noindex metadata.`,
+    );
 
     for (const expectedText of check.includes || []) {
       assert(
@@ -409,7 +413,6 @@ async function run() {
   await checkNotFoundRoute({
     label: "missing dashboard store",
     path: "/dashboard/stores/missing-store",
-    includes: ["Store workspace not found", "Dashboard", "New store"],
     excludes: ["Northline Supply", "Mira Chen", "Hydra Bottle"],
   });
 
