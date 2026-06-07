@@ -1,12 +1,21 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import ts from "typescript";
 
 const actionsPath = "features/commerce/actions.ts";
+const dataPath = "features/commerce/data.ts";
+const envPath = "lib/env.ts";
 const schemaPath = "supabase/schema.sql";
 const smokePath = "scripts/smoke.mjs";
 const sourceText = readFileSync(actionsPath, "utf8");
+const dataText = readFileSync(dataPath, "utf8");
+const envText = readFileSync(envPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
 const smokeText = readFileSync(smokePath, "utf8");
+const errorBoundaryPaths = [
+  "app/error.tsx",
+  "app/dashboard/error.tsx",
+  "app/stores/[slug]/error.tsx",
+];
 
 const expectedGuards = new Map(
   Object.entries({
@@ -131,11 +140,62 @@ if (!sourceText.includes('from("order_payment_transactions")')) {
 }
 
 if (
+  !envText.includes("isDemoDataEnabled") ||
+  !envText.includes('process.env.NODE_ENV !== "production"') ||
+  !dataText.includes("isDemoDataEnabled()")
+) {
+  failures.push("Demo data fallback must be explicitly gated off in production.");
+}
+
+for (const errorBoundaryPath of errorBoundaryPaths) {
+  if (!existsSync(errorBoundaryPath)) {
+    failures.push(`${errorBoundaryPath} is missing a route-level error boundary.`);
+    continue;
+  }
+
+  const errorBoundaryText = readFileSync(errorBoundaryPath, "utf8");
+
+  if (
+    !errorBoundaryText.includes('"use client"') ||
+    !errorBoundaryText.includes("unstable_retry") ||
+    !errorBoundaryText.includes("console.error(error)")
+  ) {
+    failures.push(`${errorBoundaryPath} must be a client error boundary with retry and logging.`);
+  }
+}
+
+if (
   !schemaText.includes(
     "create table if not exists public.order_payment_transactions",
   )
 ) {
   failures.push(`${schemaPath} is missing order_payment_transactions.`);
+}
+
+if (
+  !schemaText.includes("order_payment_transactions_provider_reference_unique_idx")
+) {
+  failures.push(`${schemaPath} is missing payment provider reference uniqueness.`);
+}
+
+if (
+  !schemaText.includes("discount_codes_value_bounds_check") ||
+  !schemaText.includes("discount_codes_redemption_limit_check") ||
+  !schemaText.includes("discount_codes_date_window_check")
+) {
+  failures.push(`${schemaPath} must enforce discount value, usage, and date-window rules.`);
+}
+
+if (
+  !schemaText.includes("products_price_nonnegative_check") ||
+  !schemaText.includes("products_inventory_nonnegative_check") ||
+  !schemaText.includes("product_variants_price_nonnegative_check") ||
+  !schemaText.includes("product_variants_inventory_nonnegative_check") ||
+  !schemaText.includes("collections_sort_order_nonnegative_check") ||
+  !schemaText.includes("collection_products_sort_order_nonnegative_check") ||
+  !schemaText.includes("product_variants_sort_order_nonnegative_check")
+) {
+  failures.push(`${schemaPath} must enforce catalog price, inventory, and sort-order integrity.`);
 }
 
 if (!schemaText.includes("customer_access_token")) {
@@ -147,6 +207,33 @@ if (
   !schemaText.includes("orders_store_client_order_key_unique_idx")
 ) {
   failures.push(`${schemaPath} is missing checkout idempotency columns or index.`);
+}
+
+if (
+  !schemaText.includes("orders_discount_not_above_subtotal_check") ||
+  !schemaText.includes("orders_total_math_check") ||
+  !schemaText.includes("orders_gift_card_not_above_total_check") ||
+  !schemaText.includes("orders_amount_due_not_above_payable_check")
+) {
+  failures.push(`${schemaPath} must enforce order money integrity constraints.`);
+}
+
+if (
+  !schemaText.includes("orders_paid_timestamp_check") ||
+  !schemaText.includes("orders_fulfilled_timestamp_check") ||
+  !schemaText.includes("orders_cancelled_timestamp_check")
+) {
+  failures.push(`${schemaPath} must enforce order lifecycle timestamp constraints.`);
+}
+
+if (
+  !schemaText.includes("store_policies_published_timestamp_check") ||
+  !schemaText.includes("store_pages_published_timestamp_check") ||
+  !schemaText.includes("product_reviews_moderation_timestamp_check") ||
+  !schemaText.includes("order_fulfillments_lifecycle_timestamp_check") ||
+  !schemaText.includes("order_return_requests_resolution_timestamp_check")
+) {
+  failures.push(`${schemaPath} must enforce publish, moderation, fulfillment, and return lifecycle timestamps.`);
 }
 
 if (!schemaText.includes("create table if not exists public.order_return_requests")) {
@@ -173,8 +260,23 @@ if (!schemaText.includes("create table if not exists public.gift_card_redemption
   failures.push(`${schemaPath} is missing gift_card_redemptions.`);
 }
 
+if (
+  !schemaText.includes("gift_cards_balance_not_above_initial_check") ||
+  !schemaText.includes("gift_card_redemptions_balance_math_check")
+) {
+  failures.push(`${schemaPath} must enforce gift-card balance and redemption math.`);
+}
+
 if (!schemaText.includes("gift_card_cents") || !schemaText.includes("payment_cents")) {
   failures.push(`${schemaPath} is missing refund tender split columns.`);
+}
+
+if (
+  !schemaText.includes("order_refunds_tender_sum_check") ||
+  !schemaText.includes("enforce_order_refund_limit") ||
+  !schemaText.includes("order_refunds_enforce_refund_limit")
+) {
+  failures.push(`${schemaPath} must enforce refund tender sums and cumulative refund limits.`);
 }
 
 if (!schemaText.includes("create table if not exists public.store_pages")) {
@@ -245,12 +347,23 @@ if (!sourceText.includes("getPaymentCaptureAmountCents(")) {
   failures.push("Payment capture mutations must use amount-due capture calculation.");
 }
 
+if (
+  !sourceText.includes("providerReference && isUniqueConstraintError(error)") ||
+  !sourceText.includes("This payment reference is already recorded.")
+) {
+  failures.push("Payment transaction inserts must handle provider reference conflicts cleanly.");
+}
+
 if (!sourceText.includes("amount_due_cents: 0")) {
   failures.push("Payment capture mutations must clear amount_due_cents.");
 }
 
 if (!sourceText.includes("calculateGiftCardRefundAmount(")) {
   failures.push("Refund mutations must split gift-card and payment refunds.");
+}
+
+if (!sourceText.includes("isRefundLimitError(")) {
+  failures.push("Refund mutations must handle database refund-limit conflicts cleanly.");
 }
 
 if (!sourceText.includes("getCustomerReturnRequestEligibility(")) {
@@ -344,6 +457,13 @@ for (const statement of sourceFile.statements) {
     !bodyText.includes("getStoreLaunchReadiness(")
   ) {
     failures.push(`${actionName} must enforce store launch readiness.`);
+  }
+
+  if (
+    actionName === "createRefundAction" &&
+    !bodyText.includes("isRefundLimitError(")
+  ) {
+    failures.push("createRefundAction must handle database refund-limit conflicts cleanly.");
   }
 
   if (expectedAuditEvent) {

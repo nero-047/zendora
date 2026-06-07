@@ -98,6 +98,7 @@ const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
 const permissions = loadTsModule("features/commerce/permissions.ts");
+const runtimeEnv = loadTsModule("lib/env.ts");
 const mockData = loadTsModule("features/commerce/mock-data.ts");
 
 const tests = [
@@ -1311,6 +1312,57 @@ const tests = [
         permissions.canStoreRole(undefined, "manage_orders"),
         "missing role should not manage orders",
       );
+    },
+  ],
+  [
+    "demo data is disabled by default in production",
+    () => {
+      const originalEnv = {
+        ENABLE_DEMO_DATA: process.env.ENABLE_DEMO_DATA,
+        NEXT_PUBLIC_ENABLE_DEMO_DATA: process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA,
+        NODE_ENV: process.env.NODE_ENV,
+      };
+
+      function restoreEnv() {
+        for (const [key, value] of Object.entries(originalEnv)) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+      }
+
+      try {
+        delete process.env.ENABLE_DEMO_DATA;
+        delete process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA;
+        process.env.NODE_ENV = "development";
+        assertTrue(
+          runtimeEnv.isDemoDataEnabled(),
+          "demo data should be enabled by default outside production",
+        );
+
+        process.env.NODE_ENV = "production";
+        assertFalse(
+          runtimeEnv.isDemoDataEnabled(),
+          "demo data should be disabled by default in production",
+        );
+
+        process.env.ENABLE_DEMO_DATA = "true";
+        assertTrue(
+          runtimeEnv.isDemoDataEnabled(),
+          "explicit demo opt-in should override production default",
+        );
+
+        process.env.ENABLE_DEMO_DATA = "false";
+        process.env.NODE_ENV = "development";
+        assertFalse(
+          runtimeEnv.isDemoDataEnabled(),
+          "explicit demo opt-out should override development default",
+        );
+      } finally {
+        restoreEnv();
+      }
     },
   ],
 ];

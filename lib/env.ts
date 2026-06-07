@@ -45,6 +45,21 @@ export function isSupabaseConfigured() {
   return Boolean(getSupabaseConfig());
 }
 
+function isEnabledEnv(value: string | undefined) {
+  return ["1", "true", "yes", "on"].includes(value?.trim().toLowerCase() || "");
+}
+
+export function isDemoDataEnabled() {
+  const explicitValue =
+    process.env.ENABLE_DEMO_DATA || process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA;
+
+  if (explicitValue !== undefined) {
+    return isEnabledEnv(explicitValue);
+  }
+
+  return process.env.NODE_ENV !== "production";
+}
+
 export function getSupabaseProjectRef() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 

@@ -963,6 +963,13 @@ async function insertPaymentTransaction(input: {
     .select("id")
     .single();
 
+  if (error && providerReference && isUniqueConstraintError(error)) {
+    return {
+      id: null,
+      error: new Error("This payment reference is already recorded."),
+    };
+  }
+
   return {
     id: data?.id || null,
     error,
@@ -1093,6 +1100,17 @@ function isUniqueConstraintError(error: { code?: string; message?: string }) {
   return (
     error.code === "23505" ||
     Boolean(error.message?.toLowerCase().includes("duplicate"))
+  );
+}
+
+function isRefundLimitError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "23514" ||
+    Boolean(
+      error.message
+        ?.toLowerCase()
+        .includes("refund exceeds the remaining refundable amount"),
+    )
   );
 }
 
@@ -6232,6 +6250,12 @@ export async function createRefundAction(
           .eq("store_id", storeId)
           .eq("inventory_restocked_at", restockedAt);
       }
+    }
+
+    if (isRefundLimitError(error)) {
+      return formError("Refund exceeds the remaining refundable amount.", {
+        amount: ["Refund exceeds the remaining refundable amount."],
+      });
     }
 
     return formError(error.message);

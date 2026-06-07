@@ -126,6 +126,52 @@ alter table public.store_pages add column if not exists seo_description text;
 alter table public.store_pages add column if not exists status text not null default 'draft' check (status in ('draft', 'published'));
 alter table public.store_pages add column if not exists published_at timestamptz;
 
+update public.store_policies
+set published_at = created_at
+where status = 'published' and published_at is null;
+
+update public.store_policies
+set published_at = null
+where status = 'draft' and published_at is not null;
+
+update public.store_pages
+set published_at = created_at
+where status = 'published' and published_at is null;
+
+update public.store_pages
+set published_at = null
+where status = 'draft' and published_at is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'store_policies_published_timestamp_check'
+  ) then
+    alter table public.store_policies
+    add constraint store_policies_published_timestamp_check
+    check (
+      (status = 'published' and published_at is not null) or
+      (status = 'draft' and published_at is null)
+    );
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'store_pages_published_timestamp_check'
+  ) then
+    alter table public.store_pages
+    add constraint store_pages_published_timestamp_check
+    check (
+      (status = 'published' and published_at is not null) or
+      (status = 'draft' and published_at is null)
+    );
+  end if;
+end
+$$;
+
 create table if not exists public.store_navigation_menus (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -235,6 +281,108 @@ alter table public.product_variants add column if not exists inventory_count int
 alter table public.product_variants add column if not exists status text not null default 'active' check (status in ('active', 'paused'));
 alter table public.product_variants add column if not exists sort_order integer not null default 0;
 
+update public.products
+set price_cents = 0
+where price_cents < 0;
+
+update public.products
+set inventory_count = 0
+where inventory_count < 0;
+
+update public.collections
+set sort_order = 0
+where sort_order < 0;
+
+update public.collection_products
+set sort_order = 0
+where sort_order < 0;
+
+update public.product_variants
+set price_cents = 0
+where price_cents < 0;
+
+update public.product_variants
+set inventory_count = 0
+where inventory_count < 0;
+
+update public.product_variants
+set sort_order = 0
+where sort_order < 0;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'products_price_nonnegative_check'
+  ) then
+    alter table public.products
+    add constraint products_price_nonnegative_check
+    check (price_cents >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'products_inventory_nonnegative_check'
+  ) then
+    alter table public.products
+    add constraint products_inventory_nonnegative_check
+    check (inventory_count >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'collections_sort_order_nonnegative_check'
+  ) then
+    alter table public.collections
+    add constraint collections_sort_order_nonnegative_check
+    check (sort_order >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'collection_products_sort_order_nonnegative_check'
+  ) then
+    alter table public.collection_products
+    add constraint collection_products_sort_order_nonnegative_check
+    check (sort_order >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'product_variants_price_nonnegative_check'
+  ) then
+    alter table public.product_variants
+    add constraint product_variants_price_nonnegative_check
+    check (price_cents >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'product_variants_inventory_nonnegative_check'
+  ) then
+    alter table public.product_variants
+    add constraint product_variants_inventory_nonnegative_check
+    check (inventory_count >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'product_variants_sort_order_nonnegative_check'
+  ) then
+    alter table public.product_variants
+    add constraint product_variants_sort_order_nonnegative_check
+    check (sort_order >= 0);
+  end if;
+end
+$$;
+
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -313,6 +461,117 @@ alter table public.orders add column if not exists tracking_carrier text;
 alter table public.orders add column if not exists tracking_number text;
 alter table public.orders add column if not exists tracking_url text;
 alter table public.orders add column if not exists fulfillment_note text;
+
+update public.orders
+set discount_cents = subtotal_cents
+where discount_cents > subtotal_cents;
+
+update public.orders
+set total_cents = subtotal_cents - discount_cents + shipping_cents + tax_cents
+where total_cents <> subtotal_cents - discount_cents + shipping_cents + tax_cents;
+
+update public.orders
+set gift_card_cents = total_cents
+where gift_card_cents > total_cents;
+
+update public.orders
+set amount_due_cents = greatest(0, total_cents - gift_card_cents)
+where amount_due_cents > greatest(0, total_cents - gift_card_cents);
+
+update public.orders
+set paid_at = created_at
+where paid_at is null
+  and (
+    status in ('paid', 'fulfilled') or
+    payment_status in ('paid', 'partially_refunded', 'refunded')
+  );
+
+update public.orders
+set fulfilled_at = coalesce(paid_at, created_at)
+where fulfilled_at is null and status = 'fulfilled';
+
+update public.orders
+set cancelled_at = created_at
+where cancelled_at is null and status = 'cancelled';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_discount_not_above_subtotal_check'
+  ) then
+    alter table public.orders
+    add constraint orders_discount_not_above_subtotal_check
+    check (discount_cents <= subtotal_cents);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_total_math_check'
+  ) then
+    alter table public.orders
+    add constraint orders_total_math_check
+    check (total_cents = subtotal_cents - discount_cents + shipping_cents + tax_cents);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_gift_card_not_above_total_check'
+  ) then
+    alter table public.orders
+    add constraint orders_gift_card_not_above_total_check
+    check (gift_card_cents <= total_cents);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_amount_due_not_above_payable_check'
+  ) then
+    alter table public.orders
+    add constraint orders_amount_due_not_above_payable_check
+    check (amount_due_cents <= greatest(0, total_cents - gift_card_cents));
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_paid_timestamp_check'
+  ) then
+    alter table public.orders
+    add constraint orders_paid_timestamp_check
+    check (
+      not (
+        status in ('paid', 'fulfilled') or
+        payment_status in ('paid', 'partially_refunded', 'refunded')
+      ) or paid_at is not null
+    );
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_fulfilled_timestamp_check'
+  ) then
+    alter table public.orders
+    add constraint orders_fulfilled_timestamp_check
+    check (status <> 'fulfilled' or fulfilled_at is not null);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_cancelled_timestamp_check'
+  ) then
+    alter table public.orders
+    add constraint orders_cancelled_timestamp_check
+    check (status <> 'cancelled' or cancelled_at is not null);
+  end if;
+end
+$$;
 
 create table if not exists public.customer_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -398,6 +657,58 @@ alter table public.product_reviews add column if not exists reviewed_at timestam
 alter table public.product_reviews add column if not exists approved_at timestamptz;
 alter table public.product_reviews add column if not exists rejected_at timestamptz;
 
+update public.product_reviews
+set approved_at = coalesce(approved_at, reviewed_at, created_at)
+where status = 'approved' and approved_at is null;
+
+update public.product_reviews
+set rejected_at = coalesce(rejected_at, reviewed_at, created_at)
+where status = 'rejected' and rejected_at is null;
+
+update public.product_reviews
+set rejected_at = null
+where status = 'approved' and rejected_at is not null;
+
+update public.product_reviews
+set approved_at = null
+where status = 'rejected' and approved_at is not null;
+
+update public.product_reviews
+set approved_at = null,
+    rejected_at = null
+where status = 'pending'
+  and (approved_at is not null or rejected_at is not null);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'product_reviews_moderation_timestamp_check'
+  ) then
+    alter table public.product_reviews
+    add constraint product_reviews_moderation_timestamp_check
+    check (
+      (
+        status = 'pending' and
+        approved_at is null and
+        rejected_at is null
+      ) or
+      (
+        status = 'approved' and
+        approved_at is not null and
+        rejected_at is null
+      ) or
+      (
+        status = 'rejected' and
+        rejected_at is not null and
+        approved_at is null
+      )
+    );
+  end if;
+end
+$$;
+
 create table if not exists public.gift_cards (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -424,6 +735,24 @@ alter table public.gift_cards add column if not exists note text;
 alter table public.gift_cards add column if not exists expires_at timestamptz;
 alter table public.gift_cards add column if not exists created_by_user_id text references public.profiles(clerk_user_id) on delete set null;
 
+update public.gift_cards
+set initial_balance_cents = balance_cents
+where balance_cents > initial_balance_cents;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'gift_cards_balance_not_above_initial_check'
+  ) then
+    alter table public.gift_cards
+    add constraint gift_cards_balance_not_above_initial_check
+    check (balance_cents <= initial_balance_cents);
+  end if;
+end
+$$;
+
 create table if not exists public.discount_codes (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -440,6 +769,55 @@ create table if not exists public.discount_codes (
   updated_at timestamptz not null default now(),
   unique (store_id, code)
 );
+
+update public.discount_codes
+set value = 100
+where type = 'percent' and value > 100;
+
+update public.discount_codes
+set usage_limit = redemption_count
+where usage_limit is not null and redemption_count > usage_limit;
+
+update public.discount_codes
+set ends_at = null
+where starts_at is not null and ends_at is not null and ends_at <= starts_at;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'discount_codes_value_bounds_check'
+  ) then
+    alter table public.discount_codes
+    add constraint discount_codes_value_bounds_check
+    check (
+      (type = 'percent' and value between 1 and 100) or
+      (type = 'fixed' and value > 0)
+    );
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'discount_codes_redemption_limit_check'
+  ) then
+    alter table public.discount_codes
+    add constraint discount_codes_redemption_limit_check
+    check (usage_limit is null or redemption_count <= usage_limit);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'discount_codes_date_window_check'
+  ) then
+    alter table public.discount_codes
+    add constraint discount_codes_date_window_check
+    check (starts_at is null or ends_at is null or ends_at > starts_at);
+  end if;
+end
+$$;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -485,6 +863,81 @@ alter table public.order_fulfillments add column if not exists shipped_at timest
 alter table public.order_fulfillments add column if not exists delivered_at timestamptz;
 alter table public.order_fulfillments add column if not exists cancelled_at timestamptz;
 
+update public.order_fulfillments
+set shipped_at = coalesce(shipped_at, created_at)
+where status in ('in_transit', 'delivered') and shipped_at is null;
+
+update public.order_fulfillments
+set delivered_at = coalesce(delivered_at, shipped_at, created_at)
+where status = 'delivered' and delivered_at is null;
+
+update public.order_fulfillments
+set cancelled_at = coalesce(cancelled_at, created_at)
+where status = 'cancelled' and cancelled_at is null;
+
+update public.order_fulfillments
+set shipped_at = null,
+    delivered_at = null,
+    cancelled_at = null
+where status = 'created'
+  and (
+    shipped_at is not null or
+    delivered_at is not null or
+    cancelled_at is not null
+  );
+
+update public.order_fulfillments
+set delivered_at = null,
+    cancelled_at = null
+where status = 'in_transit'
+  and (delivered_at is not null or cancelled_at is not null);
+
+update public.order_fulfillments
+set cancelled_at = null
+where status = 'delivered' and cancelled_at is not null;
+
+update public.order_fulfillments
+set delivered_at = null
+where status = 'cancelled' and delivered_at is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'order_fulfillments_lifecycle_timestamp_check'
+  ) then
+    alter table public.order_fulfillments
+    add constraint order_fulfillments_lifecycle_timestamp_check
+    check (
+      (
+        status = 'created' and
+        shipped_at is null and
+        delivered_at is null and
+        cancelled_at is null
+      ) or
+      (
+        status = 'in_transit' and
+        shipped_at is not null and
+        delivered_at is null and
+        cancelled_at is null
+      ) or
+      (
+        status = 'delivered' and
+        shipped_at is not null and
+        delivered_at is not null and
+        cancelled_at is null
+      ) or
+      (
+        status = 'cancelled' and
+        delivered_at is null and
+        cancelled_at is not null
+      )
+    );
+  end if;
+end
+$$;
+
 create table if not exists public.gift_card_redemptions (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -496,6 +949,25 @@ create table if not exists public.gift_card_redemptions (
   created_at timestamptz not null default now(),
   unique (gift_card_id, order_id)
 );
+
+update public.gift_card_redemptions
+set balance_after_cents = balance_before_cents - amount_cents
+where balance_before_cents >= amount_cents
+  and balance_after_cents <> balance_before_cents - amount_cents;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'gift_card_redemptions_balance_math_check'
+  ) then
+    alter table public.gift_card_redemptions
+    add constraint gift_card_redemptions_balance_math_check
+    check (balance_before_cents - amount_cents = balance_after_cents);
+  end if;
+end
+$$;
 
 create table if not exists public.order_refunds (
   id uuid primary key default gen_random_uuid(),
@@ -515,6 +987,25 @@ alter table public.order_refunds add column if not exists gift_card_cents intege
 alter table public.order_refunds add column if not exists payment_cents integer not null default 0 check (payment_cents >= 0);
 alter table public.order_refunds add column if not exists note text;
 alter table public.order_refunds add column if not exists restocked_inventory boolean not null default false;
+
+update public.order_refunds
+set payment_cents = amount_cents - gift_card_cents
+where gift_card_cents + payment_cents <> amount_cents
+  and gift_card_cents <= amount_cents;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'order_refunds_tender_sum_check'
+  ) then
+    alter table public.order_refunds
+    add constraint order_refunds_tender_sum_check
+    check (gift_card_cents + payment_cents = amount_cents);
+  end if;
+end
+$$;
 
 create table if not exists public.order_return_requests (
   id uuid primary key default gen_random_uuid(),
@@ -538,6 +1029,37 @@ alter table public.order_return_requests add column if not exists note text;
 alter table public.order_return_requests add column if not exists merchant_note text;
 alter table public.order_return_requests add column if not exists requested_at timestamptz not null default now();
 alter table public.order_return_requests add column if not exists resolved_at timestamptz;
+
+update public.order_return_requests
+set resolved_at = coalesce(resolved_at, created_at)
+where status in ('rejected', 'resolved') and resolved_at is null;
+
+update public.order_return_requests
+set resolved_at = null
+where status in ('requested', 'approved') and resolved_at is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'order_return_requests_resolution_timestamp_check'
+  ) then
+    alter table public.order_return_requests
+    add constraint order_return_requests_resolution_timestamp_check
+    check (
+      (
+        status in ('requested', 'approved') and
+        resolved_at is null
+      ) or
+      (
+        status in ('rejected', 'resolved') and
+        resolved_at is not null
+      )
+    );
+  end if;
+end
+$$;
 
 create table if not exists public.order_payment_transactions (
   id uuid primary key default gen_random_uuid(),
@@ -586,6 +1108,41 @@ language plpgsql
 as $$
 begin
   new.updated_at = now();
+  return new;
+end;
+$$;
+
+create or replace function public.enforce_order_refund_limit()
+returns trigger
+language plpgsql
+as $$
+declare
+  existing_refund_cents integer;
+  order_total_cents integer;
+begin
+  select total_cents
+  into order_total_cents
+  from public.orders
+  where id = new.order_id and store_id = new.store_id
+  for update;
+
+  if order_total_cents is null then
+    raise exception 'Refund order not found.'
+      using errcode = '23503';
+  end if;
+
+  select coalesce(sum(amount_cents), 0)
+  into existing_refund_cents
+  from public.order_refunds
+  where order_id = new.order_id
+    and store_id = new.store_id
+    and id <> new.id;
+
+  if existing_refund_cents + new.amount_cents > order_total_cents then
+    raise exception 'Refund exceeds the remaining refundable amount.'
+      using errcode = '23514';
+  end if;
+
   return new;
 end;
 $$;
@@ -649,6 +1206,11 @@ drop trigger if exists orders_set_updated_at on public.orders;
 create trigger orders_set_updated_at
 before update on public.orders
 for each row execute function public.set_updated_at();
+
+drop trigger if exists order_refunds_enforce_refund_limit on public.order_refunds;
+create trigger order_refunds_enforce_refund_limit
+before insert or update on public.order_refunds
+for each row execute function public.enforce_order_refund_limit();
 
 drop trigger if exists customer_profiles_set_updated_at on public.customer_profiles;
 create trigger customer_profiles_set_updated_at

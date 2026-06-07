@@ -83,6 +83,7 @@ import type {
 } from "@/features/commerce/types";
 import {
   getSupabaseConfig,
+  isDemoDataEnabled,
   isSupabaseConfigured,
   isSupabasePublicConfigured,
 } from "@/lib/env";
@@ -1977,6 +1978,10 @@ function getCatalogErrorMessage(error: unknown) {
 }
 
 function shouldUseDemoCatalogFallback(error: unknown) {
+  if (!isDemoDataEnabled()) {
+    return false;
+  }
+
   const message = getCatalogErrorMessage(error).toLowerCase();
 
   return (
@@ -2130,6 +2135,10 @@ export async function markProfileDeleted(clerkUserId: string) {
 
 export async function listStoresForUser(userId: string): Promise<Store[]> {
   if (!isSupabaseConfigured()) {
+    if (!isDemoDataEnabled()) {
+      return [];
+    }
+
     return mockStores.map((store) => mapDemoStoreForUser(store, userId));
   }
 
@@ -2249,6 +2258,10 @@ export async function getStoreWorkspace(
   storeId: string,
 ): Promise<StoreWorkspace | null> {
   if (!isSupabaseConfigured()) {
+    if (!isDemoDataEnabled()) {
+      return null;
+    }
+
     const store = mockStores.find(
       (item) => item.id === storeId || item.slug === storeId,
     );
@@ -2404,7 +2417,9 @@ export async function getStoreWorkspace(
 export async function getPublicStorefront(
   slug: string,
 ): Promise<StoreWorkspace | null> {
-  const demoStorefront = getMockPublicStorefront(slug);
+  const demoStorefront = isDemoDataEnabled()
+    ? getMockPublicStorefront(slug)
+    : null;
 
   if (isSupabaseConfigured()) {
     try {
@@ -2460,6 +2475,10 @@ export async function getPublicAbandonedCheckout(input: {
   }
 
   if (!isSupabaseConfigured()) {
+    if (!isDemoDataEnabled()) {
+      return null;
+    }
+
     const storefront = getMockPublicStorefront(input.slug);
 
     if (!storefront) {
@@ -2540,6 +2559,10 @@ export async function getPublicOrderReceipt(input: {
   }
 
   if (!isSupabaseConfigured()) {
+    if (!isDemoDataEnabled()) {
+      return null;
+    }
+
     const store = mockStores.find(
       (item) => item.slug === input.slug && item.status === "active",
     );
