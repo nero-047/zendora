@@ -4,23 +4,33 @@ import ts from "typescript";
 const actionsPath = "features/commerce/actions.ts";
 const abandonedCheckoutRoutePath =
   "app/api/stores/[slug]/abandoned-checkouts/route.ts";
+const buildfilePath = "Buildfile";
 const clerkWebhookRoutePath = "app/api/webhooks/clerk/route.ts";
 const csvExportPath = "features/commerce/csv-export.ts";
 const dataPath = "features/commerce/data.ts";
 const envPath = "lib/env.ts";
 const nextConfigPath = "next.config.ts";
 const packageEbPath = "scripts/package-eb.mjs";
+const packageJsonPath = "package.json";
+const prebuildHookPath = ".platform/hooks/prebuild/00_add_swap.sh";
+const predeployHookPath = ".platform/hooks/predeploy/10_next_build.sh";
+const procfilePath = "Procfile";
 const requestGuardsPath = "lib/request-guards.ts";
 const schemaPath = "supabase/schema.sql";
 const smokePath = "scripts/smoke.mjs";
 const sourceText = readFileSync(actionsPath, "utf8");
 const abandonedCheckoutRouteText = readFileSync(abandonedCheckoutRoutePath, "utf8");
+const buildfileText = readFileSync(buildfilePath, "utf8");
 const clerkWebhookRouteText = readFileSync(clerkWebhookRoutePath, "utf8");
 const csvExportText = readFileSync(csvExportPath, "utf8");
 const dataText = readFileSync(dataPath, "utf8");
 const envText = readFileSync(envPath, "utf8");
 const nextConfigText = readFileSync(nextConfigPath, "utf8");
 const packageEbText = readFileSync(packageEbPath, "utf8");
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+const prebuildHookText = readFileSync(prebuildHookPath, "utf8");
+const predeployHookText = readFileSync(predeployHookPath, "utf8");
+const procfileText = readFileSync(procfilePath, "utf8");
 const requestGuardsText = readFileSync(requestGuardsPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
 const smokeText = readFileSync(smokePath, "utf8");
@@ -220,13 +230,43 @@ if (
 
 if (
   !packageEbText.includes("isForbiddenBundleFile") ||
-  !packageEbText.includes('file === ".env"') ||
-  !packageEbText.includes('file.startsWith(".env.")') ||
-  !packageEbText.includes('file.startsWith("dist/")') ||
+  !packageEbText.includes("requiredExecutableFiles") ||
+  !packageEbText.includes("statSync") ||
+  !packageEbText.includes("0o111") ||
+  !packageEbText.includes('new Set([".env"])') ||
+  !packageEbText.includes('".env."') ||
+  !packageEbText.includes('".next/"') ||
+  !packageEbText.includes('".vercel/"') ||
+  !packageEbText.includes('"build/"') ||
+  !packageEbText.includes('"coverage/"') ||
+  !packageEbText.includes('"dist/"') ||
+  !packageEbText.includes('"node_modules/"') ||
+  !packageEbText.includes('"out/"') ||
   !packageEbText.includes('"git"') ||
-  !packageEbText.includes('"ls-files"')
+  !packageEbText.includes('"ls-files"') ||
+  !packageEbText.includes('"unzip"') ||
+  !packageEbText.includes('["-Z1", outputPath]') ||
+  !packageEbText.includes("missingBundledRequiredFiles") ||
+  !packageEbText.includes("bundledForbiddenFiles")
 ) {
   failures.push(`${packageEbPath} must package tracked source while excluding env files and build artifacts.`);
+}
+
+if (
+  buildfileText.trim() !== "build: npm run build" ||
+  procfileText.trim() !== "web: npm run start:eb" ||
+  packageJson.scripts?.["start:eb"] !== "next start -p ${PORT:-8080}" ||
+  !predeployHookText.includes("/var/app/staging") ||
+  !predeployHookText.includes("NODE_ENV=production") ||
+  !predeployHookText.includes("NEXT_TELEMETRY_DISABLED=1") ||
+  !predeployHookText.includes("NODE_OPTIONS") ||
+  !predeployHookText.includes("--max-old-space-size") ||
+  !predeployHookText.includes("npm run build") ||
+  !prebuildHookText.includes("swapon") ||
+  !prebuildHookText.includes("mkswap") ||
+  !prebuildHookText.includes("chmod 600")
+) {
+  failures.push("EB build/startup files must keep production build, port binding, and swap safeguards configured.");
 }
 
 if (
@@ -416,6 +456,9 @@ const expectedSmokeRoutes = [
   "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
   "/stores/northline-supply/pages/about",
   "/stores/northline-supply/policies/refund",
+  "/dashboard/stores/demo-store-outdoor/analytics/export",
+  "/dashboard/stores/demo-store-outdoor/activity/export?priority=critical&q=tracking",
+  "/dashboard/stores/demo-store-outdoor/checkouts/export?q=bottle&status=open",
   "/dashboard/stores/missing-store",
 ];
 

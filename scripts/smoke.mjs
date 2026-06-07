@@ -443,7 +443,13 @@ async function run() {
     {
       label: "admin analytics content",
       path: "/dashboard/stores/demo-store-outdoor/analytics",
-      includes: ["Analytics", "Orders", "Customer concentration", "Refund"],
+      includes: [
+        "Analytics",
+        "Orders",
+        "Customer concentration",
+        "Refund",
+        "Export CSV",
+      ],
     },
     {
       label: "admin activity outbox content",
@@ -457,6 +463,7 @@ async function run() {
         "Ari Patel",
         "Tracking details could not be delivered.",
         "Fulfillment",
+        "Export CSV",
       ],
     },
     {
@@ -470,6 +477,7 @@ async function run() {
         "Field Carry Pack",
         "Hydra Bottle",
         "Open",
+        "Export CSV",
         "Send",
         "Dismiss",
       ],
@@ -617,6 +625,36 @@ async function run() {
   }
 
   const dashboardCsvChecks = [
+    {
+      label: "admin analytics csv export",
+      path: "/dashboard/stores/demo-store-outdoor/analytics/export",
+      includes: [
+        "section,metric,label,value,count,detail,date,href",
+        "kpi,net_sales,Net sales",
+        "daily_sales,daily_net_sales",
+        "product_performance,top_product",
+      ],
+    },
+    {
+      label: "admin activity csv export",
+      path: "/dashboard/stores/demo-store-outdoor/activity/export?priority=critical&q=tracking",
+      includes: [
+        "activity_id,kind,priority,title",
+        "notification:",
+        "Failed Fulfillment update",
+        "Tracking details could not be delivered.",
+      ],
+    },
+    {
+      label: "admin checkouts csv export",
+      path: "/dashboard/stores/demo-store-outdoor/checkouts/export?q=bottle&status=open",
+      includes: [
+        "checkout_id,customer_name,customer_email",
+        "demo-abandoned-checkout-1004",
+        "Nina Brooks",
+        "Hydra Bottle",
+      ],
+    },
     {
       label: "admin orders csv export",
       path: "/dashboard/stores/demo-store-outdoor/orders/export?q=mira",

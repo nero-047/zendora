@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Download,
   Filter,
   MailWarning,
   Search,
@@ -30,6 +31,7 @@ import {
 } from "@/features/commerce/activity-center";
 import { getStoreWorkspace } from "@/features/commerce/data";
 import {
+  buildDashboardExportHref,
   buildDashboardPageHref,
   dashboardPageSizeOptions,
   paginateItems,
@@ -86,6 +88,10 @@ export default async function ActivityPage({
     pageSize: selectedPageSize,
   });
   const activityBasePath = `/dashboard/stores/${store.id}/activity`;
+  const activityExportHref = buildDashboardExportHref({
+    basePath: `${activityBasePath}/export`,
+    params: query,
+  });
   const criticalCount = activityItems.filter(
     (item) => item.priority === "critical",
   ).length;
@@ -140,9 +146,18 @@ export default async function ActivityPage({
               across this store.
             </p>
           </div>
-          <span className="status-pill">
-            {filteredItems.length} matching events
-          </span>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={activityExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
+            <span className="status-pill">
+              {filteredItems.length} matching events
+            </span>
+          </div>
         </div>
       </section>
 

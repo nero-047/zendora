@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   BarChart3,
   CircleDollarSign,
+  Download,
   PackageSearch,
   ReceiptText,
   Repeat,
@@ -50,6 +51,7 @@ export default async function StoreAnalyticsPage({
   }
 
   const { store, orders, products, abandonedCheckouts } = workspace;
+  const analyticsExportHref = `/dashboard/stores/${store.id}/analytics/export`;
   const analytics = getStoreAnalytics({
     orders,
     products,
@@ -162,6 +164,13 @@ export default async function StoreAnalyticsPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={analyticsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
             <Link
               className="secondary-button px-4 text-sm"
               href={`/dashboard/stores/${store.id}/orders`}

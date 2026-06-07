@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   Filter,
   Mail,
@@ -34,6 +35,7 @@ import {
 } from "@/features/commerce/actions";
 import { getStoreWorkspace } from "@/features/commerce/data";
 import {
+  buildDashboardExportHref,
   buildDashboardPageHref,
   dashboardPageSizeOptions,
   paginateItems,
@@ -82,6 +84,10 @@ export default async function AbandonedCheckoutsPage({
     pageSize: selectedPageSize,
   });
   const checkoutsBasePath = `/dashboard/stores/${store.id}/checkouts`;
+  const checkoutsExportHref = buildDashboardExportHref({
+    basePath: `${checkoutsBasePath}/export`,
+    params: query,
+  });
   const stats = getAbandonedCheckoutStats(abandonedCheckouts);
   const metricCards = [
     {
@@ -131,10 +137,19 @@ export default async function AbandonedCheckoutsPage({
               checkouts from one merchant workspace.
             </p>
           </div>
-          <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
-            <ShoppingBag aria-hidden="true" size={17} />
-            Storefront
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={checkoutsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
+            <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
+              <ShoppingBag aria-hidden="true" size={17} />
+              Storefront
+            </Link>
+          </div>
         </div>
       </section>
 

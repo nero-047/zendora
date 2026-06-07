@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -17,9 +17,27 @@ const requiredFiles = [
   "package-lock.json",
   "package.json",
 ];
+const requiredExecutableFiles = [
+  ".platform/hooks/prebuild/00_add_swap.sh",
+  ".platform/hooks/predeploy/10_next_build.sh",
+];
+const forbiddenBundleFiles = new Set([".env"]);
+const forbiddenBundlePrefixes = [
+  ".env.",
+  ".next/",
+  ".vercel/",
+  "build/",
+  "coverage/",
+  "dist/",
+  "node_modules/",
+  "out/",
+];
 
 function isForbiddenBundleFile(file) {
-  return file === ".env" || file.startsWith(".env.") || file.startsWith("dist/");
+  return (
+    forbiddenBundleFiles.has(file) ||
+    forbiddenBundlePrefixes.some((prefix) => file.startsWith(prefix))
+  );
 }
 
 if (!existsSync(distDir)) {
@@ -66,6 +84,22 @@ if (missingRequiredFiles.length > 0) {
   process.exit(1);
 }
 
+const nonExecutableRequiredFiles = requiredExecutableFiles.filter((file) => {
+  if (!files.includes(file)) {
+    return true;
+  }
+
+  return (statSync(file).mode & 0o111) === 0;
+});
+
+if (nonExecutableRequiredFiles.length > 0) {
+  console.error("EB source bundle has required hook files that are missing or not executable:");
+  for (const file of nonExecutableRequiredFiles) {
+    console.error(`- ${file}`);
+  }
+  process.exit(1);
+}
+
 const forbiddenFiles = files.filter(isForbiddenBundleFile);
 
 if (forbiddenFiles.length > 0) {
@@ -90,6 +124,49 @@ if (result.error) {
 
 if (result.status !== 0) {
   process.exit(result.status ?? 1);
+}
+
+const zipListing = spawnSync("unzip", ["-Z1", outputPath], {
+  encoding: "utf8",
+});
+
+if (zipListing.error) {
+  console.error("Could not inspect EB source bundle. Is `unzip` installed?");
+  console.error(zipListing.error.message);
+  process.exit(1);
+}
+
+if (zipListing.status !== 0) {
+  process.exit(zipListing.status ?? 1);
+}
+
+const bundledForbiddenFiles = zipListing.stdout
+  .split("\n")
+  .filter(Boolean)
+  .filter(isForbiddenBundleFile);
+const bundledFiles = new Set(
+  zipListing.stdout
+    .split("\n")
+    .filter(Boolean),
+);
+const missingBundledRequiredFiles = requiredFiles.filter(
+  (file) => !bundledFiles.has(file),
+);
+
+if (missingBundledRequiredFiles.length > 0) {
+  console.error("Created EB source bundle is missing required files:");
+  for (const file of missingBundledRequiredFiles) {
+    console.error(`- ${file}`);
+  }
+  process.exit(1);
+}
+
+if (bundledForbiddenFiles.length > 0) {
+  console.error("Created EB source bundle contains forbidden files:");
+  for (const file of bundledForbiddenFiles) {
+    console.error(`- ${file}`);
+  }
+  process.exit(1);
 }
 
 console.log(`Created ${outputPath}`);
