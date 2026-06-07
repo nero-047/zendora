@@ -6,6 +6,11 @@ import { ArrowLeft, Layers3, ShoppingBag } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
 import { getPublicStorefront } from "@/features/commerce/data";
+import {
+  getStoreSeoDescription,
+  getStoreSeoTitle,
+  getStoreSocialImages,
+} from "@/features/commerce/seo";
 import type { Product } from "@/features/commerce/types";
 
 type CollectionPageProps = {
@@ -54,10 +59,12 @@ export async function generateMetadata({
   }
 
   return {
-    title: `${data.collection.title} | ${data.store.name}`,
-    description: data.collection.description || data.store.description,
+    title: getStoreSeoTitle(data.store, data.collection.title),
+    description: data.collection.description || getStoreSeoDescription(data.store),
     openGraph: {
-      images: data.collection.imageUrl ? [data.collection.imageUrl] : undefined,
+      title: getStoreSeoTitle(data.store, data.collection.title),
+      description: data.collection.description || getStoreSeoDescription(data.store),
+      images: getStoreSocialImages(data.store, data.collection.imageUrl),
     },
   };
 }

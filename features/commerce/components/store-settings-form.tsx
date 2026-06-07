@@ -102,6 +102,64 @@ export function StoreSettingsForm({ store }: { store: Store }) {
         ) : null}
       </label>
 
+      <section className="grid gap-4 rounded-[8px] border border-slate-200 bg-white/58 p-4">
+        <div>
+          <h3 className="font-semibold text-slate-950">Search and sharing</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Control storefront titles, descriptions, and social previews.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="grid gap-2">
+            <span className="label">SEO title</span>
+            <input
+              className="field"
+              defaultValue={store.seoTitle || ""}
+              maxLength={70}
+              name="seoTitle"
+              placeholder={store.name}
+            />
+            {state.errors?.seoTitle ? (
+              <span className="text-xs font-medium text-red-600">
+                {state.errors.seoTitle[0]}
+              </span>
+            ) : null}
+          </label>
+
+          <label className="grid gap-2">
+            <span className="label">Social image URL</span>
+            <input
+              className="field"
+              defaultValue={store.socialImageUrl || ""}
+              name="socialImageUrl"
+              placeholder="https://..."
+              type="url"
+            />
+            {state.errors?.socialImageUrl ? (
+              <span className="text-xs font-medium text-red-600">
+                {state.errors.socialImageUrl[0]}
+              </span>
+            ) : null}
+          </label>
+        </div>
+
+        <label className="grid gap-2">
+          <span className="label">SEO description</span>
+          <textarea
+            className="field min-h-20 resize-none"
+            defaultValue={store.seoDescription || ""}
+            maxLength={180}
+            name="seoDescription"
+            placeholder={store.description || "Describe this storefront for search results."}
+          />
+          {state.errors?.seoDescription ? (
+            <span className="text-xs font-medium text-red-600">
+              {state.errors.seoDescription[0]}
+            </span>
+          ) : null}
+        </label>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-3">
         <label className="grid gap-2">
           <span className="label">Shipping rate</span>

@@ -1,13 +1,17 @@
 import type {
+  AbandonedCheckout,
   Discount,
   InventoryAdjustment,
   Order,
+  OrderPaymentTransaction,
   OrderRefund,
+  OrderReturnRequest,
   Product,
   ProductCollection,
   ProductVariant,
   ShippingZone,
   Store,
+  StorePolicy,
 } from "@/features/commerce/types";
 
 export const mockStores: Store[] = [
@@ -20,6 +24,11 @@ export const mockStores: Store[] = [
       "A calm, focused storefront for founders selling premium everyday goods.",
     currency: "USD",
     themeColor: "#0f766e",
+    seoTitle: "Northline Supply | Premium everyday goods",
+    seoDescription:
+      "Shop premium everyday carry, hydration, and travel essentials from Northline Supply.",
+    socialImageUrl:
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1200&q=80",
     status: "active",
     createdAt: "2026-04-12T10:00:00.000Z",
     productCount: 4,
@@ -39,6 +48,10 @@ export const mockStores: Store[] = [
       "A draft store for testing multiple brands under the same merchant account.",
     currency: "USD",
     themeColor: "#0284c7",
+    seoTitle: "Aster Studio",
+    seoDescription: "A draft Zendora storefront for testing multi-brand commerce.",
+    socialImageUrl:
+      "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80",
     status: "draft",
     createdAt: "2026-05-08T09:30:00.000Z",
     productCount: 2,
@@ -81,6 +94,57 @@ export const mockShippingZones: ShippingZone[] = [
     freeShippingThresholdCents: 10000,
     status: "active",
     createdAt: "2026-05-08T10:00:00.000Z",
+  },
+];
+
+export const mockStorePolicies: StorePolicy[] = [
+  {
+    id: "demo-policy-refund",
+    storeId: "demo-store-outdoor",
+    type: "refund",
+    title: "Refund policy",
+    body:
+      "We accept returns for unused items within 14 days of delivery. Items must be in original condition with tags and packaging.\n\nApproved refunds are issued to the original payment method after inspection. Shipping fees, duties, and taxes may be excluded unless the order arrived damaged or incorrect.",
+    status: "published",
+    publishedAt: "2026-04-13T12:00:00.000Z",
+    createdAt: "2026-04-13T12:00:00.000Z",
+    updatedAt: "2026-04-13T12:00:00.000Z",
+  },
+  {
+    id: "demo-policy-shipping",
+    storeId: "demo-store-outdoor",
+    type: "shipping",
+    title: "Shipping policy",
+    body:
+      "Orders usually leave our warehouse within 2 business days. Delivery timelines depend on the shipping destination and carrier availability.\n\nTracking details are shared when fulfillment is updated. International shipments may require local duties or import taxes paid by the customer.",
+    status: "published",
+    publishedAt: "2026-04-13T12:05:00.000Z",
+    createdAt: "2026-04-13T12:05:00.000Z",
+    updatedAt: "2026-04-13T12:05:00.000Z",
+  },
+  {
+    id: "demo-policy-privacy",
+    storeId: "demo-store-outdoor",
+    type: "privacy",
+    title: "Privacy policy",
+    body:
+      "We collect customer information needed to process orders, provide support, prevent fraud, and improve the storefront experience.\n\nCustomer data is handled with care and is shared only with service providers needed for commerce operations such as payments, fulfillment, storage, and support.",
+    status: "published",
+    publishedAt: "2026-04-13T12:10:00.000Z",
+    createdAt: "2026-04-13T12:10:00.000Z",
+    updatedAt: "2026-04-13T12:10:00.000Z",
+  },
+  {
+    id: "demo-policy-terms",
+    storeId: "demo-store-outdoor",
+    type: "terms",
+    title: "Terms of service",
+    body:
+      "By placing an order, customers agree that product availability, prices, and delivery timelines may change before checkout is completed.\n\nWe reserve the right to cancel suspicious orders, correct errors, and update these terms as the store evolves.",
+    status: "published",
+    publishedAt: "2026-04-13T12:15:00.000Z",
+    createdAt: "2026-04-13T12:15:00.000Z",
+    updatedAt: "2026-04-13T12:15:00.000Z",
   },
 ];
 
@@ -375,6 +439,7 @@ export const mockOrders: Order[] = [
     paymentMethod: "card",
     paymentProvider: "Manual card",
     paymentReference: "CARD-1001",
+    customerAccessToken: "demo-token-1001",
     subtotalCents: 34800,
     discountCents: 0,
     shippingCents: 0,
@@ -410,6 +475,25 @@ export const mockOrders: Order[] = [
       },
     ],
     refunds: [],
+    returnRequests: [],
+    paymentTransactions: [
+      {
+        id: "demo-payment-1001-capture",
+        storeId: "demo-store-outdoor",
+        orderId: "demo-order-1001",
+        clerkUserId: "demo_user_zendora",
+        type: "capture",
+        status: "succeeded",
+        paymentMethod: "card",
+        paymentProvider: "Manual card",
+        providerReference: "CARD-1001",
+        amountCents: 37671,
+        currency: "USD",
+        processedAt: "2026-05-25T13:22:00.000Z",
+        metadata: { source: "seed" },
+        createdAt: "2026-05-25T13:22:00.000Z",
+      },
+    ],
   },
   {
     id: "demo-order-1002",
@@ -430,6 +514,7 @@ export const mockOrders: Order[] = [
     paymentMethod: "bank_transfer",
     paymentProvider: "Bank transfer",
     paymentReference: "ACH-1002",
+    customerAccessToken: "demo-token-1002",
     subtotalCents: 18500,
     discountCents: 0,
     shippingCents: 0,
@@ -485,6 +570,58 @@ export const mockOrders: Order[] = [
         createdAt: "2026-06-01T11:20:00.000Z",
       },
     ],
+    returnRequests: [
+      {
+        id: "demo-return-request-1002",
+        storeId: "demo-store-outdoor",
+        orderId: "demo-order-1002",
+        customerEmail: "ari@example.com",
+        status: "approved",
+        reason: "changed_mind",
+        note: "The bottle was a duplicate gift and is still unopened.",
+        merchantNote: "Approved bottle return. Refund after inspection.",
+        requestedAt: "2026-06-01T09:10:00.000Z",
+        createdAt: "2026-06-01T09:10:00.000Z",
+        updatedAt: "2026-06-01T10:05:00.000Z",
+      },
+    ],
+    paymentTransactions: [
+      {
+        id: "demo-payment-1002-capture",
+        storeId: "demo-store-outdoor",
+        orderId: "demo-order-1002",
+        clerkUserId: "demo_user_zendora",
+        type: "capture",
+        status: "succeeded",
+        paymentMethod: "bank_transfer",
+        paymentProvider: "Bank transfer",
+        providerReference: "ACH-1002",
+        amountCents: 20026,
+        currency: "USD",
+        processedAt: "2026-05-29T09:42:00.000Z",
+        metadata: { source: "seed" },
+        createdAt: "2026-05-29T09:42:00.000Z",
+      },
+      {
+        id: "demo-payment-1002-refund",
+        storeId: "demo-store-outdoor",
+        orderId: "demo-order-1002",
+        clerkUserId: "demo_user_zendora",
+        type: "refund",
+        status: "succeeded",
+        paymentMethod: "bank_transfer",
+        paymentProvider: "Bank transfer",
+        providerReference: "demo-refund-1002-1",
+        amountCents: 4200,
+        currency: "USD",
+        processedAt: "2026-06-01T11:20:00.000Z",
+        metadata: {
+          orderRefundId: "demo-refund-1002-1",
+          reason: "customer_request",
+        },
+        createdAt: "2026-06-01T11:20:00.000Z",
+      },
+    ],
   },
   {
     id: "demo-order-1003",
@@ -505,6 +642,7 @@ export const mockOrders: Order[] = [
     paymentMethod: "manual_invoice",
     paymentProvider: "manual",
     paymentReference: "INV-1003",
+    customerAccessToken: "demo-token-1003",
     subtotalCents: 12900,
     discountCode: "WELCOME10",
     discountCents: 1290,
@@ -531,12 +669,88 @@ export const mockOrders: Order[] = [
       },
     ],
     refunds: [],
+    returnRequests: [],
+    paymentTransactions: [],
+  },
+];
+
+export const mockAbandonedCheckouts: AbandonedCheckout[] = [
+  {
+    id: "demo-abandoned-checkout-1004",
+    storeId: "demo-store-outdoor",
+    customerEmail: "nina@example.com",
+    customerName: "Nina Brooks",
+    recoveryToken: "demo-recovery-1004",
+    status: "open",
+    lines: [
+      {
+        productId: "demo-product-carry-pack",
+        productVariantId: "demo-variant-carry-pack-clay",
+        productName: "Field Carry Pack",
+        variantName: "Color: Clay",
+        unitPriceCents: 13900,
+        quantity: 1,
+        imageUrl:
+          "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1200&q=80",
+      },
+      {
+        productId: "demo-product-hydra-bottle",
+        productVariantId: "demo-variant-hydra-bottle-steel",
+        productName: "Hydra Bottle",
+        variantName: "Color: Brushed steel",
+        unitPriceCents: 4200,
+        quantity: 2,
+        imageUrl:
+          "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&w=1200&q=80",
+      },
+    ],
+    subtotalCents: 22300,
+    currency: "USD",
+    lastSeenAt: "2026-06-06T15:35:00.000Z",
+    recoveryEmailCount: 1,
+    recoveryEmailSentAt: "2026-06-06T16:00:00.000Z",
+    createdAt: "2026-06-06T15:20:00.000Z",
+    updatedAt: "2026-06-06T16:00:00.000Z",
+  },
+  {
+    id: "demo-abandoned-checkout-1005",
+    storeId: "demo-store-outdoor",
+    customerEmail: "leo@example.com",
+    customerName: "Leo Martin",
+    recoveryToken: "demo-recovery-1005",
+    status: "recovered",
+    lines: [
+      {
+        productId: "demo-product-trail-watch",
+        productName: "Trail Watch",
+        unitPriceCents: 21900,
+        quantity: 1,
+        imageUrl:
+          "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1200&q=80",
+      },
+    ],
+    subtotalCents: 21900,
+    currency: "USD",
+    lastSeenAt: "2026-06-03T18:05:00.000Z",
+    recoveryEmailCount: 2,
+    recoveryEmailSentAt: "2026-06-04T10:00:00.000Z",
+    recoveredOrderId: "demo-order-1001",
+    recoveredAt: "2026-06-04T12:40:00.000Z",
+    createdAt: "2026-06-03T17:50:00.000Z",
+    updatedAt: "2026-06-04T12:40:00.000Z",
   },
 ];
 
 export const mockOrderRefunds: OrderRefund[] = mockOrders.flatMap(
   (order) => order.refunds,
 );
+
+export const mockOrderReturnRequests: OrderReturnRequest[] = mockOrders.flatMap(
+  (order) => order.returnRequests,
+);
+
+export const mockOrderPaymentTransactions: OrderPaymentTransaction[] =
+  mockOrders.flatMap((order) => order.paymentTransactions);
 
 export const mockInventoryAdjustments: InventoryAdjustment[] = [
   {

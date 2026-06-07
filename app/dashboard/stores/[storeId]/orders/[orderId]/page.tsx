@@ -10,12 +10,14 @@ import {
   MapPin,
   Phone,
   ReceiptText,
+  RotateCcw,
   ShoppingBag,
   Truck,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { RefundForm } from "@/features/commerce/components/refund-form";
+import { ReturnRequestStatusForm } from "@/features/commerce/components/return-request-status-form";
 import {
   confirmOrderPaymentAction,
   updateOrderFulfillmentAction,
@@ -30,6 +32,15 @@ import {
   paymentMethodLabels,
   paymentStatusLabels,
 } from "@/features/commerce/order-status";
+import {
+  paymentTransactionStatusLabels,
+  paymentTransactionTypeLabels,
+  summarizePaymentTransactions,
+} from "@/features/commerce/payments";
+import {
+  returnRequestReasonLabels,
+  returnRequestStatusLabels,
+} from "@/features/commerce/returns";
 import type { RefundReason } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -61,6 +72,15 @@ export default async function OrderDetailPage({
 
   const shipping = order.shippingAddress;
   const lifecycleEvents = getOrderLifecycleEvents(order);
+  const paymentSummary = summarizePaymentTransactions(order.paymentTransactions);
+  const paymentTransactions = [...order.paymentTransactions].sort(
+    (a, b) =>
+      new Date(b.processedAt || b.createdAt).getTime() -
+      new Date(a.processedAt || a.createdAt).getTime(),
+  );
+  const canConfirmPayment =
+    order.status !== "cancelled" &&
+    (order.paymentStatus === "pending" || order.paymentStatus === "authorized");
 
   return (
     <div className="grid gap-5">
@@ -225,7 +245,7 @@ export default async function OrderDetailPage({
               ) : null}
             </div>
 
-            {order.status !== "cancelled" ? (
+            {canConfirmPayment ? (
               <form
                 action={confirmOrderPaymentAction.bind(
                   null,
@@ -271,7 +291,138 @@ export default async function OrderDetailPage({
                   Confirm payment
                 </button>
               </form>
+            ) : order.status !== "cancelled" ? (
+              <p className="mt-4 rounded-[8px] bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                Captured, refunded, or voided payments cannot be captured again.
+              </p>
             ) : null}
+          </section>
+
+          <section className="soft-panel overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                <RotateCcw aria-hidden="true" size={18} />
+                Return requests
+              </h2>
+            </div>
+            {order.returnRequests.length > 0 ? (
+              order.returnRequests.map((request) => (
+                <div
+                  className="border-b border-slate-100 p-4 last:border-0"
+                  key={request.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {returnRequestReasonLabels[request.reason]}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {request.customerEmail} /{" "}
+                        {new Date(request.requestedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <span className="status-pill">
+                      {returnRequestStatusLabels[request.status]}
+                    </span>
+                  </div>
+                  {request.note ? (
+                    <p className="mt-3 rounded-[8px] bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                      {request.note}
+                    </p>
+                  ) : null}
+                  <ReturnRequestStatusForm
+                    orderId={order.id}
+                    request={request}
+                    storeId={workspace.store.id}
+                  />
+                </div>
+              ))
+            ) : (
+              <p className="p-4 text-sm text-slate-500">
+                No return requests submitted.
+              </p>
+            )}
+          </section>
+
+          <section className="soft-panel overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                <CreditCard aria-hidden="true" size={18} />
+                Payment ledger
+              </h2>
+            </div>
+            <div className="grid gap-2 border-b border-slate-100 p-4 text-sm">
+              <div className="flex items-center justify-between gap-3 text-slate-600">
+                <span>Captured</span>
+                <span className="font-semibold text-slate-950">
+                  {formatCurrency(paymentSummary.capturedCents, order.currency)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-slate-600">
+                <span>Refunded</span>
+                <span className="font-semibold text-red-600">
+                  -{formatCurrency(paymentSummary.refundedCents, order.currency)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-slate-950">
+                <span className="font-semibold">Net captured</span>
+                <span className="font-semibold">
+                  {formatCurrency(paymentSummary.netCapturedCents, order.currency)}
+                </span>
+              </div>
+            </div>
+            {paymentTransactions.length > 0 ? (
+              paymentTransactions.map((transaction) => (
+                <div
+                  className="border-b border-slate-100 p-4 last:border-0"
+                  key={transaction.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {paymentTransactionTypeLabels[transaction.type]}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {transaction.processedAt
+                          ? new Date(transaction.processedAt).toLocaleString()
+                          : new Date(transaction.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <span
+                      className={
+                        transaction.type === "refund"
+                          ? "text-sm font-semibold text-red-600"
+                          : "text-sm font-semibold text-slate-950"
+                      }
+                    >
+                      {transaction.type === "refund" ? "-" : ""}
+                      {formatCurrency(
+                        transaction.amountCents,
+                        transaction.currency,
+                      )}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="status-pill">
+                      {paymentTransactionStatusLabels[transaction.status]}
+                    </span>
+                    <span className="status-pill">
+                      {paymentMethodLabels[transaction.paymentMethod]}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {transaction.paymentProvider}
+                    {transaction.providerReference
+                      ? ` / ${transaction.providerReference}`
+                      : ""}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="p-4 text-sm text-slate-500">
+                No payment transactions recorded yet.
+              </p>
+            )}
           </section>
 
           <section className="soft-panel overflow-hidden">

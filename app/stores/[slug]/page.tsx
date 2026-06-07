@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
@@ -5,12 +6,49 @@ import { ArrowLeft, Layers3, ShoppingBag, Sparkles } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
 import { getPublicStorefront } from "@/features/commerce/data";
+import {
+  getPolicyHref,
+  getPublishedPolicies,
+  storePolicyLabels,
+} from "@/features/commerce/policies";
+import {
+  getStoreSeoDescription,
+  getStoreSeoTitle,
+  getStoreSocialImages,
+} from "@/features/commerce/seo";
+
+type PublicStorePageProps = {
+  params: Promise<{ slug: string }>;
+};
+
+export async function generateMetadata({
+  params,
+}: PublicStorePageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const workspace = await getPublicStorefront(slug);
+
+  if (!workspace) {
+    return {
+      title: "Store not found",
+    };
+  }
+
+  const heroProduct = workspace.products[0];
+
+  return {
+    title: getStoreSeoTitle(workspace.store),
+    description: getStoreSeoDescription(workspace.store),
+    openGraph: {
+      title: getStoreSeoTitle(workspace.store),
+      description: getStoreSeoDescription(workspace.store),
+      images: getStoreSocialImages(workspace.store, heroProduct?.imageUrl),
+    },
+  };
+}
 
 export default async function PublicStorePage({
   params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+}: PublicStorePageProps) {
   const { slug } = await params;
   const workspace = await getPublicStorefront(slug);
 
@@ -18,8 +56,9 @@ export default async function PublicStorePage({
     notFound();
   }
 
-  const { store, products, collections } = workspace;
+  const { store, products, collections, policies } = workspace;
   const heroProduct = products[0];
+  const publishedPolicies = getPublishedPolicies(policies);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -93,6 +132,20 @@ export default async function PublicStorePage({
       ) : null}
 
       <StorefrontCart products={products} storeSlug={store.slug} />
+
+      {publishedPolicies.length > 0 ? (
+        <footer className="mx-auto flex max-w-7xl flex-wrap gap-3 px-4 pb-10 sm:px-6 lg:px-8">
+          {publishedPolicies.map((policy) => (
+            <Link
+              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
+              href={getPolicyHref(store.slug, policy.type)}
+              key={policy.id}
+            >
+              {storePolicyLabels[policy.type]}
+            </Link>
+          ))}
+        </footer>
+      ) : null}
     </main>
   );
 }

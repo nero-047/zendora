@@ -83,9 +83,261 @@ function assertFalse(value, message) {
 const businessRules = loadTsModule("features/commerce/business-rules.ts");
 const analytics = loadTsModule("features/commerce/analytics.ts");
 const orderStatus = loadTsModule("features/commerce/order-status.ts");
+const policies = loadTsModule("features/commerce/policies.ts");
+const seo = loadTsModule("features/commerce/seo.ts");
+const payments = loadTsModule("features/commerce/payments.ts");
+const returns = loadTsModule("features/commerce/returns.ts");
+const abandonedCheckouts = loadTsModule(
+  "features/commerce/abandoned-checkouts.ts",
+);
 const permissions = loadTsModule("features/commerce/permissions.ts");
+const mockData = loadTsModule("features/commerce/mock-data.ts");
 
 const tests = [
+  [
+    "abandoned checkouts summarize carts and protect recovery eligibility",
+    () => {
+      const lines = [
+        {
+          productId: "p1",
+          productName: "Field Pack",
+          unitPriceCents: 12900,
+          quantity: 1,
+        },
+        {
+          productId: "p2",
+          productName: "Hydra Bottle",
+          unitPriceCents: 4200,
+          quantity: 2,
+        },
+      ];
+      const summary = abandonedCheckouts.summarizeAbandonedCheckoutLines(lines);
+
+      assertDeepEqual(
+        summary,
+        {
+          lineCount: 2,
+          itemCount: 3,
+          subtotalCents: 21300,
+        },
+        "abandoned checkout summaries should count lines, items, and subtotal",
+      );
+      assertEqual(
+        abandonedCheckouts.getAbandonedCheckoutRecoveryHref({
+          storeSlug: "northline-supply",
+          recoveryToken: "tok 123",
+        }),
+        "/stores/northline-supply/checkout?recovery=tok%20123",
+        "recovery href should point at checkout with an encoded token",
+      );
+      assertTrue(
+        abandonedCheckouts.canQueueAbandonedCheckoutRecovery({
+          customerEmail: "nina@example.com",
+          recoveryToken: "demo-recovery-1004",
+          status: "open",
+          lines,
+        }),
+        "open checkouts with customer email and cart lines should be recoverable",
+      );
+      assertFalse(
+        abandonedCheckouts.canQueueAbandonedCheckoutRecovery({
+          customerEmail: "nina@example.com",
+          recoveryToken: "demo-recovery-1004",
+          status: "recovered",
+          lines,
+        }),
+        "recovered checkouts should not queue recovery again",
+      );
+    },
+  ],
+  [
+    "store SEO falls back cleanly and prefers merchant settings",
+    () => {
+      const store = {
+        name: "Northline Supply",
+        description: "Premium everyday goods.",
+        seoTitle: "Northline Supply | Durable gear",
+        seoDescription: "Shop durable everyday gear from Northline Supply.",
+        socialImageUrl: "https://example.com/social.jpg",
+      };
+
+      assertEqual(
+        seo.getStoreSeoTitle(store),
+        "Northline Supply | Durable gear",
+        "storefront metadata should prefer merchant SEO title",
+      );
+      assertEqual(
+        seo.getStoreSeoTitle(store, "Checkout"),
+        "Checkout | Northline Supply | Durable gear",
+        "nested metadata should append merchant SEO title",
+      );
+      assertEqual(
+        seo.getStoreSeoDescription(store),
+        "Shop durable everyday gear from Northline Supply.",
+        "metadata should prefer merchant SEO description",
+      );
+      assertDeepEqual(
+        seo.getStoreSocialImages(store, "https://example.com/fallback.jpg"),
+        ["https://example.com/social.jpg", "https://example.com/fallback.jpg"],
+        "social images should include merchant image before fallback",
+      );
+      assertDeepEqual(
+        seo.getStoreSocialImages(store, "https://example.com/social.jpg"),
+        ["https://example.com/social.jpg"],
+        "social images should not duplicate identical URLs",
+      );
+      assertEqual(
+        seo.getStoreSeoDescription({ name: "Draft", description: "" }),
+        "Draft storefront.",
+        "metadata should fall back when no description exists",
+      );
+    },
+  ],
+  [
+    "return requests require paid orders without active requests",
+    () => {
+      const baseOrder = {
+        status: "fulfilled",
+        paymentStatus: "paid",
+        refundableCents: 5000,
+        returnRequests: [],
+      };
+
+      assertTrue(
+        returns.canCustomerRequestReturn(baseOrder),
+        "fulfilled paid orders should accept return requests",
+      );
+      assertFalse(
+        returns.canCustomerRequestReturn({
+          ...baseOrder,
+          status: "pending",
+        }),
+        "pending orders should not accept return requests",
+      );
+      assertFalse(
+        returns.canCustomerRequestReturn({
+          ...baseOrder,
+          refundableCents: 0,
+        }),
+        "fully refunded orders should not accept return requests",
+      );
+      assertFalse(
+        returns.canCustomerRequestReturn({
+          ...baseOrder,
+          returnRequests: [{ status: "requested" }],
+        }),
+        "orders with active return requests should not accept duplicates",
+      );
+    },
+  ],
+  [
+    "customer order receipt tokens are unique and present",
+    () => {
+      const tokens = mockData.mockOrders.map((order) => order.customerAccessToken);
+
+      assertTrue(
+        tokens.every((token) => typeof token === "string" && token.length >= 12),
+        "every mock order should include a customer receipt token",
+      );
+      assertEqual(
+        new Set(tokens).size,
+        tokens.length,
+        "customer receipt tokens should be unique",
+      );
+    },
+  ],
+  [
+    "abandoned checkout recovery tokens are unique and present",
+    () => {
+      const tokens = mockData.mockAbandonedCheckouts.map(
+        (checkout) => checkout.recoveryToken,
+      );
+
+      assertTrue(
+        tokens.every((token) => typeof token === "string" && token.length >= 12),
+        "every mock abandoned checkout should include a recovery token",
+      );
+      assertEqual(
+        new Set(tokens).size,
+        tokens.length,
+        "abandoned checkout recovery tokens should be unique",
+      );
+    },
+  ],
+  [
+    "payment ledger summarizes successful captures and refunds",
+    () => {
+      const summary = payments.summarizePaymentTransactions([
+        {
+          type: "authorization",
+          status: "succeeded",
+          amountCents: 10000,
+        },
+        {
+          type: "capture",
+          status: "succeeded",
+          amountCents: 10000,
+        },
+        {
+          type: "refund",
+          status: "succeeded",
+          amountCents: 2500,
+        },
+        {
+          type: "refund",
+          status: "failed",
+          amountCents: 500,
+        },
+      ]);
+
+      assertEqual(summary.authorizedCents, 10000, "authorized amount should sum");
+      assertEqual(summary.capturedCents, 10000, "captures should sum");
+      assertEqual(summary.refundedCents, 2500, "failed refunds should be ignored");
+      assertEqual(summary.netCapturedCents, 7500, "net captured should subtract refunds");
+    },
+  ],
+  [
+    "store policies expose only published storefront pages",
+    () => {
+      const storePolicies = [
+        {
+          id: "policy_1",
+          storeId: "store_1",
+          type: "refund",
+          title: "Refund policy",
+          body: "Returns are available for unused items.",
+          status: "published",
+        },
+        {
+          id: "policy_2",
+          storeId: "store_1",
+          type: "terms",
+          title: "Terms",
+          body: "",
+          status: "published",
+        },
+        {
+          id: "policy_3",
+          storeId: "store_1",
+          type: "privacy",
+          title: "Privacy",
+          body: "Draft body",
+          status: "draft",
+        },
+      ];
+
+      assertDeepEqual(
+        policies.getPublishedPolicies(storePolicies).map((policy) => policy.id),
+        ["policy_1"],
+        "only published policies with body content should be public",
+      );
+      assertEqual(
+        policies.getPolicyHref("northline-supply", "refund"),
+        "/stores/northline-supply/policies/refund",
+        "policy href should point at storefront policy route",
+      );
+    },
+  ],
   [
     "store analytics summarizes sales, refunds, mix, and products",
     () => {

@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 const actionsPath = "features/commerce/actions.ts";
+const schemaPath = "supabase/schema.sql";
 const sourceText = readFileSync(actionsPath, "utf8");
+const schemaText = readFileSync(schemaPath, "utf8");
 
 const expectedGuards = new Map(
   Object.entries({
@@ -12,15 +14,19 @@ const expectedGuards = new Map(
     updateCollectionStatusAction: "manage_catalog",
     adjustInventoryAction: "manage_inventory",
     createManualOrderAction: "manage_orders",
+    queueAbandonedCheckoutRecoveryAction: "manage_orders",
+    dismissAbandonedCheckoutAction: "manage_orders",
     updateOrderStatusAction: "manage_orders",
     confirmOrderPaymentAction: "manage_orders",
     updateOrderFulfillmentAction: "manage_orders",
+    updateReturnRequestStatusAction: "manage_refunds",
     createRefundAction: "manage_refunds",
     createDiscountAction: "manage_discounts",
     updateDiscountStatusAction: "manage_discounts",
     createShippingZoneAction: "manage_shipping",
     updateShippingZoneStatusAction: "manage_shipping",
     updateStoreAction: "manage_store_settings",
+    updateStorePoliciesAction: "manage_store_settings",
     publishStoreAction: "manage_store_settings",
     pauseStoreAction: "manage_store_settings",
     createStoreInvitationAction: "manage_team",
@@ -34,6 +40,7 @@ const expectedAuditEvents = new Map(
   Object.entries({
     createStoreAction: "store_created",
     updateStoreAction: "store_updated",
+    updateStorePoliciesAction: "store_policy_updated",
     publishStoreAction: "store_published",
     pauseStoreAction: "store_paused",
     createProductAction: "product_created",
@@ -47,9 +54,13 @@ const expectedAuditEvents = new Map(
     updateShippingZoneStatusAction: "shipping_zone_status_updated",
     createManualOrderAction: "manual_order_created",
     createCheckoutOrderAction: "checkout_order_created",
+    queueAbandonedCheckoutRecoveryAction: "abandoned_checkout_recovery_queued",
+    dismissAbandonedCheckoutAction: "abandoned_checkout_dismissed",
     updateOrderStatusAction: "order_status_updated",
     confirmOrderPaymentAction: "payment_confirmed",
     updateOrderFulfillmentAction: "fulfillment_updated",
+    createReturnRequestAction: "return_request_created",
+    updateReturnRequestStatusAction: "return_request_updated",
     createRefundAction: "refund_created",
     createStoreInvitationAction: "team_invited",
     revokeStoreInvitationAction: "team_invite_revoked",
@@ -63,8 +74,11 @@ const expectedNotifications = new Map(
   Object.entries({
     createManualOrderAction: "manual_order_invoice",
     createCheckoutOrderAction: "order_confirmation",
+    queueAbandonedCheckoutRecoveryAction: "checkout_recovery",
     confirmOrderPaymentAction: "payment_receipt",
     updateOrderFulfillmentAction: "fulfillment_update",
+    createReturnRequestAction: "return_request_created",
+    updateReturnRequestStatusAction: "return_request_updated",
     createRefundAction: "refund_confirmation",
     createStoreInvitationAction: "team_invitation",
   }),
@@ -81,6 +95,34 @@ const failures = [];
 
 if (sourceText.includes("assertStoreAccess(")) {
   failures.push("Do not use assertStoreAccess(); use permission-specific guards.");
+}
+
+if (!sourceText.includes('from("order_payment_transactions")')) {
+  failures.push("Payment mutations must write order_payment_transactions.");
+}
+
+if (
+  !schemaText.includes(
+    "create table if not exists public.order_payment_transactions",
+  )
+) {
+  failures.push(`${schemaPath} is missing order_payment_transactions.`);
+}
+
+if (!schemaText.includes("customer_access_token")) {
+  failures.push(`${schemaPath} is missing customer_access_token for order receipts.`);
+}
+
+if (!schemaText.includes("create table if not exists public.order_return_requests")) {
+  failures.push(`${schemaPath} is missing order_return_requests.`);
+}
+
+if (!schemaText.includes("create table if not exists public.abandoned_checkouts")) {
+  failures.push(`${schemaPath} is missing abandoned_checkouts.`);
+}
+
+if (!sourceText.includes("createCustomerAccessToken()")) {
+  failures.push("Checkout/manual order mutations must create customer access tokens.");
 }
 
 function isExportedFunction(node) {

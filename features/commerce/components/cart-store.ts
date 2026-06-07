@@ -181,6 +181,13 @@ export function useStoreCart(storeSlug: string, products: Product[]) {
     dispatchCartChange();
   }, [storageKey]);
 
+  const replaceCart = useCallback(
+    (nextCart: CartLine[]) => {
+      writeCart(normalizeCartLines(nextCart, productsById));
+    },
+    [productsById, writeCart],
+  );
+
   const updateQuantity = useCallback(
     (productId: string, nextQuantity: number, variantId?: string) => {
       const product = productsById.get(productId);
@@ -241,6 +248,7 @@ export function useStoreCart(storeSlug: string, products: Product[]) {
     cart,
     cartItems,
     clearCart,
+    replaceCart,
     updateQuantity,
   };
 }

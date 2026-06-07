@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { AppUser } from "@/features/auth/app-user";
 import {
+  mockAbandonedCheckouts,
   mockCollections,
   mockDiscounts,
   mockInventoryAdjustments,
@@ -11,10 +12,14 @@ import {
   mockOrders,
   mockProducts,
   mockShippingZones,
+  mockStorePolicies,
   mockStores,
 } from "@/features/commerce/mock-data";
 import { isRevenueOrderStatus } from "@/features/commerce/order-status";
 import type {
+  AbandonedCheckout,
+  AbandonedCheckoutLine,
+  AbandonedCheckoutStatus,
   DashboardOverview,
   AuditEventAction,
   ProductCollection,
@@ -24,18 +29,24 @@ import type {
   DiscountType,
   Order,
   OrderItem,
+  OrderPaymentTransaction,
   OrderRefund,
+  OrderReturnRequest,
   OrderSource,
   OrderStatus,
   NotificationStatus,
   NotificationType,
   PaymentMethod,
   PaymentStatus,
+  PaymentTransactionStatus,
+  PaymentTransactionType,
   Product,
   ProductVariant,
   ProductVariantStatus,
   ProductStatus,
   RefundReason,
+  ReturnRequestReason,
+  ReturnRequestStatus,
   ShippingZone,
   ShippingZoneStatus,
   StoreAuditEvent,
@@ -43,6 +54,9 @@ import type {
   StoreMember,
   StoreMembershipRole,
   StoreNotification,
+  StorePolicy,
+  StorePolicyStatus,
+  StorePolicyType,
   InventoryAdjustment,
   InventoryAdjustmentReason,
   Store,
@@ -66,6 +80,9 @@ type StoreRow = {
   description: string | null;
   currency: string;
   theme_color: string;
+  seo_title: string | null;
+  seo_description: string | null;
+  social_image_url: string | null;
   status: StoreStatus;
   shipping_rate_cents: number | null;
   free_shipping_threshold_cents: number | null;
@@ -136,6 +153,18 @@ type StoreNotificationRow = {
   sent_at: string | null;
   failed_at: string | null;
   created_at: string;
+};
+
+type StorePolicyRow = {
+  id: string;
+  store_id: string;
+  type: StorePolicyType;
+  title: string;
+  body: string | null;
+  status: StorePolicyStatus;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type ProductRow = {
@@ -223,6 +252,7 @@ type OrderRow = {
   payment_method: PaymentMethod | null;
   payment_provider: string | null;
   payment_reference: string | null;
+  customer_access_token: string | null;
   subtotal_cents: number | null;
   discount_code: string | null;
   discount_cents: number | null;
@@ -280,6 +310,58 @@ type OrderRefundRow = {
   note: string | null;
   restocked_inventory: boolean;
   created_at: string;
+};
+
+type OrderReturnRequestRow = {
+  id: string;
+  store_id: string;
+  order_id: string;
+  customer_email: string;
+  status: ReturnRequestStatus;
+  reason: ReturnRequestReason;
+  note: string | null;
+  merchant_note: string | null;
+  requested_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type OrderPaymentTransactionRow = {
+  id: string;
+  store_id: string;
+  order_id: string;
+  clerk_user_id: string | null;
+  type: PaymentTransactionType;
+  status: PaymentTransactionStatus;
+  payment_method: PaymentMethod | null;
+  payment_provider: string | null;
+  provider_reference: string | null;
+  amount_cents: number;
+  currency: string;
+  processed_at: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type AbandonedCheckoutRow = {
+  id: string;
+  store_id: string;
+  customer_email: string;
+  customer_name: string | null;
+  recovery_token: string;
+  status: AbandonedCheckoutStatus;
+  cart: unknown;
+  subtotal_cents: number | null;
+  currency: string | null;
+  last_seen_at: string;
+  recovery_email_sent_at: string | null;
+  recovery_email_count: number | null;
+  recovered_order_id: string | null;
+  recovered_at: string | null;
+  dismissed_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 function mapProduct(row: ProductRow): Product {
@@ -388,10 +470,127 @@ function mapOrderRefund(row: OrderRefundRow): OrderRefund {
   };
 }
 
+function mapOrderReturnRequest(row: OrderReturnRequestRow): OrderReturnRequest {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    orderId: row.order_id,
+    customerEmail: row.customer_email,
+    status: row.status,
+    reason: row.reason,
+    note: row.note || undefined,
+    merchantNote: row.merchant_note || undefined,
+    requestedAt: row.requested_at,
+    resolvedAt: row.resolved_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapOrderPaymentTransaction(
+  row: OrderPaymentTransactionRow,
+): OrderPaymentTransaction {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    orderId: row.order_id,
+    clerkUserId: row.clerk_user_id || undefined,
+    type: row.type,
+    status: row.status,
+    paymentMethod: row.payment_method || "manual_invoice",
+    paymentProvider: row.payment_provider || "manual",
+    providerReference: row.provider_reference || undefined,
+    amountCents: row.amount_cents,
+    currency: row.currency,
+    processedAt: row.processed_at || undefined,
+    metadata: row.metadata || {},
+    createdAt: row.created_at,
+  };
+}
+
+function mapAbandonedCheckoutLine(line: unknown): AbandonedCheckoutLine | null {
+  if (typeof line !== "object" || !line) {
+    return null;
+  }
+
+  const value = line as Record<string, unknown>;
+  const productId = String(value.productId || "");
+  const productName = String(value.productName || "");
+  const unitPriceCents = Number(value.unitPriceCents);
+  const quantity = Number(value.quantity);
+
+  if (
+    !productId ||
+    !productName ||
+    !Number.isInteger(unitPriceCents) ||
+    unitPriceCents < 0 ||
+    !Number.isInteger(quantity) ||
+    quantity <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    productId,
+    productVariantId:
+      typeof value.productVariantId === "string" && value.productVariantId
+        ? value.productVariantId
+        : undefined,
+    productName,
+    variantName:
+      typeof value.variantName === "string" && value.variantName
+        ? value.variantName
+        : undefined,
+    unitPriceCents,
+    quantity,
+    imageUrl:
+      typeof value.imageUrl === "string" && value.imageUrl
+        ? value.imageUrl
+        : undefined,
+  };
+}
+
+function mapAbandonedCheckout(row: AbandonedCheckoutRow): AbandonedCheckout {
+  const lines = Array.isArray(row.cart)
+    ? row.cart
+        .map((line) => mapAbandonedCheckoutLine(line))
+        .filter((line): line is AbandonedCheckoutLine => Boolean(line))
+    : [];
+  const subtotalCents = lines.reduce(
+    (sum, line) => sum + line.unitPriceCents * line.quantity,
+    0,
+  );
+
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    customerEmail: row.customer_email,
+    customerName: row.customer_name || undefined,
+    recoveryToken: row.recovery_token,
+    status: row.status,
+    lines,
+    subtotalCents:
+      row.subtotal_cents && row.subtotal_cents > 0
+        ? row.subtotal_cents
+        : subtotalCents,
+    currency: row.currency || "USD",
+    lastSeenAt: row.last_seen_at,
+    recoveryEmailSentAt: row.recovery_email_sent_at || undefined,
+    recoveryEmailCount: row.recovery_email_count || 0,
+    recoveredOrderId: row.recovered_order_id || undefined,
+    recoveredAt: row.recovered_at || undefined,
+    dismissedAt: row.dismissed_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapOrder(
   row: OrderRow,
   items: OrderItem[] = [],
   refunds: OrderRefund[] = [],
+  returnRequests: OrderReturnRequest[] = [],
+  paymentTransactions: OrderPaymentTransaction[] = [],
 ): Order {
   const hasShippingAddress = Boolean(
     row.shipping_address_line1 ||
@@ -430,6 +629,7 @@ function mapOrder(
     paymentMethod: row.payment_method || "manual_invoice",
     paymentProvider: row.payment_provider || "manual",
     paymentReference: row.payment_reference || undefined,
+    customerAccessToken: row.customer_access_token || undefined,
     subtotalCents:
       row.subtotal_cents && row.subtotal_cents > 0
         ? row.subtotal_cents
@@ -454,6 +654,8 @@ function mapOrder(
     fulfillmentNote: row.fulfillment_note || undefined,
     items,
     refunds,
+    returnRequests,
+    paymentTransactions,
   };
 }
 
@@ -483,6 +685,9 @@ function mapStore(row: StoreRow, products: Product[], orders: Order[]): Store {
     description: row.description || "",
     currency: row.currency,
     themeColor: row.theme_color,
+    seoTitle: row.seo_title || undefined,
+    seoDescription: row.seo_description || undefined,
+    socialImageUrl: row.social_image_url || undefined,
     status: row.status,
     createdAt: row.created_at,
     productCount: products.length,
@@ -570,6 +775,20 @@ function mapStoreNotification(row: StoreNotificationRow): StoreNotification {
   };
 }
 
+function mapStorePolicy(row: StorePolicyRow): StorePolicy {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    type: row.type,
+    title: row.title,
+    body: row.body || "",
+    status: row.status,
+    publishedAt: row.published_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function byStoreId<T extends { storeId: string }>(items: T[]) {
   const grouped = new Map<string, T[]>();
 
@@ -592,6 +811,26 @@ function byOrderId(items: OrderItem[]) {
 
 function refundsByOrderId(items: OrderRefund[]) {
   const grouped = new Map<string, OrderRefund[]>();
+
+  for (const item of items) {
+    grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
+function returnRequestsByOrderId(items: OrderReturnRequest[]) {
+  const grouped = new Map<string, OrderReturnRequest[]>();
+
+  for (const item of items) {
+    grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
+function paymentTransactionsByOrderId(items: OrderPaymentTransaction[]) {
+  const grouped = new Map<string, OrderPaymentTransaction[]>();
 
   for (const item of items) {
     grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
@@ -865,6 +1104,54 @@ async function loadOrderRefunds(orderIds: string[]) {
   return ((data || []) as OrderRefundRow[]).map(mapOrderRefund);
 }
 
+async function loadOrderReturnRequests(orderIds: string[]) {
+  if (orderIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("order_return_requests")
+    .select("*")
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as OrderReturnRequestRow[]).map(mapOrderReturnRequest);
+}
+
+async function loadOrderPaymentTransactions(orderIds: string[]) {
+  if (orderIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("order_payment_transactions")
+    .select("*")
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as OrderPaymentTransactionRow[]).map(
+    mapOrderPaymentTransaction,
+  );
+}
+
 async function loadOrders(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -883,16 +1170,50 @@ async function loadOrders(storeIds: string[]) {
 
   const rows = (data || []) as OrderRow[];
   const orderIds = rows.map((row) => row.id);
-  const [items, refunds] = await Promise.all([
+  const [items, refunds, returnRequests, paymentTransactions] = await Promise.all([
     loadOrderItems(orderIds),
     loadOrderRefunds(orderIds),
+    loadOrderReturnRequests(orderIds),
+    loadOrderPaymentTransactions(orderIds),
   ]);
   const itemsByOrder = byOrderId(items);
   const refundsByOrder = refundsByOrderId(refunds);
+  const returnRequestsByOrder = returnRequestsByOrderId(returnRequests);
+  const paymentTransactionsByOrder =
+    paymentTransactionsByOrderId(paymentTransactions);
 
   return rows.map((row) =>
-    mapOrder(row, itemsByOrder.get(row.id) || [], refundsByOrder.get(row.id) || []),
+    mapOrder(
+      row,
+      itemsByOrder.get(row.id) || [],
+      refundsByOrder.get(row.id) || [],
+      returnRequestsByOrder.get(row.id) || [],
+      paymentTransactionsByOrder.get(row.id) || [],
+    ),
   );
+}
+
+async function loadAbandonedCheckouts(storeIds: string[]) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("abandoned_checkouts")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("last_seen_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as AbandonedCheckoutRow[]).map(mapAbandonedCheckout);
 }
 
 async function loadDiscounts(storeIds: string[]) {
@@ -1055,6 +1376,39 @@ async function loadStoreNotifications(
   return ((data || []) as StoreNotificationRow[]).map(mapStoreNotification);
 }
 
+async function loadStorePolicies(
+  storeIds: string[],
+  publishedOnly = false,
+  client?: SupabaseClient,
+): Promise<StorePolicy[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("store_policies")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("type", { ascending: true });
+
+  if (publishedOnly) {
+    query = query.eq("status", "published");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as StorePolicyRow[]).map(mapStorePolicy);
+}
+
 function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   const store = mockStores.find((item) => item.slug === slug);
 
@@ -1068,6 +1422,9 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
     invitations: [],
     auditEvents: [],
     notifications: [],
+    policies: mockStorePolicies.filter(
+      (policy) => policy.storeId === store.id && policy.status === "published",
+    ),
     shippingZones: mockShippingZones.filter(
       (zone) => zone.storeId === store.id && zone.status === "active",
     ),
@@ -1078,6 +1435,7 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
       (collection) => collection.storeId === store.id && collection.status === "active",
     ),
     orders: [],
+    abandonedCheckouts: [],
     discounts: [],
     inventoryAdjustments: [],
   };
@@ -1138,9 +1496,10 @@ async function loadPublicStorefrontFromClient(
   }
 
   const productRowsMapped = ((productRows || []) as ProductRow[]).map(mapProduct);
-  const [variants, shippingZones] = await Promise.all([
+  const [variants, shippingZones, policies] = await Promise.all([
     loadProductVariants([row.id], true, db),
     loadShippingZones([row.id], true, db),
+    loadStorePolicies([row.id], true, db),
   ]);
   const products = attachProductVariants(productRowsMapped, variants);
   const allCollections = await loadCollections([row.id], true, db);
@@ -1165,10 +1524,12 @@ async function loadPublicStorefrontFromClient(
     invitations: [],
     auditEvents: [],
     notifications: [],
+    policies,
     shippingZones,
     products,
     collections,
     orders: [],
+    abandonedCheckouts: [],
     discounts: [],
     inventoryAdjustments: [],
   };
@@ -1373,12 +1734,16 @@ export async function getStoreWorkspace(
       invitations: [],
       auditEvents: [],
       notifications: [],
+      policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
       shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
       products: mockProducts.filter((product) => product.storeId === store.id),
       collections: mockCollections.filter(
         (collection) => collection.storeId === store.id,
       ),
       orders: mockOrders.filter((order) => order.storeId === store.id),
+      abandonedCheckouts: mockAbandonedCheckouts.filter(
+        (checkout) => checkout.storeId === store.id,
+      ),
       discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
       inventoryAdjustments: mockInventoryAdjustments.filter(
         (adjustment) => adjustment.storeId === store.id,
@@ -1429,24 +1794,28 @@ export async function getStoreWorkspace(
     shippingZones,
     collections,
     orders,
+    abandonedCheckouts,
     discounts,
     inventoryAdjustments,
     members,
     invitations,
     auditEvents,
     notifications,
+    policies,
   ] =
     await Promise.all([
       loadProducts([storeId]),
       loadShippingZones([storeId]),
       loadCollections([storeId]),
       loadOrders([storeId]),
+      loadAbandonedCheckouts([storeId]),
       loadDiscounts([storeId]),
       loadInventoryAdjustments([storeId]),
       loadStoreMembers([storeId]),
       loadStoreInvitations([storeId]),
       loadStoreAuditEvents([storeId]),
       loadStoreNotifications([storeId]),
+      loadStorePolicies([storeId]),
     ]);
 
   return {
@@ -1456,10 +1825,12 @@ export async function getStoreWorkspace(
     invitations,
     auditEvents,
     notifications,
+    policies,
     shippingZones,
     products,
     collections,
     orders,
+    abandonedCheckouts,
     discounts,
     inventoryAdjustments,
   };
@@ -1505,6 +1876,187 @@ export async function getLivePublicStorefront(
   }
 
   return loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
+}
+
+export async function getPublicAbandonedCheckout(input: {
+  slug: string;
+  token?: string;
+}): Promise<{
+  store: Store;
+  checkout: AbandonedCheckout;
+  products: Product[];
+  shippingZones: ShippingZone[];
+  policies: StorePolicy[];
+} | null> {
+  const token = input.token?.trim();
+
+  if (!token) {
+    return null;
+  }
+
+  if (!isSupabaseConfigured()) {
+    const storefront = getMockPublicStorefront(input.slug);
+
+    if (!storefront) {
+      return null;
+    }
+
+    const checkout = mockAbandonedCheckouts.find(
+      (item) =>
+        item.storeId === storefront.store.id &&
+        item.recoveryToken === token &&
+        item.status === "open",
+    );
+
+    if (!checkout) {
+      return null;
+    }
+
+    return {
+      store: storefront.store,
+      checkout,
+      products: storefront.products,
+      shippingZones: storefront.shippingZones,
+      policies: storefront.policies,
+    };
+  }
+
+  const db = getSupabaseAdmin();
+  const storefront = await loadPublicStorefrontFromClient(db, input.slug);
+
+  if (!storefront) {
+    return null;
+  }
+
+  const { data, error } = await db
+    .from("abandoned_checkouts")
+    .select("*")
+    .eq("store_id", storefront.store.id)
+    .eq("recovery_token", token)
+    .eq("status", "open")
+    .maybeSingle();
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    store: storefront.store,
+    checkout: mapAbandonedCheckout(data as AbandonedCheckoutRow),
+    products: storefront.products,
+    shippingZones: storefront.shippingZones,
+    policies: storefront.policies,
+  };
+}
+
+export async function getPublicOrderReceipt(input: {
+  slug: string;
+  orderId: string;
+  token?: string;
+}): Promise<{
+  store: Store;
+  order: Order;
+  policies: StorePolicy[];
+} | null> {
+  const token = input.token?.trim();
+
+  if (!token) {
+    return null;
+  }
+
+  if (!isSupabaseConfigured()) {
+    const store = mockStores.find(
+      (item) => item.slug === input.slug && item.status === "active",
+    );
+
+    if (!store) {
+      return null;
+    }
+
+    const order = mockOrders.find(
+      (item) =>
+        item.storeId === store.id &&
+        item.id === input.orderId &&
+        item.customerAccessToken === token,
+    );
+
+    if (!order) {
+      return null;
+    }
+
+    return {
+      store: mapDemoStoreForUser(store, store.ownerId),
+      order,
+      policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
+    };
+  }
+
+  if (!isUuid(input.orderId)) {
+    return null;
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: storeRow, error: storeError } = await db
+    .from("stores")
+    .select("*")
+    .eq("slug", input.slug)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (storeError) {
+    throw storeError;
+  }
+
+  if (!storeRow) {
+    return null;
+  }
+
+  const store = storeRow as StoreRow;
+  const { data: orderRow, error: orderError } = await db
+    .from("orders")
+    .select("*")
+    .eq("id", input.orderId)
+    .eq("store_id", store.id)
+    .eq("customer_access_token", token)
+    .maybeSingle();
+
+  if (orderError) {
+    throw orderError;
+  }
+
+  if (!orderRow) {
+    return null;
+  }
+
+  const [items, refunds, returnRequests, paymentTransactions, policies] =
+    await Promise.all([
+    loadOrderItems([input.orderId]),
+    loadOrderRefunds([input.orderId]),
+    loadOrderReturnRequests([input.orderId]),
+    loadOrderPaymentTransactions([input.orderId]),
+    loadStorePolicies([store.id]),
+  ]);
+  const order = mapOrder(
+    orderRow as OrderRow,
+    items,
+    refunds,
+    returnRequests,
+    paymentTransactions,
+  );
+
+  return {
+    store: mapStore(store, [], [order]),
+    order,
+    policies,
+  };
 }
 
 export async function getAvailableStoreSlug(name: string) {

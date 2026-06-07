@@ -2,13 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import type { ActionState } from "@/features/commerce/action-state";
 import { initialActionState } from "@/features/commerce/action-state";
 import { createCheckoutOrderAction } from "@/features/commerce/actions";
-import { useStoreCart } from "@/features/commerce/components/cart-store";
+import {
+  type CartLine,
+  useStoreCart,
+} from "@/features/commerce/components/cart-store";
 import type { Product, ShippingZone } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -20,6 +24,10 @@ type CheckoutFormProps = {
   shippingRateCents: number;
   taxRateBps: number;
   products: Product[];
+  initialCart?: CartLine[];
+  initialCustomerEmail?: string;
+  initialCustomerName?: string;
+  initialRecoveryToken?: string;
 };
 
 function normalizeShippingCountry(value: string) {
@@ -67,9 +75,18 @@ export function CheckoutForm({
   shippingRateCents,
   taxRateBps,
   products,
+  initialCart,
+  initialCustomerEmail,
+  initialCustomerName,
+  initialRecoveryToken,
 }: CheckoutFormProps) {
+  const router = useRouter();
+  const [customerName, setCustomerName] = useState(initialCustomerName || "");
+  const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail || "");
+  const [recoveryToken, setRecoveryToken] = useState(initialRecoveryToken || "");
+  const [restoredRecoveryToken, setRestoredRecoveryToken] = useState("");
   const [shippingCountry, setShippingCountry] = useState("United States");
-  const { cartItems, clearCart, updateQuantity } = useStoreCart(
+  const { cartItems, clearCart, replaceCart, updateQuantity } = useStoreCart(
     storeSlug,
     products,
   );
@@ -94,6 +111,29 @@ export function CheckoutForm({
     checkoutAction,
     initialActionState,
   );
+  const orderStatusUrl =
+    typeof state.data?.orderStatusUrl === "string"
+      ? state.data.orderStatusUrl
+      : null;
+
+  useEffect(() => {
+    if (state.status === "success" && orderStatusUrl) {
+      router.push(orderStatusUrl);
+    }
+  }, [orderStatusUrl, router, state.status]);
+
+  useEffect(() => {
+    if (
+      !initialRecoveryToken ||
+      !initialCart?.length ||
+      restoredRecoveryToken === initialRecoveryToken
+    ) {
+      return;
+    }
+
+    replaceCart(initialCart);
+    setRestoredRecoveryToken(initialRecoveryToken);
+  }, [initialCart, initialRecoveryToken, replaceCart, restoredRecoveryToken]);
 
   const totalCents = cartItems.reduce(
     (sum, item) =>
@@ -119,7 +159,64 @@ export function CheckoutForm({
     variantId: item.variantId,
     quantity: item.quantity,
   }));
+  const checkoutPayloadJson = JSON.stringify(checkoutPayload);
   const isEmpty = cartItems.length === 0;
+
+  useEffect(() => {
+    const email = customerEmail.trim();
+
+    if (!email || !email.includes("@") || isEmpty) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/stores/${encodeURIComponent(storeSlug)}/abandoned-checkouts`,
+          {
+            body: JSON.stringify({
+              customerEmail: email,
+              customerName,
+              recoveryToken: recoveryToken || undefined,
+              cart: JSON.parse(checkoutPayloadJson),
+            }),
+            headers: {
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+            signal: controller.signal,
+          },
+        );
+        const payload = await response.json().catch(() => null);
+
+        if (
+          !controller.signal.aborted &&
+          payload &&
+          typeof payload.recoveryToken === "string" &&
+          payload.recoveryToken !== recoveryToken
+        ) {
+          setRecoveryToken(payload.recoveryToken);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn("Checkout recovery capture failed", error);
+        }
+      }
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    checkoutPayloadJson,
+    customerEmail,
+    customerName,
+    isEmpty,
+    recoveryToken,
+    storeSlug,
+  ]);
 
   return (
     <div className="mx-auto grid max-w-6xl gap-5 px-4 py-8 sm:px-6 lg:grid-cols-[1fr_0.82fr] lg:px-8">
@@ -135,7 +232,12 @@ export function CheckoutForm({
           <h1 className="text-3xl font-semibold text-slate-950">Checkout</h1>
         </div>
 
-        <input name="cart" type="hidden" value={JSON.stringify(checkoutPayload)} />
+        <input name="cart" type="hidden" value={checkoutPayloadJson} />
+        <input
+          name="abandonedCheckoutToken"
+          type="hidden"
+          value={recoveryToken}
+        />
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="grid gap-2">
@@ -144,7 +246,9 @@ export function CheckoutForm({
               autoComplete="name"
               className="field"
               name="customerName"
+              onChange={(event) => setCustomerName(event.target.value)}
               placeholder="Mira Chen"
+              value={customerName}
             />
             {state.errors?.customerName ? (
               <span className="text-xs font-medium text-red-600">
@@ -159,8 +263,10 @@ export function CheckoutForm({
               autoComplete="email"
               className="field"
               name="customerEmail"
+              onChange={(event) => setCustomerEmail(event.target.value)}
               placeholder="mira@example.com"
               type="email"
+              value={customerEmail}
             />
             {state.errors?.customerEmail ? (
               <span className="text-xs font-medium text-red-600">
@@ -341,6 +447,12 @@ export function CheckoutForm({
           >
             {state.message}
           </p>
+        ) : null}
+
+        {state.status === "success" && orderStatusUrl ? (
+          <Link className="secondary-button w-fit px-4 text-sm" href={orderStatusUrl}>
+            View order status
+          </Link>
         ) : null}
 
         <button

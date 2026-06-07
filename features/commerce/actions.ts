@@ -1,11 +1,16 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import type { ActionState } from "@/features/commerce/action-state";
+import {
+  canQueueAbandonedCheckoutRecovery,
+  getAbandonedCheckoutRecoveryHref,
+} from "@/features/commerce/abandoned-checkouts";
 import {
   calculateDiscountCents,
   calculateShippingQuote,
@@ -18,6 +23,8 @@ import type {
   NotificationType,
   PaymentMethod,
   PaymentStatus,
+  PaymentTransactionStatus,
+  PaymentTransactionType,
   Product,
   ProductVariant,
   StoreMembershipRole,
@@ -27,6 +34,7 @@ import {
   getAvailableProductSlug,
   getAvailableStoreSlug,
   getLivePublicStorefront,
+  getPublicOrderReceipt,
   getStoreWorkspace,
   upsertProfileForUser,
 } from "@/features/commerce/data";
@@ -34,11 +42,17 @@ import {
   canTransitionOrderStatus,
   isRevenueOrderStatus,
 } from "@/features/commerce/order-status";
+import { storePolicyTypes } from "@/features/commerce/policies";
 import {
   canStoreRole,
   getStorePermissionLabel,
   type StorePermission,
 } from "@/features/commerce/permissions";
+import {
+  canCustomerRequestReturn,
+  returnRequestReasons,
+  returnRequestStatuses,
+} from "@/features/commerce/returns";
 import { isSupabaseConfigured } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { uploadProductImageObject } from "@/lib/supabase/storage";
@@ -86,7 +100,44 @@ const storeUpdateSchema = storeSchema.extend({
   shippingRate: z.string().trim().optional(),
   freeShippingThreshold: z.string().trim().optional(),
   taxRate: z.string().trim().optional(),
+  seoTitle: z
+    .string()
+    .trim()
+    .max(70, "Keep SEO titles under 70 characters.")
+    .optional(),
+  seoDescription: z
+    .string()
+    .trim()
+    .max(180, "Keep SEO descriptions under 180 characters.")
+    .optional(),
+  socialImageUrl: z
+    .string()
+    .trim()
+    .url("Add a valid social image URL.")
+    .optional()
+    .or(z.literal("")),
 });
+
+const storePolicyUpdateSchema = z
+  .object({
+    type: z.enum(storePolicyTypes),
+    title: z
+      .string()
+      .trim()
+      .min(2, "Add a policy title.")
+      .max(80, "Keep policy titles under 80 characters."),
+    body: z.string().trim().max(12000, "Keep policies under 12000 characters."),
+    status: z.enum(["draft", "published"]),
+  })
+  .superRefine((policy, context) => {
+    if (policy.status === "published" && policy.body.length < 20) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Published policies need at least 20 characters.",
+        path: ["body"],
+      });
+    }
+  });
 
 const productUpdateSchema = productSchema.extend({
   status: z.enum(["draft", "active", "archived"]),
@@ -157,6 +208,12 @@ const checkoutSchema = z.object({
     .max(400, "Keep notes under 400 characters.")
     .optional(),
   discountCode: z.string().trim().max(32, "Keep discount codes under 32 characters.").optional(),
+  abandonedCheckoutToken: z
+    .string()
+    .trim()
+    .min(16, "Checkout recovery token is invalid.")
+    .max(96, "Checkout recovery token is invalid.")
+    .optional(),
   cart: z.array(checkoutLineSchema).min(1, "Add at least one item."),
 });
 
@@ -342,6 +399,25 @@ const refundSchema = z.object({
   restockInventory: z.boolean(),
 });
 
+const returnRequestSchema = z.object({
+  token: z.string().trim().min(12, "Order access token is missing."),
+  reason: z.enum(returnRequestReasons),
+  note: z
+    .string()
+    .trim()
+    .min(10, "Add a short return request note.")
+    .max(600, "Keep return request notes under 600 characters."),
+});
+
+const returnRequestStatusSchema = z.object({
+  status: z.enum(returnRequestStatuses),
+  merchantNote: z
+    .string()
+    .trim()
+    .max(600, "Keep return notes under 600 characters.")
+    .optional(),
+});
+
 const discountStatusSchema = z.object({
   status: z.enum(["active", "paused"]),
 });
@@ -376,6 +452,8 @@ type OrderLifecycleRow = {
   payment_method: PaymentMethod | null;
   payment_provider: string | null;
   payment_reference: string | null;
+  total_cents: number;
+  currency: string;
   paid_at: string | null;
   fulfilled_at: string | null;
   cancelled_at: string | null;
@@ -471,6 +549,21 @@ function checkoutDisabledState(): ActionState {
   };
 }
 
+function createCustomerAccessToken() {
+  return randomBytes(32).toString("hex");
+}
+
+function getCustomerOrderStatusHref(input: {
+  storeSlug: string;
+  orderId: string;
+  token: string;
+}) {
+  const encodedOrderId = encodeURIComponent(input.orderId);
+  const encodedToken = encodeURIComponent(input.token);
+
+  return `/stores/${input.storeSlug}/orders/${encodedOrderId}?token=${encodedToken}`;
+}
+
 async function recordAuditEvent(input: {
   db: ReturnType<typeof getSupabaseAdmin>;
   storeId: string;
@@ -529,6 +622,87 @@ async function queueNotification(input: {
   if (error) {
     console.warn(`Could not queue notification: ${error.message}`);
   }
+}
+
+async function insertPaymentTransaction(input: {
+  db: ReturnType<typeof getSupabaseAdmin>;
+  storeId: string;
+  orderId: string;
+  clerkUserId?: string | null;
+  type: PaymentTransactionType;
+  status?: PaymentTransactionStatus;
+  paymentMethod: PaymentMethod;
+  paymentProvider: string;
+  providerReference?: string | null;
+  amountCents: number;
+  currency: string;
+  processedAt?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  if (input.amountCents <= 0) {
+    return {
+      id: null,
+      error: new Error("Payment transaction amount must be greater than zero."),
+    };
+  }
+
+  const providerReference = optionalText(input.providerReference || undefined);
+
+  if (providerReference) {
+    const { data: existingTransaction, error: existingError } = await input.db
+      .from("order_payment_transactions")
+      .select("id")
+      .eq("store_id", input.storeId)
+      .eq("payment_provider", input.paymentProvider)
+      .eq("provider_reference", providerReference)
+      .maybeSingle();
+
+    if (existingError) {
+      return { id: null, error: existingError };
+    }
+
+    if (existingTransaction) {
+      return {
+        id: null,
+        error: new Error("This payment reference is already recorded."),
+      };
+    }
+  }
+
+  const { data, error } = await input.db
+    .from("order_payment_transactions")
+    .insert({
+      store_id: input.storeId,
+      order_id: input.orderId,
+      clerk_user_id: input.clerkUserId || null,
+      type: input.type,
+      status: input.status || "succeeded",
+      payment_method: input.paymentMethod,
+      payment_provider: input.paymentProvider,
+      provider_reference: providerReference,
+      amount_cents: input.amountCents,
+      currency: input.currency,
+      processed_at: input.processedAt || new Date().toISOString(),
+      metadata: input.metadata || {},
+    })
+    .select("id")
+    .single();
+
+  return {
+    id: data?.id || null,
+    error,
+  };
+}
+
+async function deletePaymentTransaction(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  transactionId: string | null | undefined,
+) {
+  if (!transactionId) {
+    return;
+  }
+
+  await db.from("order_payment_transactions").delete().eq("id", transactionId);
 }
 
 function formError(message: string, errors?: ActionState["errors"]): ActionState {
@@ -1650,6 +1824,9 @@ export async function updateStoreAction(
     shippingRate: formData.get("shippingRate") || undefined,
     freeShippingThreshold: formData.get("freeShippingThreshold") || undefined,
     taxRate: formData.get("taxRate") || undefined,
+    seoTitle: formData.get("seoTitle") || undefined,
+    seoDescription: formData.get("seoDescription") || undefined,
+    socialImageUrl: formData.get("socialImageUrl") || undefined,
   });
 
   if (!parsed.success) {
@@ -1704,6 +1881,9 @@ export async function updateStoreAction(
       currency: nextCurrency,
       theme_color: parsed.data.themeColor,
       status: parsed.data.status,
+      seo_title: optionalText(parsed.data.seoTitle),
+      seo_description: optionalText(parsed.data.seoDescription),
+      social_image_url: optionalText(parsed.data.socialImageUrl),
       shipping_rate_cents: shippingRateCents,
       free_shipping_threshold_cents: freeShippingThresholdCents,
       tax_rate_bps: taxRateBps,
@@ -1739,6 +1919,8 @@ export async function updateStoreAction(
       shippingRateCents,
       freeShippingThresholdCents,
       taxRateBps,
+      seoTitle: optionalText(parsed.data.seoTitle),
+      hasSocialImage: Boolean(optionalText(parsed.data.socialImageUrl)),
     },
   });
 
@@ -1749,6 +1931,101 @@ export async function updateStoreAction(
   return {
     status: "success",
     message: "Store updated.",
+  };
+}
+
+export async function updateStorePoliciesAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const policies = [];
+  const errors: ActionState["errors"] = {};
+
+  for (const type of storePolicyTypes) {
+    const parsed = storePolicyUpdateSchema.safeParse({
+      type,
+      title: formData.get(`title:${type}`),
+      body: formData.get(`body:${type}`),
+      status: formData.get(`status:${type}`),
+    });
+
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+
+      for (const [field, messages] of Object.entries(fieldErrors)) {
+        if (messages?.length) {
+          errors[`${field}:${type}`] = messages;
+        }
+      }
+
+      continue;
+    }
+
+    policies.push(parsed.data);
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return formError("Check storefront policies.", errors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
+  const db = getSupabaseAdmin();
+  const publishedAt = new Date().toISOString();
+  const { error } = await db.from("store_policies").upsert(
+    policies.map((policy) => ({
+      store_id: storeId,
+      type: policy.type,
+      title: policy.title,
+      body: policy.body,
+      status: policy.status,
+      published_at: policy.status === "published" ? publishedAt : null,
+    })),
+    { onConflict: "store_id,type" },
+  );
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  const publishedCount = policies.filter(
+    (policy) => policy.status === "published",
+  ).length;
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_policy_updated",
+    resourceType: "store_policy",
+    resourceId: storeId,
+    summary: `${user.email} updated storefront policies.`,
+    metadata: {
+      policyTypes: policies.map((policy) => policy.type).join(","),
+      publishedCount,
+      draftCount: policies.length - publishedCount,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  for (const type of storePolicyTypes) {
+    revalidatePath(`/stores/${workspace.store.slug}/policies/${type}`);
+  }
+
+  return {
+    status: "success",
+    message: `${publishedCount} storefront policies published.`,
   };
 }
 
@@ -2554,6 +2831,11 @@ export async function createManualOrderAction(
     discountedSubtotalCents + manualShippingCents + taxCents;
   const paidAt =
     parsed.data.paymentStatus === "paid" ? new Date().toISOString() : null;
+  const paymentProvider =
+    optionalText(parsed.data.paymentProvider) ||
+    getManualPaymentProvider(parsed.data.paymentMethod);
+  const paymentReference = optionalText(parsed.data.paymentReference);
+  const customerAccessToken = createCustomerAccessToken();
   const db = getSupabaseAdmin();
   const reservation = await reserveOrderInventory({
     db,
@@ -2584,10 +2866,9 @@ export async function createManualOrderAction(
       internal_note: optionalText(parsed.data.internalNote),
       payment_status: parsed.data.paymentStatus,
       payment_method: parsed.data.paymentMethod,
-      payment_provider:
-        optionalText(parsed.data.paymentProvider) ||
-        getManualPaymentProvider(parsed.data.paymentMethod),
-      payment_reference: optionalText(parsed.data.paymentReference),
+      payment_provider: paymentProvider,
+      payment_reference: paymentReference,
+      customer_access_token: customerAccessToken,
       subtotal_cents: subtotalCents,
       discount_code: manualDiscountCents > 0 ? "MANUAL" : null,
       discount_cents: manualDiscountCents,
@@ -2627,6 +2908,32 @@ export async function createManualOrderAction(
     return formError(itemError.message);
   }
 
+  if (parsed.data.paymentStatus === "paid" && totalCents > 0) {
+    const transaction = await insertPaymentTransaction({
+      db,
+      storeId,
+      orderId: order.id,
+      clerkUserId: user.id,
+      type: "capture",
+      paymentMethod: parsed.data.paymentMethod,
+      paymentProvider,
+      providerReference: paymentReference,
+      amountCents: totalCents,
+      currency: workspace.store.currency,
+      processedAt: paidAt,
+      metadata: {
+        source: "manual_order",
+      },
+    });
+
+    if (transaction.error) {
+      await db.from("orders").delete().eq("id", order.id).eq("store_id", storeId);
+      await rollbackReservedInventory(db, reservation.reservedInventory);
+
+      return formError(transaction.error.message);
+    }
+  }
+
   await recordAuditEvent({
     db,
     storeId,
@@ -2643,6 +2950,12 @@ export async function createManualOrderAction(
     },
   });
 
+  const orderStatusUrl = getCustomerOrderStatusHref({
+    storeSlug: workspace.store.slug,
+    orderId: order.id,
+    token: customerAccessToken,
+  });
+
   await queueNotification({
     db,
     storeId,
@@ -2655,6 +2968,7 @@ export async function createManualOrderAction(
     resourceId: order.id,
     metadata: {
       orderId: order.id,
+      orderStatusUrl,
       paymentStatus: parsed.data.paymentStatus,
       totalCents,
       currency: workspace.store.currency,
@@ -2670,6 +2984,10 @@ export async function createManualOrderAction(
   return {
     status: "success",
     message: `Manual order ${order.id.slice(0, 8)} created.`,
+    data: {
+      orderId: order.id,
+      orderStatusUrl,
+    },
   };
 }
 
@@ -2691,6 +3009,8 @@ export async function createCheckoutOrderAction(
     paymentMethod: formData.get("paymentMethod"),
     customerNote: formData.get("customerNote") || undefined,
     discountCode: formData.get("discountCode") || undefined,
+    abandonedCheckoutToken:
+      formData.get("abandonedCheckoutToken") || undefined,
     cart: readCartPayload(formData.get("cart")),
   });
 
@@ -2816,6 +3136,7 @@ export async function createCheckoutOrderAction(
     storefront.store.taxRateBps,
   );
   const totalCents = discountedSubtotalCents + shippingCents + taxCents;
+  const customerAccessToken = createCustomerAccessToken();
   const reservedInventory: ReservedInventory[] = [];
   const productInventoryById = new Map(
     orderItems.map((item) => [item.product.id, item.product.inventoryCount]),
@@ -2944,6 +3265,7 @@ export async function createCheckoutOrderAction(
       payment_method: parsed.data.paymentMethod,
       payment_provider: getManualPaymentProvider(parsed.data.paymentMethod),
       payment_reference: null,
+      customer_access_token: customerAccessToken,
       subtotal_cents: subtotalCents,
       discount_code: discount.code,
       discount_cents: discount.cents,
@@ -2996,6 +3318,34 @@ export async function createCheckoutOrderAction(
     return formError(itemError.message);
   }
 
+  const abandonedCheckoutToken = optionalText(
+    parsed.data.abandonedCheckoutToken,
+  );
+  let recoveredAbandonedCheckoutId: string | null = null;
+
+  if (abandonedCheckoutToken) {
+    const { data: recoveredCheckout, error: recoveryError } = await db
+      .from("abandoned_checkouts")
+      .update({
+        status: "recovered",
+        recovered_order_id: order.id,
+        recovered_at: new Date().toISOString(),
+      })
+      .eq("store_id", storefront.store.id)
+      .eq("recovery_token", abandonedCheckoutToken)
+      .eq("status", "open")
+      .select("id")
+      .maybeSingle();
+
+    if (recoveryError) {
+      console.warn(
+        `Could not mark abandoned checkout recovered: ${recoveryError.message}`,
+      );
+    } else {
+      recoveredAbandonedCheckoutId = recoveredCheckout?.id || null;
+    }
+  }
+
   await recordAuditEvent({
     db,
     storeId: storefront.store.id,
@@ -3010,7 +3360,31 @@ export async function createCheckoutOrderAction(
       totalCents,
       paymentMethod: parsed.data.paymentMethod,
       discountCode: discount.code,
+      recoveredAbandonedCheckoutId,
     },
+  });
+
+  if (recoveredAbandonedCheckoutId) {
+    await recordAuditEvent({
+      db,
+      storeId: storefront.store.id,
+      clerkUserId: null,
+      action: "abandoned_checkout_recovered",
+      resourceType: "abandoned_checkout",
+      resourceId: recoveredAbandonedCheckoutId,
+      summary: `Storefront checkout recovered abandoned cart ${recoveredAbandonedCheckoutId.slice(0, 8)}.`,
+      metadata: {
+        orderId: order.id,
+        customerEmail: parsed.data.customerEmail,
+        totalCents,
+      },
+    });
+  }
+
+  const orderStatusUrl = getCustomerOrderStatusHref({
+    storeSlug: storefront.store.slug,
+    orderId: order.id,
+    token: customerAccessToken,
   });
 
   await queueNotification({
@@ -3025,6 +3399,7 @@ export async function createCheckoutOrderAction(
     resourceId: order.id,
     metadata: {
       orderId: order.id,
+      orderStatusUrl,
       paymentMethod: parsed.data.paymentMethod,
       totalCents,
       currency: storefront.store.currency,
@@ -3038,7 +3413,168 @@ export async function createCheckoutOrderAction(
   return {
     status: "success",
     message: `Order ${order.id.slice(0, 8)} received.`,
+    data: {
+      orderId: order.id,
+      orderStatusUrl,
+    },
   };
+}
+
+export async function queueAbandonedCheckoutRecoveryAction(
+  storeId: string,
+  checkoutId: string,
+) {
+  const user = await requireAppUser();
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
+  const checkout = workspace.abandonedCheckouts.find(
+    (item) => item.id === checkoutId,
+  );
+
+  if (!checkout) {
+    throw new Error("Abandoned checkout not found.");
+  }
+
+  if (!canQueueAbandonedCheckoutRecovery(checkout)) {
+    throw new Error("This checkout is not eligible for recovery.");
+  }
+
+  const db = getSupabaseAdmin();
+  const now = new Date().toISOString();
+  const nextRecoveryEmailCount = checkout.recoveryEmailCount + 1;
+  const { data: updatedCheckout, error } = await db
+    .from("abandoned_checkouts")
+    .update({
+      recovery_email_sent_at: now,
+      recovery_email_count: nextRecoveryEmailCount,
+    })
+    .eq("id", checkoutId)
+    .eq("store_id", storeId)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!updatedCheckout) {
+    throw new Error("Checkout changed while recovery was being queued.");
+  }
+
+  const recoveryUrl = getAbandonedCheckoutRecoveryHref({
+    storeSlug: workspace.store.slug,
+    recoveryToken: checkout.recoveryToken,
+  });
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "abandoned_checkout_recovery_queued",
+    resourceType: "abandoned_checkout",
+    resourceId: checkoutId,
+    summary: `${user.email} queued checkout recovery for ${checkout.customerEmail}.`,
+    metadata: {
+      recoveryEmailCount: nextRecoveryEmailCount,
+      subtotalCents: checkout.subtotalCents,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "checkout_recovery",
+    recipientEmail: checkout.customerEmail,
+    recipientName: checkout.customerName,
+    subject: `${workspace.store.name} cart is saved`,
+    preview: "Your cart is ready when you are.",
+    resourceType: "abandoned_checkout",
+    resourceId: checkoutId,
+    metadata: {
+      recoveryUrl,
+      recoveryEmailCount: nextRecoveryEmailCount,
+      subtotalCents: checkout.subtotalCents,
+      currency: checkout.currency,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+}
+
+export async function dismissAbandonedCheckoutAction(
+  storeId: string,
+  checkoutId: string,
+) {
+  const user = await requireAppUser();
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
+  const checkout = workspace.abandonedCheckouts.find(
+    (item) => item.id === checkoutId,
+  );
+
+  if (!checkout) {
+    throw new Error("Abandoned checkout not found.");
+  }
+
+  if (checkout.status !== "open") {
+    throw new Error("Only open abandoned checkouts can be dismissed.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: updatedCheckout, error } = await db
+    .from("abandoned_checkouts")
+    .update({
+      status: "dismissed",
+      dismissed_at: new Date().toISOString(),
+    })
+    .eq("id", checkoutId)
+    .eq("store_id", storeId)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!updatedCheckout) {
+    throw new Error("Checkout changed while it was being dismissed.");
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "abandoned_checkout_dismissed",
+    resourceType: "abandoned_checkout",
+    resourceId: checkoutId,
+    summary: `${user.email} dismissed abandoned checkout ${checkoutId.slice(0, 8)}.`,
+    metadata: {
+      customerEmail: checkout.customerEmail,
+      subtotalCents: checkout.subtotalCents,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
 }
 
 export async function publishStoreAction(storeId: string) {
@@ -3150,7 +3686,7 @@ export async function updateOrderStatusAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "status, payment_status, payment_method, payment_provider, payment_reference, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
+      "status, payment_status, payment_method, payment_provider, payment_reference, total_cents, currency, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -3185,19 +3721,52 @@ export async function updateOrderStatusAction(
     status: parsed.data.status,
   };
   let restockedItems: RestockedInventory[] = [];
+  let paymentTransactionId: string | null = null;
 
   if (parsed.data.status === "paid" && !order.paid_at) {
     updatePayload.paid_at = now;
   }
 
-  if (
+  const shouldCapturePayment =
     (parsed.data.status === "paid" || parsed.data.status === "fulfilled") &&
-    order.payment_status !== "paid"
-  ) {
+    (!order.payment_status ||
+      order.payment_status === "pending" ||
+      order.payment_status === "authorized");
+
+  if (shouldCapturePayment) {
     updatePayload.payment_status = "paid";
     updatePayload.payment_provider =
       order.payment_provider ||
       getManualPaymentProvider(order.payment_method || "manual_invoice");
+  }
+
+  if (updatePayload.payment_status === "paid" && order.total_cents > 0) {
+    const transaction = await insertPaymentTransaction({
+      db,
+      storeId,
+      orderId,
+      clerkUserId: user.id,
+      type: "capture",
+      paymentMethod: order.payment_method || "manual_invoice",
+      paymentProvider:
+        updatePayload.payment_provider ||
+        order.payment_provider ||
+        getManualPaymentProvider(order.payment_method || "manual_invoice"),
+      providerReference: order.payment_reference,
+      amountCents: order.total_cents,
+      currency: order.currency,
+      processedAt: updatePayload.paid_at || now,
+      metadata: {
+        source: "order_status_update",
+        nextStatus: parsed.data.status,
+      },
+    });
+
+    if (transaction.error) {
+      throw transaction.error;
+    }
+
+    paymentTransactionId = transaction.id;
   }
 
   if (parsed.data.status === "fulfilled") {
@@ -3231,11 +3800,13 @@ export async function updateOrderStatusAction(
     .maybeSingle();
 
   if (error) {
+    await deletePaymentTransaction(db, paymentTransactionId);
     await rollbackRestockedInventory(db, storeId, restockedItems);
     throw error;
   }
 
   if (!updatedOrder) {
+    await deletePaymentTransaction(db, paymentTransactionId);
     await rollbackRestockedInventory(db, storeId, restockedItems);
     throw new Error("Order changed while status was being updated.");
   }
@@ -3291,7 +3862,9 @@ export async function confirmOrderPaymentAction(
   const db = getSupabaseAdmin();
   const { data: orderData, error: orderError } = await db
     .from("orders")
-    .select("customer_email, customer_name, status, payment_status, paid_at, cancelled_at")
+    .select(
+      "customer_email, customer_name, status, payment_status, total_cents, currency, paid_at, cancelled_at",
+    )
     .eq("id", orderId)
     .eq("store_id", storeId)
     .maybeSingle();
@@ -3310,6 +3883,8 @@ export async function confirmOrderPaymentAction(
     | "customer_name"
     | "status"
     | "payment_status"
+    | "total_cents"
+    | "currency"
     | "paid_at"
     | "cancelled_at"
   >;
@@ -3318,18 +3893,56 @@ export async function confirmOrderPaymentAction(
     throw new Error("Cancelled orders cannot be marked paid.");
   }
 
+  if (
+    order.payment_status &&
+    order.payment_status !== "pending" &&
+    order.payment_status !== "authorized"
+  ) {
+    throw new Error("This order already has a captured payment.");
+  }
+
   const now = new Date().toISOString();
   const nextStatus = order.status === "pending" ? "paid" : order.status;
+  const paymentProvider =
+    optionalText(parsed.data.paymentProvider) ||
+    getManualPaymentProvider(parsed.data.paymentMethod);
+  const paymentReference = optionalText(parsed.data.paymentReference);
+  let transactionId: string | null = null;
+
+  if (order.total_cents > 0) {
+    const transaction = await insertPaymentTransaction({
+      db,
+      storeId,
+      orderId,
+      clerkUserId: user.id,
+      type: "capture",
+      paymentMethod: parsed.data.paymentMethod,
+      paymentProvider,
+      providerReference: paymentReference,
+      amountCents: order.total_cents,
+      currency: order.currency,
+      processedAt: order.paid_at || now,
+      metadata: {
+        source: "payment_confirmation",
+        nextStatus,
+      },
+    });
+
+    if (transaction.error) {
+      throw transaction.error;
+    }
+
+    transactionId = transaction.id;
+  }
+
   const { data: updatedOrder, error } = await db
     .from("orders")
     .update({
       status: nextStatus,
       payment_status: "paid",
       payment_method: parsed.data.paymentMethod,
-      payment_provider:
-        optionalText(parsed.data.paymentProvider) ||
-        getManualPaymentProvider(parsed.data.paymentMethod),
-      payment_reference: optionalText(parsed.data.paymentReference),
+      payment_provider: paymentProvider,
+      payment_reference: paymentReference,
       paid_at: order.paid_at || now,
     })
     .eq("id", orderId)
@@ -3339,10 +3952,12 @@ export async function confirmOrderPaymentAction(
     .maybeSingle();
 
   if (error) {
+    await deletePaymentTransaction(db, transactionId);
     throw error;
   }
 
   if (!updatedOrder) {
+    await deletePaymentTransaction(db, transactionId);
     throw new Error("Order changed while payment was being confirmed.");
   }
 
@@ -3356,9 +3971,8 @@ export async function confirmOrderPaymentAction(
     summary: `${user.email} confirmed payment for order ${orderId.slice(0, 8)}.`,
     metadata: {
       paymentMethod: parsed.data.paymentMethod,
-      paymentProvider:
-        optionalText(parsed.data.paymentProvider) ||
-        getManualPaymentProvider(parsed.data.paymentMethod),
+      paymentProvider,
+      transactionId,
       nextStatus,
     },
   });
@@ -3376,9 +3990,8 @@ export async function confirmOrderPaymentAction(
     metadata: {
       orderId,
       paymentMethod: parsed.data.paymentMethod,
-      paymentProvider:
-        optionalText(parsed.data.paymentProvider) ||
-        getManualPaymentProvider(parsed.data.paymentMethod),
+      paymentProvider,
+      transactionId,
     },
   });
 
@@ -3420,7 +4033,7 @@ export async function updateOrderFulfillmentAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "customer_email, customer_name, status, payment_status, payment_method, payment_provider, paid_at, fulfilled_at, cancelled_at",
+      "customer_email, customer_name, status, payment_status, payment_method, payment_provider, payment_reference, total_cents, currency, paid_at, fulfilled_at, cancelled_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -3442,6 +4055,9 @@ export async function updateOrderFulfillmentAction(
     | "payment_status"
     | "payment_method"
     | "payment_provider"
+    | "payment_reference"
+    | "total_cents"
+    | "currency"
     | "paid_at"
     | "fulfilled_at"
     | "cancelled_at"
@@ -3468,6 +4084,7 @@ export async function updateOrderFulfillmentAction(
     tracking_url: optionalText(parsed.data.trackingUrl),
     fulfillment_note: optionalText(parsed.data.fulfillmentNote),
   };
+  let paymentTransactionId: string | null = null;
 
   if (parsed.data.markFulfilled) {
     if (order.status !== "paid" && order.status !== "fulfilled") {
@@ -3475,10 +4092,18 @@ export async function updateOrderFulfillmentAction(
     }
 
     updatePayload.status = "fulfilled";
-    updatePayload.payment_status = "paid";
-    updatePayload.payment_provider =
-      order.payment_provider ||
-      getManualPaymentProvider(order.payment_method || "manual_invoice");
+
+    const shouldCapturePayment =
+      !order.payment_status ||
+      order.payment_status === "pending" ||
+      order.payment_status === "authorized";
+
+    if (shouldCapturePayment) {
+      updatePayload.payment_status = "paid";
+      updatePayload.payment_provider =
+        order.payment_provider ||
+        getManualPaymentProvider(order.payment_method || "manual_invoice");
+    }
 
     if (!order.paid_at) {
       updatePayload.paid_at = now;
@@ -3486,6 +4111,35 @@ export async function updateOrderFulfillmentAction(
 
     if (!order.fulfilled_at) {
       updatePayload.fulfilled_at = now;
+    }
+
+    if (shouldCapturePayment && order.total_cents > 0) {
+      const transaction = await insertPaymentTransaction({
+        db,
+        storeId,
+        orderId,
+        clerkUserId: user.id,
+        type: "capture",
+        paymentMethod: order.payment_method || "manual_invoice",
+        paymentProvider:
+          updatePayload.payment_provider ||
+          order.payment_provider ||
+          getManualPaymentProvider(order.payment_method || "manual_invoice"),
+        providerReference: order.payment_reference,
+        amountCents: order.total_cents,
+        currency: order.currency,
+        processedAt: updatePayload.paid_at || now,
+        metadata: {
+          source: "fulfillment_update",
+          markFulfilled: true,
+        },
+      });
+
+      if (transaction.error) {
+        throw transaction.error;
+      }
+
+      paymentTransactionId = transaction.id;
     }
   }
 
@@ -3499,10 +4153,12 @@ export async function updateOrderFulfillmentAction(
     .maybeSingle();
 
   if (error) {
+    await deletePaymentTransaction(db, paymentTransactionId);
     throw error;
   }
 
   if (!updatedOrder) {
+    await deletePaymentTransaction(db, paymentTransactionId);
     throw new Error("Order changed while fulfillment was being updated.");
   }
 
@@ -3546,6 +4202,199 @@ export async function updateOrderFulfillmentAction(
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
+}
+
+export async function createReturnRequestAction(
+  storeSlug: string,
+  orderId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = returnRequestSchema.safeParse({
+    token: formData.get("token"),
+    reason: formData.get("reason"),
+    note: formData.get("note"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the return request.", parsed.error.flatten().fieldErrors);
+  }
+
+  const receipt = await getPublicOrderReceipt({
+    slug: storeSlug,
+    orderId,
+    token: parsed.data.token,
+  });
+
+  if (!receipt) {
+    return formError("This order link is no longer valid.");
+  }
+
+  if (!canCustomerRequestReturn(receipt.order)) {
+    return formError(
+      "This order is not eligible for a new return request right now.",
+    );
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      status: "success",
+      message: "Return request received. Demo mode will not persist it.",
+    };
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: request, error } = await db
+    .from("order_return_requests")
+    .insert({
+      store_id: receipt.store.id,
+      order_id: receipt.order.id,
+      customer_email: receipt.order.customerEmail,
+      status: "requested",
+      reason: parsed.data.reason,
+      note: parsed.data.note,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId: receipt.store.id,
+    clerkUserId: null,
+    action: "return_request_created",
+    resourceType: "order_return_request",
+    resourceId: request.id,
+    summary: `Customer requested a return for order ${receipt.order.id.slice(0, 8)}.`,
+    metadata: {
+      orderId: receipt.order.id,
+      reason: parsed.data.reason,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId: receipt.store.id,
+    type: "return_request_created",
+    recipientEmail: receipt.order.customerEmail,
+    recipientName: receipt.order.customerName,
+    subject: `${receipt.store.name} return request received`,
+    preview: `Return request received for order ${receipt.order.id.slice(0, 8)}.`,
+    resourceType: "order_return_request",
+    resourceId: request.id,
+    metadata: {
+      orderId: receipt.order.id,
+      reason: parsed.data.reason,
+    },
+  });
+
+  revalidatePath(`/stores/${receipt.store.slug}/orders/${receipt.order.id}`);
+  revalidatePath(`/dashboard/stores/${receipt.store.id}`);
+  revalidatePath(`/dashboard/stores/${receipt.store.id}/orders/${receipt.order.id}`);
+
+  return {
+    status: "success",
+    message: "Return request received.",
+  };
+}
+
+export async function updateReturnRequestStatusAction(
+  storeId: string,
+  orderId: string,
+  returnRequestId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = returnRequestStatusSchema.safeParse({
+    status: formData.get("status"),
+    merchantNote: formData.get("merchantNote") || undefined,
+  });
+
+  if (!parsed.success) {
+    return formError("Check the return request status.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_refunds",
+  );
+  const order = workspace.orders.find((item) => item.id === orderId);
+  const returnRequest = order?.returnRequests.find(
+    (request) => request.id === returnRequestId,
+  );
+
+  if (!order || !returnRequest) {
+    return formError("Return request not found.");
+  }
+
+  const resolvedAt =
+    parsed.data.status === "rejected" || parsed.data.status === "resolved"
+      ? new Date().toISOString()
+      : null;
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("order_return_requests")
+    .update({
+      status: parsed.data.status,
+      merchant_note: optionalText(parsed.data.merchantNote),
+      resolved_at: resolvedAt,
+    })
+    .eq("id", returnRequestId)
+    .eq("store_id", storeId)
+    .eq("order_id", orderId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "return_request_updated",
+    resourceType: "order_return_request",
+    resourceId: returnRequestId,
+    summary: `${user.email} changed return request ${returnRequestId.slice(0, 8)} to ${parsed.data.status}.`,
+    metadata: {
+      orderId,
+      previousStatus: returnRequest.status,
+      status: parsed.data.status,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "return_request_updated",
+    recipientEmail: order.customerEmail,
+    recipientName: order.customerName,
+    subject: `${workspace.store.name} return request update`,
+    preview: `Your return request for order ${orderId.slice(0, 8)} is ${parsed.data.status}.`,
+    resourceType: "order_return_request",
+    resourceId: returnRequestId,
+    metadata: {
+      orderId,
+      status: parsed.data.status,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/orders/${orderId}`);
+
+  return {
+    status: "success",
+    message: `Return request marked ${parsed.data.status}.`,
+  };
 }
 
 export async function createRefundAction(
@@ -3676,6 +4525,45 @@ export async function createRefundAction(
     return formError(error.message);
   }
 
+  const refundTransaction = await insertPaymentTransaction({
+    db,
+    storeId,
+    orderId,
+    clerkUserId: user.id,
+    type: "refund",
+    paymentMethod: order.paymentMethod,
+    paymentProvider: order.paymentProvider,
+    providerReference: refund.id,
+    amountCents,
+    currency: order.currency,
+    processedAt: new Date().toISOString(),
+    metadata: {
+      source: "refund",
+      orderRefundId: refund.id,
+      reason: parsed.data.reason,
+      restockInventory: parsed.data.restockInventory,
+    },
+  });
+
+  if (refundTransaction.error) {
+    await db.from("order_refunds").delete().eq("id", refund.id).eq("store_id", storeId);
+
+    if (parsed.data.restockInventory) {
+      await rollbackRestockedInventory(db, storeId, restockedItems);
+
+      if (inventoryMarkedRestocked) {
+        await db
+          .from("orders")
+          .update({ inventory_restocked_at: null })
+          .eq("id", orderId)
+          .eq("store_id", storeId)
+          .eq("inventory_restocked_at", restockedAt);
+      }
+    }
+
+    return formError(refundTransaction.error.message);
+  }
+
   const nextRefundedCents = order.refundedCents + amountCents;
   const nextPaymentStatus: PaymentStatus =
     nextRefundedCents >= order.totalCents ? "refunded" : "partially_refunded";
@@ -3686,6 +4574,22 @@ export async function createRefundAction(
     .eq("store_id", storeId);
 
   if (paymentStatusError) {
+    await deletePaymentTransaction(db, refundTransaction.id);
+    await db.from("order_refunds").delete().eq("id", refund.id).eq("store_id", storeId);
+
+    if (parsed.data.restockInventory) {
+      await rollbackRestockedInventory(db, storeId, restockedItems);
+
+      if (inventoryMarkedRestocked) {
+        await db
+          .from("orders")
+          .update({ inventory_restocked_at: null })
+          .eq("id", orderId)
+          .eq("store_id", storeId)
+          .eq("inventory_restocked_at", restockedAt);
+      }
+    }
+
     return formError(paymentStatusError.message);
   }
 
@@ -3703,6 +4607,7 @@ export async function createRefundAction(
       reason: parsed.data.reason,
       restockInventory: parsed.data.restockInventory,
       paymentStatus: nextPaymentStatus,
+      transactionId: refundTransaction.id,
     },
   });
 
@@ -3721,6 +4626,7 @@ export async function createRefundAction(
       amountCents,
       reason: parsed.data.reason,
       paymentStatus: nextPaymentStatus,
+      transactionId: refundTransaction.id,
     },
   });
 

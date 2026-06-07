@@ -107,20 +107,24 @@ export async function GET() {
         { error: storeInvitationColumnError },
         { error: storeAuditEventColumnError },
         { error: storeNotificationColumnError },
+        { error: storePolicyColumnError },
         { error: productColumnError },
         { error: collectionColumnError },
         { error: collectionProductColumnError },
         { error: productVariantColumnError },
         { error: orderColumnError },
+        { error: abandonedCheckoutColumnError },
         { error: orderItemColumnError },
         { error: orderRefundColumnError },
+        { error: orderReturnRequestColumnError },
+        { error: orderPaymentTransactionColumnError },
         { error: discountColumnError },
         { error: inventoryAdjustmentColumnError },
       ] = await Promise.all([
         supabase
           .from("stores")
           .select(
-            "id, shipping_rate_cents, free_shipping_threshold_cents, tax_rate_bps",
+            "id, shipping_rate_cents, free_shipping_threshold_cents, tax_rate_bps, seo_title, seo_description, social_image_url",
             { count: "exact", head: true },
           ),
         supabase
@@ -154,6 +158,12 @@ export async function GET() {
             { count: "exact", head: true },
           ),
         supabase
+          .from("store_policies")
+          .select(
+            "id, store_id, type, title, body, status, published_at, created_at, updated_at",
+            { count: "exact", head: true },
+          ),
+        supabase
           .from("products")
           .select("id, sku, category", { count: "exact", head: true }),
         supabase
@@ -177,7 +187,13 @@ export async function GET() {
         supabase
           .from("orders")
           .select(
-            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, order_source, internal_note, payment_status, payment_method, payment_provider, payment_reference, subtotal_cents, discount_code, discount_cents, shipping_cents, tax_cents, tax_rate_bps, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
+            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, order_source, internal_note, payment_status, payment_method, payment_provider, payment_reference, customer_access_token, subtotal_cents, discount_code, discount_cents, shipping_cents, tax_cents, tax_rate_bps, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("abandoned_checkouts")
+          .select(
+            "id, store_id, customer_email, customer_name, recovery_token, status, cart, subtotal_cents, currency, last_seen_at, recovery_email_sent_at, recovery_email_count, recovered_order_id, recovered_at, dismissed_at, created_at, updated_at",
             { count: "exact", head: true },
           ),
         supabase
@@ -190,6 +206,18 @@ export async function GET() {
           .from("order_refunds")
           .select(
             "id, store_id, order_id, clerk_user_id, amount_cents, reason, note, restocked_inventory",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("order_return_requests")
+          .select(
+            "id, store_id, order_id, customer_email, status, reason, note, merchant_note, requested_at, resolved_at, created_at, updated_at",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("order_payment_transactions")
+          .select(
+            "id, store_id, order_id, clerk_user_id, type, status, payment_method, payment_provider, provider_reference, amount_cents, currency, processed_at, metadata, created_at",
             { count: "exact", head: true },
           ),
         supabase
@@ -209,13 +237,17 @@ export async function GET() {
         storeInvitationColumnError ||
         storeAuditEventColumnError ||
         storeNotificationColumnError ||
+        storePolicyColumnError ||
         productColumnError ||
         collectionColumnError ||
         collectionProductColumnError ||
         productVariantColumnError ||
         orderColumnError ||
+        abandonedCheckoutColumnError ||
         orderItemColumnError ||
         orderRefundColumnError ||
+        orderReturnRequestColumnError ||
+        orderPaymentTransactionColumnError ||
         discountColumnError ||
         inventoryAdjustmentColumnError;
 
@@ -224,7 +256,7 @@ export async function GET() {
         ok: !error,
         detail: error
           ? `Supabase schema is missing commerce columns: ${error.message}`
-          : "Supabase store, team, audit, notification, catalog, collections, variants, refunds, inventory audit, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
+          : "Supabase store, team, audit, notification, policy, catalog, collections, variants, abandoned checkout recovery, refunds, return requests, payment transactions, inventory audit, customer order access, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
       });
     } catch (error) {
       checks.push({

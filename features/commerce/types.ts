@@ -19,24 +19,48 @@ export type PaymentMethod =
   | "cash_on_delivery"
   | "card"
   | "other";
+export type PaymentTransactionType =
+  | "authorization"
+  | "capture"
+  | "refund"
+  | "void";
+export type PaymentTransactionStatus = "pending" | "succeeded" | "failed";
 export type RefundReason =
   | "customer_request"
   | "damaged"
   | "fraud"
   | "other";
+export type ReturnRequestStatus =
+  | "requested"
+  | "approved"
+  | "rejected"
+  | "resolved";
+export type ReturnRequestReason =
+  | "changed_mind"
+  | "damaged"
+  | "wrong_item"
+  | "quality"
+  | "other";
+export type AbandonedCheckoutStatus = "open" | "recovered" | "dismissed";
 export type DiscountStatus = "active" | "paused";
 export type DiscountType = "percent" | "fixed";
+export type StorePolicyType = "refund" | "shipping" | "privacy" | "terms";
+export type StorePolicyStatus = "draft" | "published";
 export type NotificationStatus = "pending" | "sent" | "failed" | "suppressed";
 export type NotificationType =
   | "order_confirmation"
   | "manual_order_invoice"
   | "payment_receipt"
   | "fulfillment_update"
+  | "checkout_recovery"
+  | "return_request_created"
+  | "return_request_updated"
   | "refund_confirmation"
   | "team_invitation";
 export type AuditEventAction =
   | "store_created"
   | "store_updated"
+  | "store_policy_updated"
   | "store_published"
   | "store_paused"
   | "product_created"
@@ -50,9 +74,14 @@ export type AuditEventAction =
   | "shipping_zone_status_updated"
   | "checkout_order_created"
   | "manual_order_created"
+  | "abandoned_checkout_recovered"
+  | "abandoned_checkout_recovery_queued"
+  | "abandoned_checkout_dismissed"
   | "order_status_updated"
   | "payment_confirmed"
   | "fulfillment_updated"
+  | "return_request_created"
+  | "return_request_updated"
   | "refund_created"
   | "team_invited"
   | "team_invite_revoked"
@@ -68,6 +97,9 @@ export type Store = {
   description: string;
   currency: string;
   themeColor: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  socialImageUrl?: string;
   status: StoreStatus;
   createdAt: string;
   productCount: number;
@@ -127,6 +159,18 @@ export type StoreNotification = {
   sentAt?: string;
   failedAt?: string;
   createdAt: string;
+};
+
+export type StorePolicy = {
+  id: string;
+  storeId: string;
+  type: StorePolicyType;
+  title: string;
+  body: string;
+  status: StorePolicyStatus;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ShippingZone = {
@@ -224,6 +268,7 @@ export type Order = {
   paymentMethod: PaymentMethod;
   paymentProvider: string;
   paymentReference?: string;
+  customerAccessToken?: string;
   subtotalCents: number;
   discountCode?: string;
   discountCents: number;
@@ -245,6 +290,8 @@ export type Order = {
   fulfillmentNote?: string;
   items?: OrderItem[];
   refunds: OrderRefund[];
+  returnRequests: OrderReturnRequest[];
+  paymentTransactions: OrderPaymentTransaction[];
 };
 
 export type ShippingAddress = {
@@ -281,6 +328,68 @@ export type OrderRefund = {
   createdAt: string;
 };
 
+export type OrderReturnRequest = {
+  id: string;
+  storeId: string;
+  orderId: string;
+  customerEmail: string;
+  status: ReturnRequestStatus;
+  reason: ReturnRequestReason;
+  note?: string;
+  merchantNote?: string;
+  requestedAt: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrderPaymentTransaction = {
+  id: string;
+  storeId: string;
+  orderId: string;
+  clerkUserId?: string;
+  type: PaymentTransactionType;
+  status: PaymentTransactionStatus;
+  paymentMethod: PaymentMethod;
+  paymentProvider: string;
+  providerReference?: string;
+  amountCents: number;
+  currency: string;
+  processedAt?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type AbandonedCheckoutLine = {
+  productId: string;
+  productVariantId?: string;
+  productName: string;
+  variantName?: string;
+  unitPriceCents: number;
+  quantity: number;
+  imageUrl?: string;
+};
+
+export type AbandonedCheckout = {
+  id: string;
+  storeId: string;
+  customerEmail: string;
+  customerName?: string;
+  recoveryToken: string;
+  status: AbandonedCheckoutStatus;
+  lines: AbandonedCheckoutLine[];
+  subtotalCents: number;
+  currency: string;
+  lastSeenAt: string;
+  recoveryEmailSentAt?: string;
+  recoveryEmailCount: number;
+  recoveredOrderId?: string;
+  recoveredAt?: string;
+  dismissedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Discount = {
   id: string;
   storeId: string;
@@ -303,10 +412,12 @@ export type StoreWorkspace = {
   invitations: StoreInvitation[];
   auditEvents: StoreAuditEvent[];
   notifications: StoreNotification[];
+  policies: StorePolicy[];
   shippingZones: ShippingZone[];
   products: Product[];
   collections: ProductCollection[];
   orders: Order[];
+  abandonedCheckouts: AbandonedCheckout[];
   discounts: Discount[];
   inventoryAdjustments: InventoryAdjustment[];
 };

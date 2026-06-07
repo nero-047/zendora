@@ -20,14 +20,22 @@ import {
   Truck,
   UserMinus,
   Users,
+  XCircle,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { CollectionForm } from "@/features/commerce/components/collection-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
 import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
+import { StorePoliciesForm } from "@/features/commerce/components/store-policies-form";
 import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
 import { TeamInviteForm } from "@/features/commerce/components/team-invite-form";
+import {
+  abandonedCheckoutStatusLabels,
+  canQueueAbandonedCheckoutRecovery,
+  getAbandonedCheckoutRecoveryHref,
+  summarizeAbandonedCheckoutLines,
+} from "@/features/commerce/abandoned-checkouts";
 import {
   getCustomerStats,
   getCustomerSummaries,
@@ -38,8 +46,10 @@ import {
   orderStatusLabels,
 } from "@/features/commerce/order-status";
 import {
+  dismissAbandonedCheckoutAction,
   pauseStoreAction,
   publishStoreAction,
+  queueAbandonedCheckoutRecoveryAction,
   removeStoreMemberAction,
   revokeStoreInvitationAction,
   updateCollectionStatusAction,
@@ -70,16 +80,21 @@ export default async function StorePage({
     collections,
     shippingZones,
     orders,
+    abandonedCheckouts,
     discounts,
     members,
     invitations,
     auditEvents,
     notifications,
+    policies,
     membershipRole,
   } = workspace;
   const canManageTeam = canStoreRole(membershipRole, "manage_team");
   const customers = getCustomerSummaries(orders, store.currency);
   const customerStats = getCustomerStats(customers);
+  const openAbandonedCheckoutCount = abandonedCheckouts.filter(
+    (checkout) => checkout.status === "open",
+  ).length;
 
   return (
     <div className="grid gap-5">
@@ -145,6 +160,10 @@ export default async function StorePage({
           ["Orders", String(store.orderCount)],
           ["Customers", String(customerStats.totalCustomers)],
           ["Repeat buyers", String(customerStats.repeatCustomers)],
+          [
+            "Abandoned",
+            `${openAbandonedCheckoutCount}/${abandonedCheckouts.length}`,
+          ],
           ["Inventory", String(store.inventoryCount)],
           ["Products", String(store.productCount)],
         ].map(([label, value]) => (
@@ -156,6 +175,12 @@ export default async function StorePage({
       </section>
 
       <StoreSettingsForm store={store} />
+
+      <StorePoliciesForm
+        policies={policies}
+        storeId={store.id}
+        storeSlug={store.slug}
+      />
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         {canManageTeam ? (
@@ -479,6 +504,119 @@ export default async function StorePage({
             <p className="p-4 text-sm text-slate-500">No discount codes yet.</p>
           )}
         </div>
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <Mail aria-hidden="true" size={18} />
+            Abandoned checkouts
+          </h2>
+        </div>
+        {abandonedCheckouts.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {abandonedCheckouts.slice(0, 6).map((checkout) => {
+              const summary = summarizeAbandonedCheckoutLines(checkout.lines);
+              const recoveryHref = getAbandonedCheckoutRecoveryHref({
+                storeSlug: store.slug,
+                recoveryToken: checkout.recoveryToken,
+              });
+              const canRecover = canQueueAbandonedCheckoutRecovery(checkout);
+
+              return (
+                <div
+                  className="grid gap-4 p-4 xl:grid-cols-[1fr_auto]"
+                  key={checkout.id}
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-950">
+                        {checkout.customerName || "Guest customer"}
+                      </p>
+                      <span className="status-pill">
+                        {abandonedCheckoutStatusLabels[checkout.status]}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                      {checkout.customerEmail}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-700">
+                      {summary.itemCount} items /{" "}
+                      {formatCurrency(checkout.subtotalCents, checkout.currency)}
+                    </p>
+                    <p className="mt-1 text-xs font-medium text-slate-500">
+                      Last seen{" "}
+                      {new Date(checkout.lastSeenAt).toLocaleString("en-US", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}{" "}
+                      / {checkout.recoveryEmailCount} recovery emails
+                    </p>
+                    {checkout.lines.length > 0 ? (
+                      <div className="mt-3 grid gap-1 text-xs text-slate-500">
+                        {checkout.lines.slice(0, 3).map((line) => (
+                          <p
+                            className="truncate"
+                            key={`${checkout.id}:${line.productId}:${line.productVariantId || ""}`}
+                          >
+                            {line.quantity} x {line.productName}
+                            {line.variantName ? ` (${line.variantName})` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap items-start gap-2 xl:justify-end">
+                    <Link
+                      className="secondary-button min-h-10 px-3 text-sm"
+                      href={recoveryHref}
+                    >
+                      <ExternalLink aria-hidden="true" size={16} />
+                      Open
+                    </Link>
+                    <form
+                      action={queueAbandonedCheckoutRecoveryAction.bind(
+                        null,
+                        store.id,
+                        checkout.id,
+                      )}
+                    >
+                      <button
+                        className="secondary-button min-h-10 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!canRecover}
+                        type="submit"
+                      >
+                        <Mail aria-hidden="true" size={16} />
+                        Send
+                      </button>
+                    </form>
+                    <form
+                      action={dismissAbandonedCheckoutAction.bind(
+                        null,
+                        store.id,
+                        checkout.id,
+                      )}
+                    >
+                      <button
+                        className="secondary-button min-h-10 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={checkout.status !== "open"}
+                        type="submit"
+                      >
+                        <XCircle aria-hidden="true" size={16} />
+                        Dismiss
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Recoverable carts will appear after a customer enters an email at checkout.
+          </p>
+        )}
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">

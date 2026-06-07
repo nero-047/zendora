@@ -83,5 +83,9 @@ export function getOrderLifecycleEvents(order: Order) {
       label: "Refund recorded",
       value: refund.createdAt,
     })),
+    ...order.returnRequests.map((request) => ({
+      label: "Return requested",
+      value: request.requestedAt,
+    })),
   ].filter((event) => Boolean(event.value));
 }

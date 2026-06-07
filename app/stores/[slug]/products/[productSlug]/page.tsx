@@ -6,6 +6,7 @@ import { ArrowLeft, Package, ShoppingBag } from "lucide-react";
 
 import { ProductDetailActions } from "@/features/commerce/components/product-detail-actions";
 import { getPublicStorefront } from "@/features/commerce/data";
+import { getStoreSeoTitle, getStoreSocialImages } from "@/features/commerce/seo";
 import { formatCurrency } from "@/lib/utils";
 
 type ProductPageProps = {
@@ -44,10 +45,12 @@ export async function generateMetadata({
   }
 
   return {
-    title: `${data.product.name} | ${data.store.name}`,
+    title: getStoreSeoTitle(data.store, data.product.name),
     description: data.product.description,
     openGraph: {
-      images: [data.product.imageUrl],
+      title: getStoreSeoTitle(data.store, data.product.name),
+      description: data.product.description,
+      images: getStoreSocialImages(data.store, data.product.imageUrl),
     },
   };
 }
