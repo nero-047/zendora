@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowUpRight,
   BarChart3,
   CircleDollarSign,
   PackageSearch,
@@ -48,8 +49,15 @@ export default async function StoreAnalyticsPage({
     notFound();
   }
 
-  const { store, orders, products } = workspace;
-  const analytics = getStoreAnalytics({ orders, products, dayCount: 14 });
+  const { store, orders, products, abandonedCheckouts } = workspace;
+  const analytics = getStoreAnalytics({
+    orders,
+    products,
+    abandonedCheckouts,
+    storeId: store.id,
+    currency: store.currency,
+    dayCount: 14,
+  });
   const maxDaySales = Math.max(
     1,
     ...analytics.days.map((day) => day.netSalesCents),
@@ -64,6 +72,10 @@ export default async function StoreAnalyticsPage({
   const maxProductSales = Math.max(
     1,
     ...analytics.topProducts.map((product) => product.netSalesCents),
+  );
+  const maxCustomerSales = Math.max(
+    1,
+    ...analytics.topCustomers.map((customer) => customer.netSalesCents),
   );
   const metricCards = [
     {
@@ -83,6 +95,20 @@ export default async function StoreAnalyticsPage({
       label: "Average order",
       value: formatCurrency(analytics.averageOrderValueCents, store.currency),
       detail: `${analytics.averageItemsPerPaidOrder} items per paid order`,
+    },
+    {
+      icon: CircleDollarSign,
+      label: "Pending revenue",
+      value: formatCurrency(analytics.pendingRevenueCents, store.currency),
+      detail: `${formatNumber(analytics.pendingOrders)} pending orders`,
+    },
+    {
+      icon: TrendingUp,
+      label: "Cart recovery",
+      value: formatPercent(analytics.checkoutRecoveryRate),
+      detail: `${formatNumber(
+        analytics.recoveredAbandonedCheckouts,
+      )}/${formatNumber(analytics.abandonedCheckoutCount)} recovered`,
     },
     {
       icon: Repeat,
@@ -167,6 +193,50 @@ export default async function StoreAnalyticsPage({
             <p className="mt-2 text-xs font-medium text-slate-500">{detail}</p>
           </div>
         ))}
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <TrendingUp aria-hidden="true" size={18} />
+            Analytics priorities
+          </h2>
+        </div>
+        {analytics.insights.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {analytics.insights.map((insight) => (
+              <div
+                className="grid gap-3 p-4 md:grid-cols-[auto_1fr_auto]"
+                key={insight.id}
+              >
+                <span className="status-pill w-fit capitalize">
+                  {insight.severity}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {insight.title}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {insight.detail}
+                  </p>
+                </div>
+                {insight.href ? (
+                  <Link
+                    className="secondary-button min-h-10 px-3 text-sm"
+                    href={insight.href}
+                  >
+                    <ArrowUpRight aria-hidden="true" size={16} />
+                    {insight.actionLabel}
+                  </Link>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Analytics priorities will appear as the store receives more signal.
+          </p>
+        )}
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
@@ -261,6 +331,52 @@ export default async function StoreAnalyticsPage({
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <Users aria-hidden="true" size={18} />
+            Customer concentration
+          </h2>
+        </div>
+        {analytics.topCustomers.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {analytics.topCustomers.map((customer) => (
+              <div
+                className="grid gap-3 p-4 md:grid-cols-[1fr_180px_auto]"
+                key={customer.customerEmail}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">
+                    {customer.customerName}
+                  </p>
+                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                    {customer.customerEmail} / {customer.orderCount} orders
+                  </p>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-slate-100 md:mt-2">
+                  <div
+                    className="h-full rounded-full bg-violet-600"
+                    style={{
+                      width: barWidth(customer.netSalesCents, maxCustomerSales),
+                    }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  <span className="status-pill">{formatPercent(customer.share)}</span>
+                  <p className="text-sm font-semibold text-slate-950 md:text-right">
+                    {formatCurrency(customer.netSalesCents, store.currency)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Customer concentration appears after paid orders are created.
+          </p>
+        )}
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">

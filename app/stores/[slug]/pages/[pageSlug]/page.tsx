@@ -12,6 +12,7 @@ import { getStorePageDescription } from "@/features/commerce/store-pages";
 import {
   getStoreSeoTitle,
   getStoreSocialImages,
+  getStorePageCanonicalUrl,
 } from "@/features/commerce/seo";
 
 type StoreCustomPageProps = {
@@ -58,13 +59,19 @@ export async function generateMetadata({
 
   const title = data.page.seoTitle?.trim() || data.page.title;
   const description = getStorePageDescription(data.page);
+  const canonicalUrl = getStorePageCanonicalUrl(data.store, data.page);
+  const metadataTitle = getStoreSeoTitle(data.store, title);
 
   return {
-    title: getStoreSeoTitle(data.store, title),
+    title: metadataTitle,
     description,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
-      title: getStoreSeoTitle(data.store, title),
+      title: metadataTitle,
       description,
+      url: canonicalUrl,
       images: getStoreSocialImages(data.store, data.heroProduct?.imageUrl),
     },
   };

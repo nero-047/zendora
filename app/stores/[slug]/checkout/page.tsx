@@ -32,12 +32,20 @@ export async function generateMetadata({
   if (!workspace) {
     return {
       title: "Checkout not found",
+      robots: {
+        index: false,
+        follow: false,
+      },
     };
   }
 
   return {
     title: getStoreSeoTitle(workspace.store, "Checkout"),
     description: getStoreSeoDescription(workspace.store),
+    robots: {
+      index: false,
+      follow: false,
+    },
     openGraph: {
       title: getStoreSeoTitle(workspace.store, "Checkout"),
       description: getStoreSeoDescription(workspace.store),

@@ -13,8 +13,8 @@ import {
   getAbandonedCheckoutRecoveryHref,
 } from "@/features/commerce/abandoned-checkouts";
 import {
+  calculateCheckoutTotals,
   calculateDiscountCents,
-  calculateShippingQuote,
   calculateTaxCents,
   normalizeCartLines,
   normalizeCheckoutSessionId,
@@ -4065,24 +4065,19 @@ export async function createCheckoutOrderAction(
     });
   }
 
-  const discountedSubtotalCents = Math.max(0, subtotalCents - discount.cents);
-  const shippingQuote = calculateShippingQuote({
-    discountedSubtotalCents,
+  const checkoutTotalsBeforeGiftCard = calculateCheckoutTotals({
+    discountCents: discount.cents,
     freeShippingThresholdCents: storefront.store.freeShippingThresholdCents,
     shippingCountry: parsed.data.shippingCountry,
     shippingRateCents: storefront.store.shippingRateCents,
     shippingZones: storefront.shippingZones,
+    subtotalCents,
+    taxRateBps: storefront.store.taxRateBps,
   });
-  const shippingCents = shippingQuote.shippingCents;
-  const taxCents = calculateTaxCents(
-    discountedSubtotalCents,
-    storefront.store.taxRateBps,
-  );
-  const totalCents = discountedSubtotalCents + shippingCents + taxCents;
   const giftCard = await getCheckoutGiftCard({
     code: normalizeGiftCardCode(parsed.data.giftCardCode) || null,
     currency: storefront.store.currency,
-    orderTotalCents: totalCents,
+    orderTotalCents: checkoutTotalsBeforeGiftCard.totalCents,
     storeId: storefront.store.id,
   });
 
@@ -4092,8 +4087,21 @@ export async function createCheckoutOrderAction(
     });
   }
 
-  const giftCardCents = giftCard.cents;
-  const amountDueCents = Math.max(0, totalCents - giftCardCents);
+  const checkoutTotals = calculateCheckoutTotals({
+    discountCents: discount.cents,
+    freeShippingThresholdCents: storefront.store.freeShippingThresholdCents,
+    giftCardCents: giftCard.cents,
+    shippingCountry: parsed.data.shippingCountry,
+    shippingRateCents: storefront.store.shippingRateCents,
+    shippingZones: storefront.shippingZones,
+    subtotalCents,
+    taxRateBps: storefront.store.taxRateBps,
+  });
+  const shippingCents = checkoutTotals.shippingCents;
+  const taxCents = checkoutTotals.taxCents;
+  const totalCents = checkoutTotals.totalCents;
+  const giftCardCents = checkoutTotals.giftCardCents;
+  const amountDueCents = checkoutTotals.amountDueCents;
   const customerAccessToken = createCustomerAccessToken();
   const reservedInventory: ReservedInventory[] = [];
   const productInventoryById = new Map(

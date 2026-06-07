@@ -32,8 +32,167 @@ function getAssertableHtml(body) {
     .replace(/\s+/g, " ");
 }
 
+function assertSecurityHeaders(result, path) {
+  const headers = result.response.headers;
+  const csp = headers.get("content-security-policy") || "";
+
+  assert(
+    headers.get("x-content-type-options") === "nosniff",
+    `${path} is missing X-Content-Type-Options=nosniff.`,
+  );
+  assert(
+    headers.get("x-frame-options") === "DENY",
+    `${path} is missing X-Frame-Options=DENY.`,
+  );
+  assert(
+    headers.get("referrer-policy") === "strict-origin-when-cross-origin",
+    `${path} is missing strict Referrer-Policy.`,
+  );
+  assert(
+    (headers.get("permissions-policy") || "").includes("camera=()"),
+    `${path} is missing restrictive Permissions-Policy.`,
+  );
+  assert(
+    (headers.get("strict-transport-security") || "").includes(
+      "max-age=31536000",
+    ),
+    `${path} is missing Strict-Transport-Security.`,
+  );
+  assert(
+    csp.includes("default-src 'self'") &&
+      csp.includes("object-src 'none'") &&
+      csp.includes("frame-ancestors 'none'"),
+    `${path} is missing the expected Content-Security-Policy baseline.`,
+  );
+  assert(
+    !headers.has("x-powered-by"),
+    `${path} should not expose the Next.js powered-by header.`,
+  );
+}
+
 async function run() {
   const checks = [];
+
+  function assertHtmlRoute(check, result) {
+    assert(
+      result.response.status === 200,
+      `${check.path} did not return 200. Status: ${result.response.status}`,
+    );
+    assert(
+      typeof result.body === "string",
+      `${check.path} did not return an HTML response.`,
+    );
+
+    const assertableBody = check.visibleOnly
+      ? getAssertableHtml(result.body)
+      : result.body.replace(/<!--[\s\S]*?-->/g, "");
+    const visibleBody = getAssertableHtml(result.body);
+
+    for (const expectedText of check.includes) {
+      assert(
+        assertableBody.includes(expectedText),
+        `${check.path} did not render expected text: ${expectedText}`,
+      );
+    }
+
+    for (const excludedText of check.excludes || []) {
+      assert(
+        !visibleBody.includes(excludedText),
+        `${check.path} rendered excluded text: ${excludedText}`,
+      );
+    }
+  }
+
+  async function checkHtmlRoute(check) {
+    const result = await request(check.path);
+    assertHtmlRoute(check, result);
+    checks.push(check.label);
+  }
+
+  async function checkProtectedDashboardRoute(check) {
+    const result = await request(check.path);
+
+    if (result.response.status === 307 || result.response.status === 308) {
+      const location = result.response.headers.get("location") || "";
+      assert(
+        location.includes("/sign-in") || location.includes("/dashboard"),
+        `${check.path} redirected to an unexpected location: ${location}`,
+      );
+      checks.push(`${check.label} auth redirect`);
+      return;
+    }
+
+    assertHtmlRoute(check, result);
+    checks.push(check.label);
+  }
+
+  async function checkAbandonedCheckoutApi() {
+    const emailSuffix = `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    const validCapture = await request(
+      "/api/stores/northline-supply/abandoned-checkouts",
+      {
+        body: JSON.stringify({
+          customerEmail: `smoke-${emailSuffix}@example.com`,
+          customerName: "Smoke Test",
+          cart: [
+            {
+              productId: "demo-product-hydra-bottle",
+              variantId: "demo-variant-hydra-bottle-steel",
+              quantity: 2,
+            },
+          ],
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    assert(
+      validCapture.response.status === 200,
+      `abandoned checkout capture did not return 200. Status: ${validCapture.response.status}`,
+    );
+    assert(
+      validCapture.body?.ok === true &&
+        typeof validCapture.body.recoveryToken === "string" &&
+        validCapture.body.recoveryToken.length >= 16,
+      "abandoned checkout capture did not return a recovery token.",
+    );
+
+    const invalidCapture = await request(
+      "/api/stores/northline-supply/abandoned-checkouts",
+      {
+        body: JSON.stringify({
+          customerEmail: `smoke-invalid-${emailSuffix}@example.com`,
+          cart: [
+            {
+              productId: "missing-product",
+              quantity: 1,
+            },
+          ],
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    assert(
+      invalidCapture.response.status === 400,
+      `invalid abandoned checkout capture should return 400. Status: ${invalidCapture.response.status}`,
+    );
+    assert(
+      invalidCapture.body?.ok === false &&
+        String(invalidCapture.body.error || "").includes("unavailable"),
+      "invalid abandoned checkout capture should explain unavailable cart items.",
+    );
+
+    checks.push("abandoned checkout api");
+  }
 
   const health = await request("/api/health");
   assert(health.response.status === 200, "/api/health did not return 200.");
@@ -46,7 +205,9 @@ async function run() {
     typeof home.body === "string" && home.body.includes("Zendora"),
     "/ did not render Zendora content.",
   );
+  assertSecurityHeaders(home, "/");
   checks.push("home");
+  checks.push("security headers");
 
   const dashboard = await request("/dashboard");
   assert(
@@ -75,21 +236,53 @@ async function run() {
 
   checks.push("readiness");
 
+  const robots = await request("/robots.txt");
+  assert(robots.response.status === 200, "/robots.txt did not return 200.");
+  assert(
+    typeof robots.body === "string" &&
+      robots.body.includes("Disallow: /dashboard/") &&
+      robots.body.includes("Sitemap:"),
+    "/robots.txt did not expose private-route rules and sitemap location.",
+  );
+  checks.push("robots");
+
+  const sitemap = await request("/sitemap.xml");
+  assert(sitemap.response.status === 200, "/sitemap.xml did not return 200.");
+  assert(
+    typeof sitemap.body === "string" &&
+      sitemap.body.includes("/stores/northline-supply") &&
+      sitemap.body.includes("/stores/northline-supply/products/field-carry-pack") &&
+      !sitemap.body.includes("/dashboard/") &&
+      !sitemap.body.includes("/checkout"),
+    "/sitemap.xml did not expose only public storefront URLs.",
+  );
+  checks.push("sitemap");
+
   const storefrontChecks = [
     {
       label: "storefront",
       path: "/stores/northline-supply",
-      includes: ["Northline Supply", "Field Carry Pack", "Checkout"],
+      includes: [
+        "Northline Supply",
+        "Field Carry Pack",
+        "Checkout",
+        '"@type":"Store"',
+      ],
     },
     {
       label: "product",
       path: "/stores/northline-supply/products/field-carry-pack",
-      includes: ["Field Carry Pack", "Weather-resistant", "Add to cart"],
+      includes: [
+        "Field Carry Pack",
+        "Weather-resistant",
+        "Add to cart",
+        '"@type":"Product"',
+      ],
     },
     {
       label: "collection",
       path: "/stores/northline-supply/collections/everyday-carry",
-      includes: ["Everyday Carry", "Field Carry Pack"],
+      includes: ["Everyday Carry", "Field Carry Pack", '"@type":"CollectionPage"'],
     },
     {
       label: "filtered collection",
@@ -101,7 +294,7 @@ async function run() {
     {
       label: "checkout",
       path: "/stores/northline-supply/checkout",
-      includes: ["Checkout", "Customer", "Delivery"],
+      includes: ["Checkout", "Customer", "Delivery", "noindex"],
     },
     {
       label: "cart permalink checkout",
@@ -115,7 +308,12 @@ async function run() {
     {
       label: "order receipt",
       path: "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
-      includes: ["Order received", "Payment summary", "Request return"],
+      includes: [
+        "Order received",
+        "Payment summary",
+        "Request return",
+        "noindex",
+      ],
     },
     {
       label: "store page",
@@ -130,36 +328,66 @@ async function run() {
   ];
 
   for (const check of storefrontChecks) {
-    const result = await request(check.path);
-    assert(
-      result.response.status === 200,
-      `${check.path} did not return 200. Status: ${result.response.status}`,
-    );
-    assert(
-      typeof result.body === "string",
-      `${check.path} did not return an HTML response.`,
-    );
+    await checkHtmlRoute(check);
+  }
 
-    const assertableBody = check.visibleOnly
-      ? getAssertableHtml(result.body)
-      : result.body.replace(/<!--[\s\S]*?-->/g, "");
-    const visibleBody = getAssertableHtml(result.body);
+  await checkAbandonedCheckoutApi();
 
-    for (const expectedText of check.includes) {
-      assert(
-        assertableBody.includes(expectedText),
-        `${check.path} did not render expected text: ${expectedText}`,
-      );
-    }
+  const dashboardChecks = [
+    {
+      label: "dashboard content",
+      path: "/dashboard",
+      includes: ["Commerce command center", "Northline Supply", "Low stock"],
+    },
+    {
+      label: "store operations content",
+      path: "/dashboard/stores/demo-store-outdoor",
+      includes: [
+        "Northline Supply",
+        "Launch readiness",
+        "Activity center",
+        "Operations queue",
+      ],
+    },
+    {
+      label: "admin analytics content",
+      path: "/dashboard/stores/demo-store-outdoor/analytics",
+      includes: ["Analytics", "Orders", "Customer concentration", "Refund"],
+    },
+    {
+      label: "admin products content",
+      path: "/dashboard/stores/demo-store-outdoor/products?q=bottle&sort=inventory_asc",
+      includes: [
+        "Product catalog",
+        "Hydra Bottle",
+        "Needs attention",
+        "Search products",
+      ],
+    },
+    {
+      label: "admin orders content",
+      path: "/dashboard/stores/demo-store-outdoor/orders?q=mira",
+      includes: [
+        "Order workspace",
+        "Mira Chen",
+        "Showing 1-1 of 1 matching orders",
+        "Details",
+      ],
+    },
+    {
+      label: "admin order detail content",
+      path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001",
+      includes: ["Settlement", "Payment ledger", "Net collected", "Ledger delta"],
+    },
+    {
+      label: "admin customers content",
+      path: "/dashboard/stores/demo-store-outdoor/customers?segment=vip&sort=risk_priority",
+      includes: ["Customers", "Mira", "VIP", "Marketing"],
+    },
+  ];
 
-    for (const excludedText of check.excludes || []) {
-      assert(
-        !visibleBody.includes(excludedText),
-        `${check.path} rendered excluded text: ${excludedText}`,
-      );
-    }
-
-    checks.push(check.label);
+  for (const check of dashboardChecks) {
+    await checkProtectedDashboardRoute(check);
   }
 
   console.log(

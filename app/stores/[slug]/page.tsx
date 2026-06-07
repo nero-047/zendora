@@ -12,9 +12,12 @@ import {
 } from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import {
+  getStoreCanonicalUrl,
+  getStoreJsonLd,
   getStoreSeoDescription,
   getStoreSeoTitle,
   getStoreSocialImages,
+  serializeJsonLd,
 } from "@/features/commerce/seo";
 
 type PublicStorePageProps = {
@@ -35,13 +38,18 @@ export async function generateMetadata({
   }
 
   const heroProduct = workspace.products[0];
+  const canonicalUrl = getStoreCanonicalUrl(workspace.store);
 
   return {
     title: getStoreSeoTitle(workspace.store),
     description: getStoreSeoDescription(workspace.store),
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
       title: getStoreSeoTitle(workspace.store),
       description: getStoreSeoDescription(workspace.store),
+      url: canonicalUrl,
       images: getStoreSocialImages(workspace.store, heroProduct?.imageUrl),
     },
   };
@@ -64,9 +72,14 @@ export default async function PublicStorePage({
   const { store, products, collections, navigationMenus } = workspace;
   const heroProduct = products[0];
   const catalogFilters = parseStorefrontCatalogFilters(query);
+  const storeJsonLd = getStoreJsonLd({ store, products });
 
   return (
     <main className="liquid-bg min-h-screen">
+      <script
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(storeJsonLd) }}
+        type="application/ld+json"
+      />
       <StorefrontHeader menus={navigationMenus} store={store} />
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-10 pt-8 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">

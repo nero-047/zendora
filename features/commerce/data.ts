@@ -1999,6 +1999,60 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   };
 }
 
+export type PublicStorefrontSitemapEntry = {
+  store: Store;
+  products: Product[];
+  collections: ProductCollection[];
+  policies: StorePolicy[];
+  customPages: StorePage[];
+};
+
+function getMockPublicStorefrontSitemapEntries(): PublicStorefrontSitemapEntry[] {
+  return mockStores
+    .filter((store) => store.status === "active")
+    .map((store) => {
+      const activeProducts = mockProducts.filter(
+        (product) => product.storeId === store.id && product.status === "active",
+      );
+      const activeProductIds = new Set(activeProducts.map((product) => product.id));
+      const collections = mockCollections
+        .filter(
+          (collection) =>
+            collection.storeId === store.id && collection.status === "active",
+        )
+        .map((collection) => {
+          const productIds = collection.productIds.filter((id) =>
+            activeProductIds.has(id),
+          );
+
+          return {
+            ...collection,
+            productIds,
+            productCount: productIds.length,
+          };
+        })
+        .filter((collection) => collection.productCount > 0);
+
+      return {
+        store,
+        products: activeProducts,
+        collections,
+        policies: mockStorePolicies.filter(
+          (policy) =>
+            policy.storeId === store.id &&
+            policy.status === "published" &&
+            policy.body.trim().length > 0,
+        ),
+        customPages: mockStorePages.filter(
+          (page) =>
+            page.storeId === store.id &&
+            page.status === "published" &&
+            page.body.trim().length > 0,
+        ),
+      };
+    });
+}
+
 function getMockStoreWorkspaceForUser(
   userId: string,
   storeId: string,
@@ -2194,6 +2248,86 @@ async function loadPublicStorefrontFromClient(
     discounts: [],
     inventoryAdjustments: [],
   };
+}
+
+async function loadPublicStorefrontSitemapEntriesFromClient(
+  db: SupabaseClient,
+): Promise<PublicStorefrontSitemapEntry[]> {
+  const { data, error } = await db
+    .from("stores")
+    .select("*")
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const stores = ((data || []) as StoreRow[]).map((row) => mapStore(row, [], []));
+  const storefronts = await Promise.all(
+    stores.map((store) => loadPublicStorefrontFromClient(db, store.slug)),
+  );
+
+  return storefronts.flatMap((workspace) =>
+    workspace
+      ? [
+          {
+            store: workspace.store,
+            products: workspace.products,
+            collections: workspace.collections,
+            policies: workspace.policies.filter(
+              (policy) => policy.body.trim().length > 0,
+            ),
+            customPages: workspace.customPages.filter(
+              (page) => page.body.trim().length > 0,
+            ),
+          },
+        ]
+      : [],
+  );
+}
+
+export async function listPublicStorefrontSitemapEntries(): Promise<
+  PublicStorefrontSitemapEntry[]
+> {
+  const demoEntries = isDemoDataEnabled()
+    ? getMockPublicStorefrontSitemapEntries()
+    : [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      return await loadPublicStorefrontSitemapEntriesFromClient(getSupabaseAdmin());
+    } catch (error) {
+      if (shouldUseDemoCatalogFallback(error)) {
+        return demoEntries;
+      }
+
+      if (isCommerceSchemaUnavailableError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  if (isSupabasePublicConfigured()) {
+    try {
+      return await loadPublicStorefrontSitemapEntriesFromClient(getSupabasePublic());
+    } catch (error) {
+      if (shouldUseDemoCatalogFallback(error)) {
+        return demoEntries;
+      }
+
+      if (isCommerceSchemaUnavailableError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  return demoEntries;
 }
 
 export async function upsertProfileForUser(user: AppUser) {

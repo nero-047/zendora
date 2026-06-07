@@ -9,6 +9,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import type { ActionState } from "@/features/commerce/action-state";
 import { initialActionState } from "@/features/commerce/action-state";
 import { createCheckoutOrderAction } from "@/features/commerce/actions";
+import { calculateCheckoutTotals } from "@/features/commerce/business-rules";
 import {
   type CartLine,
   useStoreCart,
@@ -31,43 +32,6 @@ type CheckoutFormProps = {
   initialCustomerName?: string;
   initialRecoveryToken?: string;
 };
-
-function normalizeShippingCountry(value: string) {
-  return value.trim().toLowerCase().replace(/[.]/g, "").replace(/\s+/g, " ");
-}
-
-function getShippingEstimate(input: {
-  freeShippingThresholdCents: number;
-  shippingCountry: string;
-  shippingRateCents: number;
-  shippingZones: ShippingZone[];
-  subtotalCents: number;
-}) {
-  const normalizedCountry = normalizeShippingCountry(input.shippingCountry);
-  const zone = input.shippingZones.find(
-    (shippingZone) =>
-      shippingZone.status === "active" &&
-      shippingZone.countries.some(
-        (country) => normalizeShippingCountry(country) === normalizedCountry,
-      ),
-  );
-  const rateCents = zone?.rateCents ?? input.shippingRateCents;
-  const freeShippingThresholdCents =
-    zone?.freeShippingThresholdCents ?? input.freeShippingThresholdCents;
-
-  if (input.subtotalCents <= 0) {
-    return { cents: 0, zone };
-  }
-
-  if (
-    freeShippingThresholdCents > 0 &&
-    input.subtotalCents >= freeShippingThresholdCents
-  ) {
-    return { cents: 0, zone };
-  }
-
-  return { cents: rateCents, zone };
-}
 
 export function CheckoutForm({
   checkoutSessionId,
@@ -140,24 +104,20 @@ export function CheckoutForm({
     restoredInitialCartKeyRef.current = initialCartKey;
   }, [initialCart, initialCartKey, replaceCart]);
 
-  const totalCents = cartItems.reduce(
+  const subtotalCents = cartItems.reduce(
     (sum, item) =>
       sum + (item.variant?.priceCents ?? item.product.priceCents) * item.quantity,
     0,
   );
-  const shippingEstimate = getShippingEstimate({
+  const checkoutTotals = calculateCheckoutTotals({
     freeShippingThresholdCents,
     shippingCountry,
     shippingRateCents,
     shippingZones,
-    subtotalCents: totalCents,
+    subtotalCents,
+    taxRateBps,
   });
-  const estimatedShippingCents = shippingEstimate.cents;
-  const shippingLabel = shippingEstimate.zone?.name || "Base rate";
-  const estimatedTaxCents =
-    totalCents > 0 ? Math.round((totalCents * taxRateBps) / 10000) : 0;
-  const estimatedTotalCents =
-    totalCents + estimatedShippingCents + estimatedTaxCents;
+  const shippingLabel = checkoutTotals.shippingZone?.name || "Base rate";
   const currency = products[0]?.currency || "USD";
   const checkoutPayload = cartItems.map((item) => ({
     productId: item.productId,
@@ -587,7 +547,7 @@ export function CheckoutForm({
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold text-slate-500">Subtotal</span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(totalCents, currency)}
+                {formatCurrency(checkoutTotals.subtotalCents, currency)}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -600,19 +560,19 @@ export function CheckoutForm({
                 ) : null}
               </span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(estimatedShippingCents, currency)}
+                {formatCurrency(checkoutTotals.shippingCents, currency)}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold text-slate-500">Tax</span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(estimatedTaxCents, currency)}
+                {formatCurrency(checkoutTotals.taxCents, currency)}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
               <span className="text-sm font-semibold text-slate-500">Estimated total</span>
               <span className="text-xl font-semibold text-slate-950">
-                {formatCurrency(estimatedTotalCents, currency)}
+                {formatCurrency(checkoutTotals.totalCents, currency)}
               </span>
             </div>
           </div>

@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   Boxes,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Edit3,
   Filter,
@@ -24,11 +26,27 @@ import {
   getProductCategories,
   getProductEditHref,
   getProductStats,
+  parseProductHealthFilter,
+  parseProductInventoryUrgencyFilter,
+  parseProductSortOption,
   productStatusFilters,
   productStatusLabels,
+  productHealthFilters,
+  productHealthFilterLabels,
+  productInventoryUrgencyFilters,
+  productInventoryUrgencyFilterLabels,
+  productSortLabels,
+  productSortOptions,
   readProductSearchParam,
   parseProductStatusFilter,
 } from "@/features/commerce/products";
+import {
+  buildDashboardPageHref,
+  dashboardPageSizeOptions,
+  paginateItems,
+  parseDashboardPage,
+  parseDashboardPageSize,
+} from "@/features/commerce/pagination";
 import { formatCurrency } from "@/lib/utils";
 
 export default async function ProductsPage({
@@ -40,6 +58,11 @@ export default async function ProductsPage({
     q?: string | string[];
     status?: string | string[];
     category?: string | string[];
+    health?: string | string[];
+    inventory?: string | string[];
+    sort?: string | string[];
+    page?: string | string[];
+    pageSize?: string | string[];
   }>;
 }) {
   const { storeId } = await params;
@@ -55,13 +78,12 @@ export default async function ProductsPage({
   const searchQuery = readProductSearchParam(query.q);
   const selectedStatus = parseProductStatusFilter(query.status);
   const selectedCategory = readProductSearchParam(query.category);
+  const selectedHealth = parseProductHealthFilter(query.health);
+  const selectedInventory = parseProductInventoryUrgencyFilter(query.inventory);
+  const selectedSort = parseProductSortOption(query.sort);
+  const selectedPage = parseDashboardPage(query.page);
+  const selectedPageSize = parseDashboardPageSize(query.pageSize);
   const categories = getProductCategories(products);
-  const filteredProducts = filterProducts({
-    products,
-    query: searchQuery,
-    status: selectedStatus,
-    category: selectedCategory,
-  });
   const stats = getProductStats(products);
   const inventorySignals = getInventoryPlanningSignals({
     products,
@@ -71,6 +93,22 @@ export default async function ProductsPage({
   const inventorySignalsByProduct = new Map(
     inventorySignals.map((signal) => [signal.productId, signal]),
   );
+  const filteredProducts = filterProducts({
+    products,
+    query: searchQuery,
+    status: selectedStatus,
+    category: selectedCategory,
+    health: selectedHealth,
+    inventory: selectedInventory,
+    sort: selectedSort,
+    inventorySignalsByProduct,
+  });
+  const paginatedProducts = paginateItems({
+    items: filteredProducts,
+    page: selectedPage,
+    pageSize: selectedPageSize,
+  });
+  const productsBasePath = `/dashboard/stores/${store.id}/products`;
   const reorderNowCount = inventorySignals.filter(
     (signal) =>
       signal.urgency === "out_of_stock" || signal.urgency === "reorder_now",
@@ -159,7 +197,8 @@ export default async function ProductsPage({
       </section>
 
       <section className="soft-panel p-4">
-        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto]" method="get">
+        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto]" method="get">
+          <input name="page" type="hidden" value="1" />
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Search products
             <span className="relative">
@@ -187,6 +226,34 @@ export default async function ProductsPage({
             </select>
           </label>
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Health
+            <select
+              className="field min-w-44"
+              defaultValue={selectedHealth}
+              name="health"
+            >
+              {productHealthFilters.map((health) => (
+                <option key={health} value={health}>
+                  {productHealthFilterLabels[health]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Inventory
+            <select
+              className="field min-w-44"
+              defaultValue={selectedInventory}
+              name="inventory"
+            >
+              {productInventoryUrgencyFilters.map((inventory) => (
+                <option key={inventory} value={inventory}>
+                  {productInventoryUrgencyFilterLabels[inventory]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Category
             <select
               className="field min-w-44"
@@ -201,11 +268,43 @@ export default async function ProductsPage({
               ))}
             </select>
           </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Sort
+            <select
+              className="field min-w-44"
+              defaultValue={selectedSort}
+              name="sort"
+            >
+              {productSortOptions.map((sort) => (
+                <option key={sort} value={sort}>
+                  {productSortLabels[sort]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Page size
+            <select
+              className="field min-w-32"
+              defaultValue={selectedPageSize}
+              name="pageSize"
+            >
+              {dashboardPageSizeOptions.map((pageSize) => (
+                <option key={pageSize} value={pageSize}>
+                  {pageSize}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="secondary-button mt-auto min-h-12 px-4 text-sm" type="submit">
             <Filter aria-hidden="true" size={16} />
             Filter
           </button>
         </form>
+        <p className="mt-3 text-xs font-medium text-slate-500">
+          Showing {paginatedProducts.startItem}-{paginatedProducts.endItem} of{" "}
+          {filteredProducts.length} matching products.
+        </p>
       </section>
 
       <section className="soft-panel overflow-hidden">
@@ -218,7 +317,7 @@ export default async function ProductsPage({
           <span className="hidden xl:inline">Price</span>
           <span>Edit</span>
         </div>
-        {filteredProducts.map((product) => {
+        {paginatedProducts.items.map((product) => {
           const health = getProductHealth(product);
           const inventorySignal = inventorySignalsByProduct.get(product.id);
 
@@ -300,6 +399,52 @@ export default async function ProductsPage({
           </p>
         ) : null}
       </section>
+      {filteredProducts.length > 0 ? (
+        <nav
+          aria-label="Product catalog pages"
+          className="flex flex-wrap items-center justify-between gap-3 text-sm"
+        >
+          <p className="font-medium text-slate-500">
+            Page {paginatedProducts.page} of {paginatedProducts.totalPages}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              aria-disabled={!paginatedProducts.hasPreviousPage}
+              className={
+                paginatedProducts.hasPreviousPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: productsBasePath,
+                params: query,
+                page: paginatedProducts.page - 1,
+                pageSize: paginatedProducts.pageSize,
+              })}
+            >
+              <ChevronLeft aria-hidden="true" size={16} />
+              Previous
+            </Link>
+            <Link
+              aria-disabled={!paginatedProducts.hasNextPage}
+              className={
+                paginatedProducts.hasNextPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: productsBasePath,
+                params: query,
+                page: paginatedProducts.page + 1,
+                pageSize: paginatedProducts.pageSize,
+              })}
+            >
+              Next
+              <ChevronRight aria-hidden="true" size={16} />
+            </Link>
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }

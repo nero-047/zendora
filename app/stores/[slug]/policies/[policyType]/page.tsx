@@ -12,7 +12,11 @@ import {
   storePolicyLabels,
   storePolicyTypes,
 } from "@/features/commerce/policies";
-import { getStoreSeoTitle, getStoreSocialImages } from "@/features/commerce/seo";
+import {
+  getStorePolicyCanonicalUrl,
+  getStoreSeoTitle,
+  getStoreSocialImages,
+} from "@/features/commerce/seo";
 import type { StorePolicyType } from "@/features/commerce/types";
 
 type PolicyPageProps = {
@@ -61,12 +65,22 @@ export async function generateMetadata({
     };
   }
 
+  const title = getStoreSeoTitle(data.store, data.policy.title);
+  const description = `${storePolicyLabels[data.policy.type]} for ${
+    data.store.name
+  }.`;
+  const canonicalUrl = getStorePolicyCanonicalUrl(data.store, data.policy);
+
   return {
-    title: getStoreSeoTitle(data.store, data.policy.title),
-    description: `${storePolicyLabels[data.policy.type]} for ${data.store.name}.`,
+    title,
+    description,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
-      title: getStoreSeoTitle(data.store, data.policy.title),
-      description: `${storePolicyLabels[data.policy.type]} for ${data.store.name}.`,
+      title,
+      description,
+      url: canonicalUrl,
       images: getStoreSocialImages(data.store),
     },
   };

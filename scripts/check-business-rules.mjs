@@ -83,12 +83,14 @@ function assertFalse(value, message) {
 const businessRules = loadTsModule("features/commerce/business-rules.ts");
 const analytics = loadTsModule("features/commerce/analytics.ts");
 const orderStatus = loadTsModule("features/commerce/order-status.ts");
+const orderHelpers = loadTsModule("features/commerce/orders.ts");
 const policies = loadTsModule("features/commerce/policies.ts");
 const storePages = loadTsModule("features/commerce/store-pages.ts");
 const seo = loadTsModule("features/commerce/seo.ts");
 const payments = loadTsModule("features/commerce/payments.ts");
 const orderInsights = loadTsModule("features/commerce/order-insights.ts");
 const productHealth = loadTsModule("features/commerce/product-health.ts");
+const productHelpers = loadTsModule("features/commerce/products.ts");
 const inventoryPlanning = loadTsModule("features/commerce/inventory-planning.ts");
 const returns = loadTsModule("features/commerce/returns.ts");
 const reviews = loadTsModule("features/commerce/reviews.ts");
@@ -98,8 +100,10 @@ const customers = loadTsModule("features/commerce/customers.ts");
 const navigation = loadTsModule("features/commerce/navigation.ts");
 const cartPermalinks = loadTsModule("features/commerce/cart-permalinks.ts");
 const catalogFilters = loadTsModule("features/commerce/catalog-filters.ts");
+const pagination = loadTsModule("features/commerce/pagination.ts");
 const launchReadiness = loadTsModule("features/commerce/launch-readiness.ts");
 const storeInsights = loadTsModule("features/commerce/store-insights.ts");
+const activityCenter = loadTsModule("features/commerce/activity-center.ts");
 const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
@@ -233,6 +237,302 @@ const tests = [
         productHealth.getProductHealth(makeProduct({ status: "draft" })).status,
         "not_listed",
         "draft products should be classified as not listed",
+      );
+    },
+  ],
+  [
+    "dashboard pagination clamps pages and preserves list filters",
+    () => {
+      const items = Array.from({ length: 23 }, (_, index) => index + 1);
+
+      assertEqual(
+        pagination.parseDashboardPage("0"),
+        1,
+        "invalid pages should fall back to the first page",
+      );
+      assertEqual(
+        pagination.parseDashboardPage(["3", "4"]),
+        3,
+        "repeated page params should use the first value",
+      );
+      assertEqual(
+        pagination.parseDashboardPageSize("999"),
+        10,
+        "unsupported page sizes should fall back to the dashboard default",
+      );
+      assertEqual(
+        pagination.parseDashboardPageSize("25"),
+        25,
+        "supported page sizes should be accepted",
+      );
+
+      const secondPage = pagination.paginateItems({
+        items,
+        page: 2,
+        pageSize: 10,
+      });
+      const clampedPage = pagination.paginateItems({
+        items,
+        page: 99,
+        pageSize: 10,
+      });
+      const emptyPage = pagination.paginateItems({
+        items: [],
+        page: 2,
+        pageSize: 10,
+      });
+
+      assertDeepEqual(
+        secondPage.items,
+        [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+        "pagination should slice the requested page",
+      );
+      assertEqual(secondPage.startItem, 11, "pagination should expose the first visible row");
+      assertEqual(secondPage.endItem, 20, "pagination should expose the last visible row");
+      assertEqual(secondPage.totalPages, 3, "pagination should expose total pages");
+      assertTrue(secondPage.hasPreviousPage, "middle pages should have previous links");
+      assertTrue(secondPage.hasNextPage, "middle pages should have next links");
+      assertEqual(clampedPage.page, 3, "oversized page requests should clamp to the last page");
+      assertDeepEqual(
+        clampedPage.items,
+        [21, 22, 23],
+        "clamped pages should return the final rows",
+      );
+      assertEqual(emptyPage.page, 1, "empty lists should settle on page one");
+      assertEqual(emptyPage.startItem, 0, "empty lists should not expose a start row");
+      assertEqual(emptyPage.endItem, 0, "empty lists should not expose an end row");
+
+      assertEqual(
+        pagination.buildDashboardPageHref({
+          basePath: "/dashboard/stores/store_1/products",
+          params: {
+            q: "bottle",
+            status: "active",
+            category: "",
+            page: "3",
+            pageSize: "25",
+          },
+          page: 1,
+          pageSize: 10,
+        }),
+        "/dashboard/stores/store_1/products?q=bottle&status=active",
+        "default pagination params should be omitted from first-page links",
+      );
+      assertEqual(
+        pagination.buildDashboardPageHref({
+          basePath: "/dashboard/stores/store_1/orders",
+          params: {
+            q: ["mira", "ari"],
+            risk: "high",
+            page: "1",
+          },
+          page: 2,
+          pageSize: 25,
+        }),
+        "/dashboard/stores/store_1/orders?q=mira&q=ari&risk=high&page=2&pageSize=25",
+        "pagination links should preserve repeated filters and non-default page size",
+      );
+    },
+  ],
+  [
+    "product catalog filters triage health, inventory urgency, and sort priority",
+    () => {
+      const makeProduct = (overrides = {}) => ({
+        id: "product_ready",
+        storeId: "store_1",
+        name: "Ready Pack",
+        slug: "ready-pack",
+        sku: "READY-1",
+        category: "Bags",
+        description: "A complete product ready for customer traffic.",
+        priceCents: 10000,
+        currency: "USD",
+        inventoryCount: 24,
+        imageUrl: "https://example.com/ready.jpg",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+        variants: [],
+        ...overrides,
+      });
+      const products = [
+        makeProduct(),
+        makeProduct({
+          id: "product_broken",
+          name: "Broken Draft",
+          slug: "",
+          sku: "",
+          category: "",
+          description: "Tiny",
+          priceCents: 0,
+          inventoryCount: 0,
+          imageUrl: "",
+          createdAt: "2026-06-03T10:00:00.000Z",
+        }),
+        makeProduct({
+          id: "product_draft",
+          name: "Draft Bottle",
+          slug: "draft-bottle",
+          category: "Drinkware",
+          inventoryCount: 1,
+          status: "draft",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        }),
+        makeProduct({
+          id: "product_reorder",
+          name: "Velocity Jacket",
+          slug: "velocity-jacket",
+          category: "Outerwear",
+          priceCents: 50000,
+          inventoryCount: 14,
+          createdAt: "2026-06-02T10:00:00.000Z",
+        }),
+      ];
+      const inventorySignalsByProduct = new Map([
+        [
+          "product_ready",
+          {
+            productId: "product_ready",
+            urgency: "healthy",
+            estimatedDaysUntilStockout: 60,
+            soldQuantity: 4,
+          },
+        ],
+        [
+          "product_broken",
+          {
+            productId: "product_broken",
+            urgency: "out_of_stock",
+            soldQuantity: 0,
+          },
+        ],
+        [
+          "product_draft",
+          {
+            productId: "product_draft",
+            urgency: "not_tracked",
+            soldQuantity: 0,
+          },
+        ],
+        [
+          "product_reorder",
+          {
+            productId: "product_reorder",
+            urgency: "reorder_now",
+            estimatedDaysUntilStockout: 4,
+            soldQuantity: 12,
+          },
+        ],
+      ]);
+
+      assertEqual(
+        productHelpers.parseProductHealthFilter("broken"),
+        "all",
+        "invalid health filters should fall back to all",
+      );
+      assertEqual(
+        productHelpers.parseProductInventoryUrgencyFilter("soon"),
+        "all",
+        "invalid inventory filters should fall back to all",
+      );
+      assertEqual(
+        productHelpers.parseProductSortOption("random"),
+        "reorder_priority",
+        "invalid product sort should fall back to reorder priority",
+      );
+      assertDeepEqual(
+        productHelpers.getProductCategories(products),
+        ["Bags", "Drinkware", "Outerwear"],
+        "product categories should be unique and alphabetized",
+      );
+      assertDeepEqual(
+        productHelpers
+          .filterProducts({
+            products,
+            query: "",
+            status: "all",
+            category: "",
+            health: "needs_attention",
+            inventory: "all",
+            sort: "health_priority",
+            inventorySignalsByProduct,
+          })
+          .map((product) => product.id),
+        ["product_broken"],
+        "health filters should isolate products with launch blockers",
+      );
+      assertDeepEqual(
+        productHelpers
+          .filterProducts({
+            products,
+            query: "",
+            status: "all",
+            category: "",
+            health: "all",
+            inventory: "reorder_now",
+            sort: "reorder_priority",
+            inventorySignalsByProduct,
+          })
+          .map((product) => product.id),
+        ["product_reorder"],
+        "inventory urgency filters should isolate reorder work",
+      );
+      assertDeepEqual(
+        productHelpers
+          .filterProducts({
+            products,
+            query: "missing image",
+            status: "all",
+            category: "",
+            health: "all",
+            inventory: "all",
+            sort: "reorder_priority",
+            inventorySignalsByProduct,
+          })
+          .map((product) => product.id),
+        ["product_broken"],
+        "catalog search should include health issue labels",
+      );
+      assertDeepEqual(
+        productHelpers
+          .filterProducts({
+            products,
+            query: "",
+            status: "all",
+            category: "",
+            health: "all",
+            inventory: "all",
+            sort: "reorder_priority",
+            inventorySignalsByProduct,
+          })
+          .map((product) => product.id),
+        [
+          "product_broken",
+          "product_reorder",
+          "product_ready",
+          "product_draft",
+        ],
+        "reorder priority sort should put urgent inventory work first",
+      );
+      assertDeepEqual(
+        productHelpers
+          .filterProducts({
+            products,
+            query: "",
+            status: "all",
+            category: "",
+            health: "all",
+            inventory: "all",
+            sort: "value_desc",
+            inventorySignalsByProduct,
+          })
+          .map((product) => product.id),
+        [
+          "product_reorder",
+          "product_ready",
+          "product_draft",
+          "product_broken",
+        ],
+        "inventory value sort should surface the most valuable stock",
       );
     },
   ],
@@ -629,6 +929,173 @@ const tests = [
     },
   ],
   [
+    "order filters triage payment, fulfillment, source, and risk",
+    () => {
+      const makeOrder = (overrides = {}) => ({
+        id: "order_paid_ready",
+        storeId: "store_1",
+        customerName: "Nina Shah",
+        customerEmail: "nina@example.com",
+        status: "paid",
+        source: "storefront",
+        internalNote: "",
+        paymentStatus: "paid",
+        paymentMethod: "card",
+        paymentProvider: "Stripe",
+        subtotalCents: 10000,
+        discountCents: 0,
+        giftCardCents: 0,
+        shippingCents: 0,
+        taxCents: 0,
+        taxRateBps: 0,
+        totalCents: 10000,
+        amountDueCents: 0,
+        refundedCents: 0,
+        refundableCents: 10000,
+        currency: "USD",
+        createdAt: "2026-06-06T10:00:00.000Z",
+        shippingAddress: {
+          line1: "1 Main Street",
+          city: "Austin",
+          region: "TX",
+          postalCode: "78701",
+          country: "US",
+        },
+        items: [
+          {
+            productId: "product_pack",
+            productName: "Field Pack",
+            unitPriceCents: 10000,
+            quantity: 1,
+          },
+        ],
+        fulfillments: [],
+        refunds: [],
+        returnRequests: [],
+        paymentTransactions: [
+          {
+            id: "txn_capture",
+            storeId: "store_1",
+            orderId: "order_paid_ready",
+            type: "capture",
+            status: "succeeded",
+            paymentMethod: "card",
+            paymentProvider: "Stripe",
+            amountCents: 10000,
+            currency: "USD",
+            metadata: {},
+            createdAt: "2026-06-06T10:02:00.000Z",
+          },
+        ],
+        ...overrides,
+      });
+      const orderRows = [
+        makeOrder(),
+        makeOrder({
+          id: "order_pending_high",
+          customerName: "COD Buyer",
+          customerEmail: "cod@example.com",
+          status: "pending",
+          paymentStatus: "pending",
+          paymentMethod: "cash_on_delivery",
+          totalCents: 125000,
+          amountDueCents: 125000,
+          refundableCents: 125000,
+          paymentTransactions: [],
+        }),
+        makeOrder({
+          id: "order_manual_ship",
+          customerName: "Manual Buyer",
+          customerEmail: "manual@example.com",
+          source: "manual",
+          internalNote: "packing slip requested",
+          fulfillments: [
+            {
+              id: "fulfillment_1",
+              storeId: "store_1",
+              orderId: "order_manual_ship",
+              status: "in_transit",
+              trackingCarrier: "UPS",
+              trackingNumber: "1Z999",
+              createdAt: "2026-06-06T11:00:00.000Z",
+              updatedAt: "2026-06-06T11:00:00.000Z",
+            },
+          ],
+        }),
+      ];
+
+      assertEqual(
+        orderHelpers.parseOrderPaymentStatusFilter("broken"),
+        "all",
+        "invalid payment filters should fall back to all",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
+            query: "",
+            status: "all",
+            paymentStatus: "pending",
+          })
+          .map((order) => order.id),
+        ["order_pending_high"],
+        "payment filters should isolate pending payment orders",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
+            query: "",
+            status: "all",
+            fulfillmentStage: "in_transit",
+          })
+          .map((order) => order.id),
+        ["order_manual_ship"],
+        "fulfillment filters should isolate in-transit shipments",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
+            query: "",
+            status: "all",
+            source: "manual",
+          })
+          .map((order) => order.id),
+        ["order_manual_ship"],
+        "source filters should isolate manual orders",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
+            query: "",
+            status: "all",
+            risk: "high",
+          })
+          .map((order) => order.id),
+        ["order_pending_high"],
+        "risk filters should isolate high-risk orders",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
+            query: "packing slip",
+            status: "all",
+          })
+          .map((order) => order.id),
+        ["order_manual_ship"],
+        "order search should include internal notes",
+      );
+      assertEqual(
+        orderHelpers.getOrderStats(orderRows).highRiskOrders,
+        1,
+        "order stats should count high-risk orders",
+      );
+    },
+  ],
+  [
     "product reviews summarize approved ratings and prevent duplicate item reviews",
     () => {
       const reviewRows = [
@@ -712,6 +1179,61 @@ const tests = [
           quantity: 2,
         },
       ];
+      const productWithVariants = {
+        id: "p1",
+        storeId: "store_1",
+        name: "Field Pack",
+        slug: "field-pack",
+        sku: "PACK-1",
+        category: "Bags",
+        description: "A compact carry pack.",
+        priceCents: 12900,
+        currency: "USD",
+        inventoryCount: 8,
+        imageUrl: "https://example.com/pack.jpg",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+        variants: [
+          {
+            id: "v1",
+            storeId: "store_1",
+            productId: "p1",
+            optionName: "Color",
+            optionValue: "Black",
+            sku: "PACK-BLK",
+            priceCents: 11900,
+            currency: "USD",
+            inventoryCount: 3,
+            status: "active",
+            sortOrder: 1,
+            createdAt: "2026-06-01T10:00:00.000Z",
+          },
+        ],
+      };
+      const simpleProduct = {
+        id: "p2",
+        storeId: "store_1",
+        name: "Hydra Bottle",
+        slug: "hydra-bottle",
+        sku: "BOT-1",
+        category: "Drinkware",
+        description: "Insulated bottle.",
+        priceCents: 4200,
+        currency: "USD",
+        inventoryCount: 12,
+        imageUrl: "https://example.com/bottle.jpg",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+        variants: [],
+      };
+      const captured = abandonedCheckouts.captureAbandonedCheckoutLines({
+        cart: [
+          { productId: "p1", variantId: "v1", quantity: 2 },
+          { productId: "p1", variantId: "v1", quantity: 2 },
+          { productId: "p2", quantity: 2 },
+        ],
+        products: [productWithVariants, simpleProduct],
+      });
       const summary = abandonedCheckouts.summarizeAbandonedCheckoutLines(lines);
 
       assertDeepEqual(
@@ -722,6 +1244,61 @@ const tests = [
           subtotalCents: 21300,
         },
         "abandoned checkout summaries should count lines, items, and subtotal",
+      );
+      assertDeepEqual(
+        captured.lines.map((item) => ({
+          productId: item.line.productId,
+          productVariantId: item.line.productVariantId,
+          variantName: item.line.variantName,
+          unitPriceCents: item.line.unitPriceCents,
+          quantity: item.line.quantity,
+        })),
+        [
+          {
+            productId: "p1",
+            productVariantId: "v1",
+            variantName: "Color: Black",
+            unitPriceCents: 11900,
+            quantity: 3,
+          },
+          {
+            productId: "p2",
+            productVariantId: undefined,
+            variantName: undefined,
+            unitPriceCents: 4200,
+            quantity: 2,
+          },
+        ],
+        "abandoned checkout capture should merge lines and cap saved quantity to stock",
+      );
+      assertEqual(
+        abandonedCheckouts.captureAbandonedCheckoutLines({
+          cart: [{ productId: "p1", quantity: 1 }],
+          products: [productWithVariants],
+        }).error,
+        "Choose an available variant for Field Pack.",
+        "abandoned checkout capture should require an active variant when variants exist",
+      );
+      assertEqual(
+        abandonedCheckouts.captureAbandonedCheckoutLines({
+          cart: [{ productId: "missing", quantity: 1 }],
+          products: [productWithVariants],
+        }).error,
+        "One or more cart items are unavailable.",
+        "abandoned checkout capture should reject unknown products",
+      );
+      assertEqual(
+        abandonedCheckouts.captureAbandonedCheckoutLines({
+          cart: [
+            {
+              productId: "p2",
+              quantity: 1,
+            },
+          ],
+          products: [{ ...simpleProduct, inventoryCount: 0 }],
+        }).error,
+        "Hydra Bottle is out of stock.",
+        "abandoned checkout capture should reject out-of-stock products",
       );
       assertEqual(
         abandonedCheckouts.getAbandonedCheckoutRecoveryHref({
@@ -756,11 +1333,50 @@ const tests = [
     () => {
       const store = {
         name: "Northline Supply",
+        slug: "northline-supply",
+        currency: "USD",
         description: "Premium everyday goods.",
         seoTitle: "Northline Supply | Durable gear",
         seoDescription: "Shop durable everyday gear from Northline Supply.",
         socialImageUrl: "https://example.com/social.jpg",
       };
+      const product = {
+        id: "product_pack",
+        storeId: "store_1",
+        name: "Field Carry Pack",
+        slug: "field-carry-pack",
+        sku: "PACK-001",
+        category: "Everyday Carry",
+        description: "Weather-resistant carry pack.",
+        priceCents: 12900,
+        currency: "USD",
+        inventoryCount: 0,
+        imageUrl: "https://example.com/pack.jpg",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+        variants: [
+          {
+            id: "variant_pack_black",
+            storeId: "store_1",
+            productId: "product_pack",
+            optionName: "Color",
+            optionValue: "Black",
+            sku: "PACK-001-BLK",
+            priceCents: 11900,
+            currency: "USD",
+            inventoryCount: 8,
+            status: "active",
+            sortOrder: 1,
+            createdAt: "2026-06-01T10:00:00.000Z",
+          },
+        ],
+      };
+      const collection = {
+        title: "Everyday Carry",
+        slug: "everyday-carry",
+        description: "Bags, bottles, and compact gear.",
+      };
+      const baseUrl = runtimeEnv.getAppUrl().replace(/\/$/, "");
 
       assertEqual(
         seo.getStoreSeoTitle(store),
@@ -786,6 +1402,62 @@ const tests = [
         seo.getStoreSocialImages(store, "https://example.com/social.jpg"),
         ["https://example.com/social.jpg"],
         "social images should not duplicate identical URLs",
+      );
+      assertEqual(
+        seo.getStoreCanonicalUrl(store),
+        `${baseUrl}/stores/northline-supply`,
+        "store canonical URL should use the public app URL",
+      );
+      assertEqual(
+        seo.getProductCanonicalUrl(store, product),
+        `${baseUrl}/stores/northline-supply/products/field-carry-pack`,
+        "product canonical URL should include the product slug",
+      );
+      assertEqual(
+        seo.getCollectionCanonicalUrl(store, collection),
+        `${baseUrl}/stores/northline-supply/collections/everyday-carry`,
+        "collection canonical URL should include the collection slug",
+      );
+      assertFalse(
+        seo.serializeJsonLd({ name: "<script>" }).includes("<script>"),
+        "JSON-LD serialization should escape script-like content",
+      );
+      const storeJsonLd = seo.getStoreJsonLd({ store, products: [product] });
+      const productJsonLd = seo.getProductJsonLd({
+        store,
+        product,
+        reviewSummary: { averageRating: 4.5, reviewCount: 12 },
+      });
+      const collectionJsonLd = seo.getCollectionJsonLd({
+        store,
+        collection,
+        products: [product],
+      });
+
+      assertEqual(
+        storeJsonLd["@type"],
+        "Store",
+        "store JSON-LD should identify the storefront",
+      );
+      assertEqual(
+        storeJsonLd.makesOffer[0].price,
+        "119.00",
+        "store JSON-LD offers should use the lowest active variant price",
+      );
+      assertEqual(
+        productJsonLd.offers.availability,
+        "https://schema.org/InStock",
+        "product JSON-LD should expose sellable variant inventory",
+      );
+      assertEqual(
+        productJsonLd.aggregateRating.reviewCount,
+        12,
+        "product JSON-LD should include approved review totals",
+      );
+      assertEqual(
+        collectionJsonLd.mainEntity.itemListElement[0].url,
+        `${baseUrl}/stores/northline-supply/products/field-carry-pack`,
+        "collection JSON-LD should link listed products",
       );
       assertEqual(
         seo.getStoreSeoDescription({ name: "Draft", description: "" }),
@@ -912,6 +1584,103 @@ const tests = [
         returns.getReturnRequestStatusOptions("rejected"),
         ["rejected"],
         "rejected returns should only allow note-only saves",
+      );
+    },
+  ],
+  [
+    "return request queue prioritizes active merchant work",
+    () => {
+      const makeOrder = (overrides = {}) => ({
+        id: "order_return_1",
+        storeId: "store_1",
+        customerName: "Mira Chen",
+        customerEmail: "mira@example.com",
+        status: "fulfilled",
+        paymentStatus: "paid",
+        refundableCents: 12000,
+        currency: "USD",
+        createdAt: "2026-05-01T10:00:00.000Z",
+        paidAt: "2026-05-01T10:00:00.000Z",
+        fulfilledAt: "2026-05-05T10:00:00.000Z",
+        fulfillments: [],
+        returnRequests: [],
+        ...overrides,
+      });
+      const orders = [
+        makeOrder({
+          id: "order_approved",
+          customerName: "Ari Patel",
+          customerEmail: "ari@example.com",
+          returnRequests: [
+            {
+              id: "return_approved",
+              storeId: "store_1",
+              orderId: "order_approved",
+              customerEmail: "ari@example.com",
+              status: "approved",
+              reason: "changed_mind",
+              note: "Duplicate gift and still unopened.",
+              merchantNote: "Refund after inspection.",
+              requestedAt: "2026-06-01T09:00:00.000Z",
+              createdAt: "2026-06-01T09:00:00.000Z",
+              updatedAt: "2026-06-01T09:00:00.000Z",
+            },
+          ],
+        }),
+        makeOrder({
+          id: "order_requested",
+          returnRequests: [
+            {
+              id: "return_requested",
+              storeId: "store_1",
+              orderId: "order_requested",
+              customerEmail: "mira@example.com",
+              status: "requested",
+              reason: "damaged",
+              note: "Arrived with visible damage on the corner.",
+              requestedAt: "2026-05-30T09:00:00.000Z",
+              createdAt: "2026-05-30T09:00:00.000Z",
+              updatedAt: "2026-05-30T09:00:00.000Z",
+            },
+            {
+              id: "return_resolved",
+              storeId: "store_1",
+              orderId: "order_requested",
+              customerEmail: "mira@example.com",
+              status: "resolved",
+              reason: "quality",
+              note: "Old resolved return.",
+              requestedAt: "2026-05-20T09:00:00.000Z",
+              createdAt: "2026-05-20T09:00:00.000Z",
+              updatedAt: "2026-05-21T09:00:00.000Z",
+            },
+          ],
+        }),
+      ];
+      const queue = returns.getReturnRequestQueue(orders, {
+        storeId: "store_1",
+        now: new Date("2026-06-07T09:00:00.000Z"),
+      });
+      const stats = returns.getReturnRequestQueueStats(queue);
+
+      assertDeepEqual(
+        queue.map((item) => item.request.id),
+        ["return_requested", "return_approved"],
+        "active return queue should sort requested before approved and hide closed requests",
+      );
+      assertEqual(queue[0].priority, "needs_review", "requested returns should need review");
+      assertEqual(queue[0].requestedAgeDays, 8, "return queue should expose request age");
+      assertEqual(
+        queue[1].detail,
+        "Approved return has 120.00 USD still refundable.",
+        "approved returns should explain refundable balance",
+      );
+      assertEqual(stats.totalOpen, 2, "queue stats should count active return work");
+      assertEqual(stats.needsReview, 1, "queue stats should count requested returns");
+      assertEqual(
+        stats.awaitingResolution,
+        1,
+        "queue stats should count approved returns awaiting resolution",
       );
     },
   ],
@@ -1051,6 +1820,97 @@ const tests = [
         7000,
         "pending orders should show the remaining amount due",
       );
+
+      const makeOrder = (overrides = {}) => ({
+        status: "paid",
+        paymentStatus: "paid",
+        totalCents: 10000,
+        amountDueCents: 0,
+        giftCardCents: 3000,
+        refundedCents: 2000,
+        refundableCents: 8000,
+        refunds: [
+          {
+            amountCents: 2000,
+            giftCardCents: 1000,
+            paymentCents: 1000,
+          },
+        ],
+        paymentTransactions: [
+          {
+            type: "capture",
+            status: "succeeded",
+            amountCents: 7000,
+          },
+          {
+            type: "refund",
+            status: "succeeded",
+            amountCents: 1000,
+          },
+        ],
+        ...overrides,
+      });
+      const settled = payments.getOrderFinancialReconciliation(makeOrder());
+      const openBalance = payments.getOrderFinancialReconciliation(
+        makeOrder({
+          paymentStatus: "pending",
+          amountDueCents: 7000,
+          giftCardCents: 3000,
+          refundedCents: 0,
+          refundableCents: 10000,
+          refunds: [],
+          paymentTransactions: [],
+        }),
+      );
+      const ledgerMismatch = payments.getOrderFinancialReconciliation(
+        makeOrder({
+          giftCardCents: 0,
+          refundedCents: 0,
+          refundableCents: 10000,
+          refunds: [],
+          paymentTransactions: [
+            {
+              type: "capture",
+              status: "succeeded",
+              amountCents: 5000,
+            },
+          ],
+        }),
+      );
+      const overRefunded = payments.getOrderFinancialReconciliation(
+        makeOrder({
+          refundedCents: 12000,
+          refundableCents: 0,
+          refunds: [
+            {
+              amountCents: 12000,
+              giftCardCents: 3000,
+              paymentCents: 9000,
+            },
+          ],
+        }),
+      );
+
+      assertEqual(settled.status, "settled", "balanced orders should settle");
+      assertEqual(settled.netCollectedCents, 8000, "net collected should include tender refunds");
+      assertEqual(settled.expectedNetCents, 8000, "expected net should subtract total refunds");
+      assertEqual(openBalance.status, "open_balance", "pending payments should expose open balance");
+      assertEqual(openBalance.balanceDueCents, 7000, "open balance should use amount due");
+      assertEqual(
+        ledgerMismatch.status,
+        "ledger_mismatch",
+        "paid orders with low captured tender should flag ledger mismatch",
+      );
+      assertEqual(
+        ledgerMismatch.ledgerDeltaCents,
+        -5000,
+        "ledger mismatch should expose the collected-vs-expected delta",
+      );
+      assertEqual(
+        overRefunded.status,
+        "over_refunded",
+        "refunds above the original total should be critical",
+      );
     },
   ],
   [
@@ -1147,9 +2007,13 @@ const tests = [
           id: "order_1",
           status: "paid",
           source: "storefront",
+          customerName: "Ari Patel",
           customerEmail: "a@example.com",
+          paymentStatus: "paid",
           totalCents: 10000,
+          amountDueCents: 0,
           refundedCents: 2000,
+          currency: "USD",
           paidAt: "2026-06-06T10:00:00.000Z",
           createdAt: "2026-06-06T09:00:00.000Z",
           items: [
@@ -1167,14 +2031,26 @@ const tests = [
             },
           ],
           refunds: [],
+          returnRequests: [
+            {
+              id: "return_1",
+              status: "requested",
+              reason: "damaged",
+              requestedAt: "2026-06-07T09:00:00.000Z",
+            },
+          ],
         },
         {
           id: "order_2",
           status: "fulfilled",
           source: "manual",
+          customerName: "Ari Patel",
           customerEmail: "a@example.com",
+          paymentStatus: "paid",
           totalCents: 5000,
+          amountDueCents: 0,
           refundedCents: 0,
+          currency: "USD",
           paidAt: "2026-06-07T10:00:00.000Z",
           createdAt: "2026-06-07T09:00:00.000Z",
           items: [
@@ -1186,28 +2062,39 @@ const tests = [
             },
           ],
           refunds: [],
+          returnRequests: [],
         },
         {
           id: "order_3",
           status: "pending",
           source: "storefront",
+          customerName: "Nina Shah",
           customerEmail: "b@example.com",
+          paymentStatus: "pending",
           totalCents: 2500,
+          amountDueCents: 2500,
           refundedCents: 0,
+          currency: "USD",
           createdAt: "2026-06-07T08:00:00.000Z",
           items: [],
           refunds: [],
+          returnRequests: [],
         },
         {
           id: "order_4",
           status: "cancelled",
           source: "manual",
+          customerName: "Nina Shah",
           customerEmail: "b@example.com",
+          paymentStatus: "voided",
           totalCents: 2500,
+          amountDueCents: 0,
           refundedCents: 0,
+          currency: "USD",
           createdAt: "2026-06-05T08:00:00.000Z",
           items: [],
           refunds: [],
+          returnRequests: [],
         },
       ];
       const products = [
@@ -1224,9 +2111,37 @@ const tests = [
           inventoryCount: 12,
         },
       ];
+      const abandonedCheckouts = [
+        {
+          id: "checkout_open",
+          customerEmail: "cart@example.com",
+          recoveryToken: "recover-open",
+          status: "open",
+          lines: [
+            {
+              productId: "p1",
+              productName: "Apex Jacket",
+              unitPriceCents: 4000,
+              quantity: 1,
+            },
+          ],
+          subtotalCents: 4000,
+        },
+        {
+          id: "checkout_recovered",
+          customerEmail: "buyer@example.com",
+          recoveryToken: "recover-done",
+          status: "recovered",
+          lines: [],
+          subtotalCents: 6000,
+        },
+      ];
       const summary = analytics.getStoreAnalytics({
         orders,
         products,
+        abandonedCheckouts,
+        storeId: "store_1",
+        currency: "USD",
         now: new Date("2026-06-07T12:00:00.000Z"),
         dayCount: 3,
         lowStockThreshold: 5,
@@ -1235,12 +2150,40 @@ const tests = [
       assertEqual(summary.grossSalesCents, 15000, "gross sales should use revenue orders");
       assertEqual(summary.netSalesCents, 13000, "net sales should subtract refunds");
       assertEqual(summary.refundCents, 2000, "refunds should sum revenue-order refunds");
+      assertEqual(summary.pendingRevenueCents, 2500, "pending revenue should use amount due");
+      assertEqual(
+        summary.unfulfilledRevenueCents,
+        8000,
+        "unfulfilled revenue should count paid net sales awaiting fulfillment",
+      );
       assertEqual(summary.averageOrderValueCents, 6500, "AOV should use net sales");
       assertEqual(summary.averageItemsPerPaidOrder, 2, "item average should use paid orders");
       assertEqual(summary.paidRate, 50, "paid rate should use all orders");
       assertEqual(summary.fulfillmentRate, 50, "fulfillment rate should use revenue orders");
       assertEqual(summary.refundRate, 13, "refund rate should be rounded");
       assertEqual(summary.repeatCustomerRate, 100, "repeat rate should use customer history");
+      assertEqual(summary.returnRequestRate, 50, "return request rate should use revenue orders");
+      assertEqual(summary.openReturnRequests, 1, "open return requests should be counted");
+      assertEqual(
+        summary.checkoutRecoveryRate,
+        50,
+        "checkout recovery should compare recovered carts with all abandoned carts",
+      );
+      assertEqual(
+        summary.abandonedCheckoutValueCents,
+        4000,
+        "recoverable abandoned checkout value should be counted",
+      );
+      assertEqual(
+        summary.recoveredCheckoutValueCents,
+        6000,
+        "recovered abandoned checkout value should be counted",
+      );
+      assertEqual(
+        summary.customerConcentrationRate,
+        100,
+        "customer concentration should expose top customer sales share",
+      );
       assertDeepEqual(
         summary.sourceMix.map((source) => [source.source, source.count, source.share]),
         [
@@ -1268,10 +2211,32 @@ const tests = [
         9800,
         "top product should allocate refunds by order ratio",
       );
+      assertDeepEqual(
+        summary.topCustomers.map((customer) => [
+          customer.customerEmail,
+          customer.netSalesCents,
+          customer.share,
+        ]),
+        [["a@example.com", 13000, 100]],
+        "top customers should rank by net sales and expose concentration",
+      );
       assertEqual(
         summary.lowStockProducts[0].id,
         "p1",
         "low stock should include active low inventory products",
+      );
+      assertDeepEqual(
+        summary.insights.map((insight) => insight.id),
+        [
+          "low-stock-products",
+          "fulfillment-backlog",
+          "refund-exposure",
+          "open-return-requests",
+          "customer-concentration",
+          "pending-revenue",
+          "abandoned-checkout-recovery",
+        ],
+        "analytics insights should prioritize operational growth work",
       );
     },
   ],
@@ -1378,6 +2343,82 @@ const tests = [
         businessRules.calculateTaxCents(1000, 0),
         0,
         "zero tax rate should have zero tax",
+      );
+    },
+  ],
+  [
+    "checkout totals coordinate discount shipping tax and gift cards",
+    () => {
+      const zone = {
+        id: "us",
+        name: "United States",
+        countries: ["United States"],
+        rateCents: 500,
+        freeShippingThresholdCents: 8000,
+        status: "active",
+      };
+      const totals = businessRules.calculateCheckoutTotals({
+        discountCents: 2500,
+        freeShippingThresholdCents: 12000,
+        giftCardCents: 3000,
+        shippingCountry: "United States",
+        shippingRateCents: 900,
+        shippingZones: [zone],
+        subtotalCents: 10000,
+        taxRateBps: 1000,
+      });
+
+      assertDeepEqual(
+        {
+          subtotalCents: totals.subtotalCents,
+          discountCents: totals.discountCents,
+          discountedSubtotalCents: totals.discountedSubtotalCents,
+          shippingCents: totals.shippingCents,
+          taxCents: totals.taxCents,
+          totalCents: totals.totalCents,
+          giftCardCents: totals.giftCardCents,
+          amountDueCents: totals.amountDueCents,
+          shippingZoneName: totals.shippingZone?.name,
+        },
+        {
+          subtotalCents: 10000,
+          discountCents: 2500,
+          discountedSubtotalCents: 7500,
+          shippingCents: 500,
+          taxCents: 750,
+          totalCents: 8750,
+          giftCardCents: 3000,
+          amountDueCents: 5750,
+          shippingZoneName: "United States",
+        },
+        "checkout totals should use the same math for order creation and display",
+      );
+
+      const capped = businessRules.calculateCheckoutTotals({
+        discountCents: 9999,
+        freeShippingThresholdCents: 0,
+        giftCardCents: 9999,
+        shippingCountry: "Mars",
+        shippingRateCents: 700,
+        shippingZones: [],
+        subtotalCents: 4000,
+        taxRateBps: 825,
+      });
+
+      assertDeepEqual(
+        {
+          discountCents: capped.discountCents,
+          totalCents: capped.totalCents,
+          giftCardCents: capped.giftCardCents,
+          amountDueCents: capped.amountDueCents,
+        },
+        {
+          discountCents: 4000,
+          totalCents: 0,
+          giftCardCents: 0,
+          amountDueCents: 0,
+        },
+        "checkout totals should cap over-sized discount and gift card amounts",
       );
     },
   ],
@@ -1666,6 +2707,21 @@ const tests = [
         "all",
         "invalid customer segment filters should fall back to all",
       );
+      assertEqual(
+        customers.parseCustomerMarketingFilter("maybe"),
+        "all",
+        "invalid customer marketing filters should fall back to all",
+      );
+      assertEqual(
+        customers.parseCustomerOrderActivityFilter("stale"),
+        "all",
+        "invalid customer activity filters should fall back to all",
+      );
+      assertEqual(
+        customers.parseCustomerSortOption("random"),
+        "last_order_desc",
+        "invalid customer sorts should fall back to latest activity",
+      );
       assertDeepEqual(
         customers
           .filterCustomers({
@@ -1709,6 +2765,78 @@ const tests = [
           .map((customer) => customer.email),
         ["ari@example.com"],
         "customer search should include order-derived names and emails",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            marketing: "subscribed",
+          })
+          .map((customer) => customer.email),
+        ["lead@example.com", "mira@example.com"],
+        "marketing filters should isolate customers with consent",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            marketing: "not_subscribed",
+          })
+          .map((customer) => customer.email),
+        ["ari@example.com"],
+        "marketing filters should isolate customers without consent",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            activity: "no_orders",
+          })
+          .map((customer) => customer.email),
+        ["lead@example.com"],
+        "activity filters should isolate profile-only customers",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            activity: "repeat",
+          })
+          .map((customer) => customer.email),
+        ["mira@example.com"],
+        "activity filters should isolate repeat buyers",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            sort: "spent_desc",
+          })
+          .map((customer) => customer.email),
+        ["mira@example.com", "ari@example.com", "lead@example.com"],
+        "customer sorting should surface highest spenders first",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "all",
+            sort: "risk_priority",
+          })
+          .map((customer) => customer.email),
+        ["mira@example.com", "ari@example.com", "lead@example.com"],
+        "risk sorting should prioritize VIP and active customer segments",
       );
     },
   ],
@@ -1825,6 +2953,108 @@ const tests = [
     },
   ],
   [
+    "activity center prioritizes notification delivery issues and store audit work",
+    () => {
+      const notifications = [
+        {
+          id: "notification_sent",
+          storeId: "store_1",
+          type: "payment_receipt",
+          status: "sent",
+          recipientEmail: "buyer@example.com",
+          recipientName: "Buyer",
+          subject: "Payment received",
+          preview: "Payment was confirmed.",
+          resourceType: "order",
+          resourceId: "order_1",
+          metadata: { orderId: "order_1" },
+          sentAt: "2026-06-07T10:10:00.000Z",
+          createdAt: "2026-06-07T10:00:00.000Z",
+        },
+        {
+          id: "notification_pending",
+          storeId: "store_1",
+          type: "return_request_updated",
+          status: "pending",
+          recipientEmail: "returns@example.com",
+          subject: "Return updated",
+          preview: "Your return request is approved.",
+          resourceType: "order_return_request",
+          resourceId: "return_1",
+          metadata: { orderId: "order_1" },
+          createdAt: "2026-06-07T09:30:00.000Z",
+        },
+        {
+          id: "notification_failed",
+          storeId: "store_1",
+          type: "fulfillment_update",
+          status: "failed",
+          recipientEmail: "shipping@example.com",
+          subject: "Shipment update",
+          preview: "Shipment is in transit.",
+          resourceType: "order_fulfillment",
+          resourceId: "fulfillment_1",
+          metadata: { orderId: "order_1" },
+          failedAt: "2026-06-07T09:40:00.000Z",
+          createdAt: "2026-06-07T09:20:00.000Z",
+        },
+      ];
+      const auditEvents = [
+        {
+          id: "audit_order",
+          storeId: "store_1",
+          clerkUserId: "user_1",
+          action: "order_status_updated",
+          resourceType: "order",
+          resourceId: "order_1",
+          summary: "Merchant marked order paid.",
+          metadata: {},
+          createdAt: "2026-06-07T10:20:00.000Z",
+        },
+      ];
+
+      const stats = activityCenter.getNotificationStats(notifications);
+      const items = activityCenter.getActivityCenter(
+        {
+          auditEvents,
+          notifications,
+          storeId: "store_1",
+        },
+        { limit: 4 },
+      );
+
+      assertEqual(stats.total, 3, "activity stats should count all messages");
+      assertEqual(stats.failed, 1, "activity stats should count failed messages");
+      assertEqual(stats.pending, 1, "activity stats should count pending messages");
+      assertEqual(
+        stats.actionRequired,
+        2,
+        "pending and failed messages should require review",
+      );
+      assertDeepEqual(
+        items.map((item) => item.id),
+        [
+          "notification:notification_failed",
+          "notification:notification_pending",
+          "audit:audit_order",
+          "notification:notification_sent",
+        ],
+        "activity center should sort actionable notifications before informational activity",
+      );
+      assertEqual(
+        items[0].href,
+        "/dashboard/stores/store_1/orders/order_1",
+        "fulfillment notifications should link back to the parent order",
+      );
+      assertEqual(
+        items[1].resourceLabel,
+        "Return request",
+        "return request notifications should have merchant-readable resource labels",
+      );
+      assertEqual(items[2].label, "Audit", "audit entries should remain visible");
+    },
+  ],
+  [
     "store operations insights prioritize launch, order, catalog, and conversion work",
     () => {
       const store = {
@@ -1871,7 +3101,20 @@ const tests = [
         createdAt: "2026-05-01T10:00:00.000Z",
         fulfillments: [],
         refunds: [],
-        returnRequests: [],
+        returnRequests: [
+          {
+            id: "return_ops",
+            storeId: store.id,
+            orderId: "order_risky_ops",
+            customerEmail: "risk@example.com",
+            status: "requested",
+            reason: "damaged",
+            note: "Package arrived damaged and needs merchant review.",
+            requestedAt: "2026-06-06T09:00:00.000Z",
+            createdAt: "2026-06-06T09:00:00.000Z",
+            updatedAt: "2026-06-06T09:00:00.000Z",
+          },
+        ],
         paymentTransactions: [],
       };
       const workspace = {
@@ -1880,7 +3123,35 @@ const tests = [
         members: [],
         invitations: [],
         auditEvents: [],
-        notifications: [],
+        notifications: [
+          {
+            id: "notification_failed_ops",
+            storeId: store.id,
+            type: "fulfillment_update",
+            status: "failed",
+            recipientEmail: "risk@example.com",
+            subject: "Shipment update",
+            preview: "Shipment email could not be delivered.",
+            resourceType: "order_fulfillment",
+            resourceId: "fulfillment_ops",
+            metadata: { orderId: "order_risky_ops" },
+            failedAt: "2026-06-07T09:30:00.000Z",
+            createdAt: "2026-06-07T09:00:00.000Z",
+          },
+          {
+            id: "notification_pending_ops",
+            storeId: store.id,
+            type: "return_request_updated",
+            status: "pending",
+            recipientEmail: "risk@example.com",
+            subject: "Return update",
+            preview: "Return request update is still waiting.",
+            resourceType: "order_return_request",
+            resourceId: "return_ops",
+            metadata: { orderId: "order_risky_ops" },
+            createdAt: "2026-06-07T09:35:00.000Z",
+          },
+        ],
         policies: [],
         customPages: [],
         navigationMenus: [],
@@ -1963,10 +3234,27 @@ const tests = [
         insightIds.includes("pending-reviews"),
         "operations queue should include pending review moderation",
       );
+      assertTrue(
+        insightIds.includes("return-request:return_ops"),
+        "operations queue should include return request work",
+      );
+      assertTrue(
+        insightIds.includes("notification-failures"),
+        "operations queue should include failed notification work",
+      );
+      assertTrue(
+        insightIds.includes("notification-pending"),
+        "operations queue should include pending notification work",
+      );
       assertTrue(categories.has("launch"), "launch insights should be categorized");
       assertTrue(categories.has("orders"), "order insights should be categorized");
       assertTrue(categories.has("catalog"), "catalog insights should be categorized");
       assertTrue(categories.has("inventory"), "inventory insights should be categorized");
+      assertTrue(categories.has("returns"), "return insights should be categorized");
+      assertTrue(
+        categories.has("notifications"),
+        "notification insights should be categorized",
+      );
       assertEqual(
         insights[0].severity,
         "critical",

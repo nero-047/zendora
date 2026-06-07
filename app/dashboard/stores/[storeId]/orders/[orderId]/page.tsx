@@ -38,6 +38,7 @@ import {
   paymentStatusLabels,
 } from "@/features/commerce/order-status";
 import {
+  getOrderFinancialReconciliation,
   paymentTransactionStatusLabels,
   paymentTransactionTypeLabels,
   summarizePaymentTransactions,
@@ -90,6 +91,7 @@ export default async function OrderDetailPage({
   const shipping = order.shippingAddress;
   const lifecycleEvents = getOrderLifecycleEvents(order);
   const paymentSummary = summarizePaymentTransactions(order.paymentTransactions);
+  const financialReconciliation = getOrderFinancialReconciliation(order);
   const paymentTransactions = [...order.paymentTransactions].sort(
     (a, b) =>
       new Date(b.processedAt || b.createdAt).getTime() -
@@ -165,7 +167,7 @@ export default async function OrderDetailPage({
         </form>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-3">
+      <section className="grid gap-5 lg:grid-cols-4">
         <div className="soft-panel p-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase text-slate-400">
@@ -225,8 +227,27 @@ export default async function OrderDetailPage({
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             {paymentStatusLabels[order.paymentStatus]} payment status with{" "}
-            {formatCurrency(paymentSummary.netCapturedCents, order.currency)} net
-            captured.
+            {formatCurrency(financialReconciliation.netCollectedCents, order.currency)} net
+            collected.
+          </p>
+        </div>
+
+        <div className="soft-panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase text-slate-400">
+              Settlement
+            </h2>
+            {financialReconciliation.severity === "success" ? (
+              <CheckCircle aria-hidden="true" className="text-emerald-700" size={18} />
+            ) : (
+              <AlertTriangle aria-hidden="true" className="text-amber-700" size={18} />
+            )}
+          </div>
+          <p className="mt-4 text-2xl font-semibold text-slate-950">
+            {financialReconciliation.label}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {financialReconciliation.detail}
           </p>
         </div>
       </section>
@@ -541,15 +562,64 @@ export default async function OrderDetailPage({
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3 text-slate-600">
-                <span>Refunded</span>
+                <span>Payment refunds</span>
                 <span className="font-semibold text-red-600">
                   -{formatCurrency(paymentSummary.refundedCents, order.currency)}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-slate-950">
-                <span className="font-semibold">Net captured</span>
+              {financialReconciliation.expectedGiftCardCents > 0 ? (
+                <>
+                  <div className="flex items-center justify-between gap-3 text-slate-600">
+                    <span>Gift card tender</span>
+                    <span className="font-semibold text-slate-950">
+                      {formatCurrency(
+                        financialReconciliation.expectedGiftCardCents,
+                        order.currency,
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-slate-600">
+                    <span>Gift card refunds</span>
+                    <span className="font-semibold text-red-600">
+                      -{formatCurrency(
+                        financialReconciliation.giftCardRefundedCents,
+                        order.currency,
+                      )}
+                    </span>
+                  </div>
+                </>
+              ) : null}
+              <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-slate-600">
+                <span>Expected net</span>
                 <span className="font-semibold">
-                  {formatCurrency(paymentSummary.netCapturedCents, order.currency)}
+                  {formatCurrency(
+                    financialReconciliation.expectedNetCents,
+                    order.currency,
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-slate-950">
+                <span className="font-semibold">Net collected</span>
+                <span className="font-semibold">
+                  {formatCurrency(
+                    financialReconciliation.netCollectedCents,
+                    order.currency,
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-slate-600">
+                <span>Ledger delta</span>
+                <span
+                  className={
+                    financialReconciliation.ledgerDeltaCents === 0
+                      ? "font-semibold text-emerald-700"
+                      : "font-semibold text-amber-700"
+                  }
+                >
+                  {formatCurrency(
+                    financialReconciliation.ledgerDeltaCents,
+                    order.currency,
+                  )}
                 </span>
               </div>
             </div>

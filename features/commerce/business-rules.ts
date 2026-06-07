@@ -96,6 +96,53 @@ export function calculateTaxCents(discountedSubtotalCents: number, taxRateBps: n
   return Math.round((discountedSubtotalCents * taxRateBps) / 10000);
 }
 
+export function calculateCheckoutTotals(input: {
+  discountCents?: number;
+  freeShippingThresholdCents: number;
+  giftCardCents?: number;
+  shippingCountry: string;
+  shippingRateCents: number;
+  shippingZones: ShippingZone[];
+  subtotalCents: number;
+  taxRateBps: number;
+}) {
+  const subtotalCents = Math.max(0, input.subtotalCents);
+  const discountCents = Math.min(
+    subtotalCents,
+    Math.max(0, input.discountCents || 0),
+  );
+  const discountedSubtotalCents = subtotalCents - discountCents;
+  const shippingQuote = calculateShippingQuote({
+    discountedSubtotalCents,
+    freeShippingThresholdCents: input.freeShippingThresholdCents,
+    shippingCountry: input.shippingCountry,
+    shippingRateCents: Math.max(0, input.shippingRateCents),
+    shippingZones: input.shippingZones,
+  });
+  const shippingCents = Math.max(0, shippingQuote.shippingCents);
+  const taxCents = calculateTaxCents(
+    discountedSubtotalCents,
+    Math.max(0, input.taxRateBps),
+  );
+  const totalCents = discountedSubtotalCents + shippingCents + taxCents;
+  const giftCardCents = Math.min(
+    totalCents,
+    Math.max(0, input.giftCardCents || 0),
+  );
+
+  return {
+    subtotalCents,
+    discountCents,
+    discountedSubtotalCents,
+    shippingCents,
+    shippingZone: shippingQuote.zone,
+    taxCents,
+    totalCents,
+    giftCardCents,
+    amountDueCents: totalCents - giftCardCents,
+  };
+}
+
 export function normalizeCartLines(lines: CheckoutLineInput[]) {
   const quantitiesByLine = new Map<
     string,

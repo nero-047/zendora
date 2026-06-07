@@ -3,12 +3,17 @@ import {
   summarizeAbandonedCheckoutLines,
 } from "@/features/commerce/abandoned-checkouts";
 import {
+  getNotificationStats,
+  notificationTypeLabels,
+} from "@/features/commerce/activity-center";
+import {
   getCustomerSegmentation,
   getCustomerSummaries,
 } from "@/features/commerce/customers";
 import { getInventoryPlanningSignals } from "@/features/commerce/inventory-planning";
 import { getOrderRiskAssessment } from "@/features/commerce/order-insights";
 import { getProductHealth } from "@/features/commerce/product-health";
+import { getReturnRequestQueue } from "@/features/commerce/returns";
 import { getStoreLaunchReadiness } from "@/features/commerce/launch-readiness";
 import type { StoreWorkspace } from "@/features/commerce/types";
 
@@ -18,8 +23,10 @@ export type StoreInsightCategory =
   | "orders"
   | "catalog"
   | "inventory"
+  | "returns"
   | "customers"
   | "conversion"
+  | "notifications"
   | "reviews";
 
 export type StoreOperationalInsight = {
@@ -46,6 +53,12 @@ function sortInsights(insights: StoreOperationalInsight[]) {
 
     return a.title.localeCompare(b.title);
   });
+}
+
+function getDateTimeValue(value?: string) {
+  const time = Date.parse(value || "");
+
+  return Number.isFinite(time) ? time : 0;
 }
 
 export function getStoreOperationalInsights(
@@ -143,6 +156,72 @@ export function getStoreOperationalInsights(
       detail: signal.detail,
       href: `/dashboard/stores/${workspace.store.id}/products/${signal.productId}/edit`,
       actionLabel: "Plan reorder",
+    });
+  }
+
+  for (const item of getReturnRequestQueue(workspace.orders, {
+    storeId: workspace.store.id,
+    now: options.now,
+  })) {
+    insights.push({
+      id: `return-request:${item.request.id}`,
+      category: "returns",
+      severity: item.priority === "needs_review" ? "warning" : "info",
+      title: `${item.order.customerName} return request`,
+      detail: item.detail,
+      href: item.href,
+      actionLabel: "Review return",
+    });
+  }
+
+  const notificationStats = getNotificationStats(workspace.notifications);
+  const failedNotifications = workspace.notifications
+    .filter((notification) => notification.status === "failed")
+    .sort(
+      (a, b) =>
+        getDateTimeValue(b.failedAt || b.createdAt) -
+        getDateTimeValue(a.failedAt || a.createdAt),
+    );
+  const pendingNotifications = workspace.notifications
+    .filter((notification) => notification.status === "pending")
+    .sort(
+      (a, b) =>
+        getDateTimeValue(a.createdAt) - getDateTimeValue(b.createdAt),
+    );
+
+  if (failedNotifications.length > 0) {
+    const first = failedNotifications[0];
+
+    insights.push({
+      id: "notification-failures",
+      category: "notifications",
+      severity: "critical",
+      title: "Notification delivery failures",
+      detail: `${notificationStats.failed} message${
+        notificationStats.failed === 1 ? "" : "s"
+      } failed to send. Latest: ${notificationTypeLabels[first.type]} to ${
+        first.recipientEmail
+      }.`,
+      href: `/dashboard/stores/${workspace.store.id}`,
+      actionLabel: "Review outbox",
+    });
+  }
+
+  if (pendingNotifications.length > 0) {
+    const first = pendingNotifications[0];
+
+    insights.push({
+      id: "notification-pending",
+      category: "notifications",
+      severity: "warning",
+      title: "Notifications awaiting delivery",
+      detail: `${notificationStats.pending} message${
+        notificationStats.pending === 1 ? "" : "s"
+      } still pending. Oldest visible: ${notificationTypeLabels[first.type]} to ${
+        first.recipientEmail
+      }.`,
+      href: `/dashboard/stores/${workspace.store.id}`,
+      actionLabel: "Review queue",
     });
   }
 

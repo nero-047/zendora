@@ -52,10 +52,76 @@ export const customerSegmentFilters = [
 
 export type CustomerSegmentFilter = (typeof customerSegmentFilters)[number];
 
+export const customerMarketingFilters = [
+  "all",
+  "subscribed",
+  "not_subscribed",
+] as const;
+
+export type CustomerMarketingFilter = (typeof customerMarketingFilters)[number];
+
+export const customerOrderActivityFilters = [
+  "all",
+  "has_orders",
+  "no_orders",
+  "repeat",
+] as const;
+
+export type CustomerOrderActivityFilter =
+  (typeof customerOrderActivityFilters)[number];
+
+export const customerSortOptions = [
+  "last_order_desc",
+  "spent_desc",
+  "orders_desc",
+  "risk_priority",
+  "name_asc",
+  "created_desc",
+] as const;
+
+export type CustomerSortOption = (typeof customerSortOptions)[number];
+
+export const customerMarketingFilterLabels: Record<
+  CustomerMarketingFilter,
+  string
+> = {
+  all: "All marketing",
+  subscribed: "Marketing opt-ins",
+  not_subscribed: "No marketing consent",
+};
+
+export const customerOrderActivityFilterLabels: Record<
+  CustomerOrderActivityFilter,
+  string
+> = {
+  all: "All activity",
+  has_orders: "Has orders",
+  no_orders: "No orders",
+  repeat: "Repeat buyers",
+};
+
+export const customerSortLabels: Record<CustomerSortOption, string> = {
+  last_order_desc: "Latest activity",
+  spent_desc: "Highest spend",
+  orders_desc: "Most orders",
+  risk_priority: "Risk priority",
+  name_asc: "Name A-Z",
+  created_desc: "Newest profile",
+};
+
 const VIP_SPEND_THRESHOLD_CENTS = 50000;
 const AT_RISK_DAYS = 90;
 const NEW_CUSTOMER_DAYS = 30;
 const REFUND_WATCH_RATE = 35;
+
+const customerSegmentRank: Record<CustomerSegment, number> = {
+  refund_watch: 0,
+  at_risk: 1,
+  vip: 2,
+  repeat: 3,
+  new: 4,
+  lead: 5,
+};
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -214,6 +280,46 @@ export function parseCustomerSegmentFilter(
   }
 
   return "all";
+}
+
+export function parseCustomerMarketingFilter(
+  value: string | string[] | undefined,
+) {
+  const marketing = Array.isArray(value) ? value[0] : value;
+
+  if (
+    customerMarketingFilters.includes(marketing as CustomerMarketingFilter)
+  ) {
+    return marketing as CustomerMarketingFilter;
+  }
+
+  return "all";
+}
+
+export function parseCustomerOrderActivityFilter(
+  value: string | string[] | undefined,
+) {
+  const activity = Array.isArray(value) ? value[0] : value;
+
+  if (
+    customerOrderActivityFilters.includes(
+      activity as CustomerOrderActivityFilter,
+    )
+  ) {
+    return activity as CustomerOrderActivityFilter;
+  }
+
+  return "all";
+}
+
+export function parseCustomerSortOption(value: string | string[] | undefined) {
+  const sort = Array.isArray(value) ? value[0] : value;
+
+  if (customerSortOptions.includes(sort as CustomerSortOption)) {
+    return sort as CustomerSortOption;
+  }
+
+  return "last_order_desc";
 }
 
 export function getCustomerStats(customers: CustomerSummary[]): CustomerStats {
@@ -488,20 +594,82 @@ export function filterCustomers(input: {
   customers: CustomerSummary[];
   query: string;
   segment: CustomerSegmentFilter;
+  marketing?: CustomerMarketingFilter;
+  activity?: CustomerOrderActivityFilter;
+  sort?: CustomerSortOption;
 }) {
   const normalizedQuery = input.query.trim().toLowerCase();
+  const marketing = input.marketing || "all";
+  const activity = input.activity || "all";
+  const sort = input.sort || "last_order_desc";
 
-  return input.customers.filter((customer) => {
-    const segmentation = getCustomerSegmentation(customer);
-    const segmentMatches =
-      input.segment === "all" ||
-      segmentation.segments.includes(input.segment as CustomerSegment);
-    const queryMatches =
-      !normalizedQuery ||
-      getCustomerSearchText(customer).includes(normalizedQuery);
+  return input.customers
+    .filter((customer) => {
+      const segmentation = getCustomerSegmentation(customer);
+      const segmentMatches =
+        input.segment === "all" ||
+        segmentation.segments.includes(input.segment as CustomerSegment);
+      const marketingMatches =
+        marketing === "all" ||
+        (marketing === "subscribed" && customer.acceptsMarketing) ||
+        (marketing === "not_subscribed" && !customer.acceptsMarketing);
+      const activityMatches =
+        activity === "all" ||
+        (activity === "has_orders" && customer.orderCount > 0) ||
+        (activity === "no_orders" && customer.orderCount === 0) ||
+        (activity === "repeat" && customer.orderCount > 1);
+      const queryMatches =
+        !normalizedQuery ||
+        getCustomerSearchText(customer).includes(normalizedQuery);
 
-    return segmentMatches && queryMatches;
-  });
+      return (
+        segmentMatches &&
+        marketingMatches &&
+        activityMatches &&
+        queryMatches
+      );
+    })
+    .sort((a, b) => {
+      const aSegmentation = getCustomerSegmentation(a);
+      const bSegmentation = getCustomerSegmentation(b);
+
+      if (sort === "spent_desc") {
+        return b.totalSpentCents - a.totalSpentCents || a.name.localeCompare(b.name);
+      }
+
+      if (sort === "orders_desc") {
+        return b.orderCount - a.orderCount || a.name.localeCompare(b.name);
+      }
+
+      if (sort === "risk_priority") {
+        return (
+          customerSegmentRank[aSegmentation.primarySegment] -
+            customerSegmentRank[bSegmentation.primarySegment] ||
+          bSegmentation.refundRate - aSegmentation.refundRate ||
+          (bSegmentation.daysSinceLastOrder || 0) -
+            (aSegmentation.daysSinceLastOrder || 0) ||
+          a.name.localeCompare(b.name)
+        );
+      }
+
+      if (sort === "name_asc") {
+        return a.name.localeCompare(b.name);
+      }
+
+      if (sort === "created_desc") {
+        return (
+          getSortTime(b.profileCreatedAt || b.firstOrderAt) -
+            getSortTime(a.profileCreatedAt || a.firstOrderAt) ||
+          a.name.localeCompare(b.name)
+        );
+      }
+
+      return (
+        getSortTime(b.lastOrderAt || b.profileUpdatedAt || b.profileCreatedAt) -
+          getSortTime(a.lastOrderAt || a.profileUpdatedAt || a.profileCreatedAt) ||
+        a.name.localeCompare(b.name)
+      );
+    });
 }
 
 export function parseCustomerTags(value: string) {

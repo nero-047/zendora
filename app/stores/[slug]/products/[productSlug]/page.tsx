@@ -11,7 +11,13 @@ import {
 } from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import { getProductReviewSummary } from "@/features/commerce/reviews";
-import { getStoreSeoTitle, getStoreSocialImages } from "@/features/commerce/seo";
+import {
+  getProductCanonicalUrl,
+  getProductJsonLd,
+  getStoreSeoTitle,
+  getStoreSocialImages,
+  serializeJsonLd,
+} from "@/features/commerce/seo";
 import { formatCurrency } from "@/lib/utils";
 
 type ProductPageProps = {
@@ -49,12 +55,19 @@ export async function generateMetadata({
     };
   }
 
+  const canonicalUrl = getProductCanonicalUrl(data.store, data.product);
+  const title = getStoreSeoTitle(data.store, data.product.name);
+
   return {
-    title: getStoreSeoTitle(data.store, data.product.name),
+    title,
     description: data.product.description,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
-      title: getStoreSeoTitle(data.store, data.product.name),
+      title,
       description: data.product.description,
+      url: canonicalUrl,
       images: getStoreSocialImages(data.store, data.product.imageUrl),
     },
   };
@@ -71,6 +84,7 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
   const { store, product, products, productReviews, navigationMenus } = data;
   const reviews = productReviews.filter((review) => review.productId === product.id);
   const reviewSummary = getProductReviewSummary(reviews);
+  const productJsonLd = getProductJsonLd({ store, product, reviewSummary });
   const relatedProducts = products
     .filter(
       (item) =>
@@ -82,6 +96,10 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
 
   return (
     <main className="liquid-bg min-h-screen">
+      <script
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(productJsonLd) }}
+        type="application/ld+json"
+      />
       <StorefrontHeader
         backHref={`/stores/${store.slug}`}
         backLabel={store.name}

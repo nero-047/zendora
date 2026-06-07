@@ -14,6 +14,7 @@ import {
   PackagePlus,
   Percent,
   ReceiptText,
+  RotateCcw,
   ShieldCheck,
   ShoppingBag,
   Star,
@@ -36,6 +37,7 @@ import { StoreSettingsForm } from "@/features/commerce/components/store-settings
 import { StoreStatusControls } from "@/features/commerce/components/store-status-controls";
 import { TeamInviteForm } from "@/features/commerce/components/team-invite-form";
 import { ProductReviewStatusForm } from "@/features/commerce/components/product-review-status-form";
+import { ReturnRequestStatusForm } from "@/features/commerce/components/return-request-status-form";
 import {
   abandonedCheckoutStatusLabels,
   canQueueAbandonedCheckoutRecovery,
@@ -43,10 +45,20 @@ import {
   summarizeAbandonedCheckoutLines,
 } from "@/features/commerce/abandoned-checkouts";
 import {
+  getActivityCenter,
+  getNotificationStats,
+} from "@/features/commerce/activity-center";
+import {
   giftCardStatusLabels,
   maskGiftCardCode,
 } from "@/features/commerce/gift-cards";
 import { productReviewStatusLabels } from "@/features/commerce/reviews";
+import {
+  getReturnRequestQueue,
+  getReturnRequestQueueStats,
+  returnRequestReasonLabels,
+  returnRequestStatusLabels,
+} from "@/features/commerce/returns";
 import {
   getCustomerStats,
   getCustomerSummaries,
@@ -118,6 +130,13 @@ export default async function StorePage({
   const pendingReviewCount = productReviews.filter(
     (review) => review.status === "pending",
   ).length;
+  const returnQueue = getReturnRequestQueue(orders, { storeId: store.id });
+  const returnQueueStats = getReturnRequestQueueStats(returnQueue);
+  const activityCenterItems = getActivityCenter(
+    { auditEvents, notifications, storeId: store.id },
+    { limit: 12 },
+  );
+  const notificationStats = getNotificationStats(notifications);
   const activeGiftCardBalanceCents = giftCards
     .filter((giftCard) => giftCard.status === "active")
     .reduce((sum, giftCard) => sum + giftCard.balanceCents, 0);
@@ -185,6 +204,11 @@ export default async function StorePage({
             `${openAbandonedCheckoutCount}/${abandonedCheckouts.length}`,
           ],
           ["Reviews", `${pendingReviewCount}/${productReviews.length}`],
+          ["Returns", `${returnQueueStats.needsReview}/${returnQueueStats.totalOpen}`],
+          [
+            "Outbox",
+            `${notificationStats.failed}/${notificationStats.actionRequired}`,
+          ],
           ["Gift cards", formatCurrency(activeGiftCardBalanceCents, store.currency)],
           ["Pages", `${publishedPageCount}/${customPages.length}`],
           ["Inventory", String(store.inventoryCount)],
@@ -792,6 +816,94 @@ export default async function StorePage({
       </section>
 
       <section className="soft-panel overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <RotateCcw aria-hidden="true" size={18} />
+              Return queue
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {returnQueueStats.needsReview} need review /{" "}
+              {returnQueueStats.awaitingResolution} awaiting resolution.
+            </p>
+          </div>
+          <Link
+            className="secondary-button min-h-10 px-3 text-sm"
+            href={`/dashboard/stores/${store.id}/orders?risk=high`}
+          >
+            <ReceiptText aria-hidden="true" size={16} />
+            Orders
+          </Link>
+        </div>
+
+        {returnQueue.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {returnQueue.slice(0, 6).map((item) => (
+              <div
+                className="grid gap-4 p-4 xl:grid-cols-[1fr_360px]"
+                key={item.request.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-slate-950">
+                      {item.order.customerName}
+                    </p>
+                    <span className="status-pill">{item.label}</span>
+                    <span className="status-pill">
+                      {returnRequestStatusLabels[item.request.status]}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                    {item.order.customerEmail} / Order {item.order.id.slice(0, 8)}
+                  </p>
+                  <p className="mt-3 text-sm font-semibold text-slate-700">
+                    {returnRequestReasonLabels[item.request.reason]} /{" "}
+                    {formatCurrency(
+                      item.order.refundableCents,
+                      item.order.currency,
+                    )}{" "}
+                    refundable
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    Requested{" "}
+                    {new Date(item.request.requestedAt).toLocaleString("en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}{" "}
+                    / {item.requestedAgeDays} days old
+                  </p>
+                  <p className="mt-3 rounded-[8px] bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                    {item.request.note}
+                  </p>
+                  {item.request.merchantNote ? (
+                    <p className="mt-2 rounded-[8px] bg-white/70 p-3 text-sm leading-6 text-slate-600">
+                      {item.request.merchantNote}
+                    </p>
+                  ) : null}
+                  <Link
+                    className="mt-3 inline-flex text-sm font-semibold text-sky-700"
+                    href={item.href}
+                  >
+                    Open order
+                  </Link>
+                </div>
+
+                <ReturnRequestStatusForm
+                  orderId={item.order.id}
+                  request={item.request}
+                  storeId={store.id}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Customer return requests will appear here after buyers submit them.
+          </p>
+        )}
+      </section>
+
+      <section className="soft-panel overflow-hidden">
         <div className="border-b border-slate-100 p-4">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
             <Star aria-hidden="true" size={18} />
@@ -1009,79 +1121,81 @@ export default async function StorePage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-            <Mail aria-hidden="true" size={18} />
-            Notification outbox
-          </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Mail aria-hidden="true" size={18} />
+              Activity center
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Notification delivery, audit history, and recent store actions.
+            </p>
+          </div>
+          <span className="status-pill">
+            {notificationStats.actionRequired} needs review
+          </span>
         </div>
-        {notifications.length > 0 ? (
+
+        <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-4">
+          {[
+            ["Total", notificationStats.total],
+            ["Failed", notificationStats.failed],
+            ["Pending", notificationStats.pending],
+            ["Sent", notificationStats.sent],
+          ].map(([label, value]) => (
+            <div className="border-b border-slate-100 p-4 sm:border-b-0 sm:border-r sm:last:border-r-0" key={label}>
+              <p className="text-xs font-bold uppercase text-slate-400">
+                {label}
+              </p>
+              <p className="mt-2 text-xl font-semibold text-slate-950">
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {activityCenterItems.length > 0 ? (
           <div className="divide-y divide-slate-100">
-            {notifications.slice(0, 10).map((notification) => (
+            {activityCenterItems.map((item) => (
               <div
-                className="grid gap-3 p-4 md:grid-cols-[1fr_auto]"
-                key={notification.id}
+                className="grid gap-3 p-4 md:grid-cols-[auto_1fr_auto]"
+                key={item.id}
               >
+                <span className="status-pill w-fit capitalize">
+                  {item.priority}
+                </span>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="truncate text-sm font-semibold text-slate-950">
-                      {notification.subject}
+                      {item.title}
                     </p>
-                    <span className="status-pill">{notification.status}</span>
+                    <span className="status-pill">{item.label}</span>
+                    <span className="status-pill">{item.resourceLabel}</span>
                   </div>
-                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
-                    {notification.recipientEmail} /{" "}
-                    {notification.type.replaceAll("_", " ")}
-                  </p>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
-                    {notification.preview}
+                    {item.detail}
                   </p>
                 </div>
-                <time
-                  className="text-xs font-semibold text-slate-500 md:text-right"
-                  dateTime={notification.createdAt}
-                >
-                  {new Date(notification.createdAt).toLocaleString("en-US", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
-                </time>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="p-4 text-sm text-slate-500">No notifications queued yet.</p>
-        )}
-      </section>
-
-      <section className="soft-panel overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-            <Activity aria-hidden="true" size={18} />
-            Activity log
-          </h2>
-        </div>
-        {auditEvents.length > 0 ? (
-          <div className="divide-y divide-slate-100">
-            {auditEvents.slice(0, 10).map((event) => (
-              <div className="grid gap-2 p-4 sm:grid-cols-[1fr_auto]" key={event.id}>
-                <div>
-                  <p className="text-sm font-semibold text-slate-950">
-                    {event.summary}
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">
-                    {event.action.replaceAll("_", " ")} / {event.resourceType}
-                  </p>
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  <time
+                    className="text-xs font-semibold text-slate-500 md:text-right"
+                    dateTime={item.createdAt}
+                  >
+                    {new Date(item.createdAt).toLocaleString("en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </time>
+                  {item.href ? (
+                    <Link
+                      className="secondary-button min-h-10 px-3 text-sm"
+                      href={item.href}
+                    >
+                      <ArrowUpRight aria-hidden="true" size={16} />
+                      Open
+                    </Link>
+                  ) : null}
                 </div>
-                <time
-                  className="text-xs font-semibold text-slate-500 sm:text-right"
-                  dateTime={event.createdAt}
-                >
-                  {new Date(event.createdAt).toLocaleString("en-US", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
-                </time>
               </div>
             ))}
           </div>

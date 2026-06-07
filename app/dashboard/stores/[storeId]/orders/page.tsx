@@ -2,12 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Filter,
   PackageCheck,
   ReceiptText,
   Search,
   ShoppingBag,
+  TriangleAlert,
   Truck,
 } from "lucide-react";
 
@@ -18,6 +21,7 @@ import { getStoreWorkspace } from "@/features/commerce/data";
 import {
   getOrderFulfillmentSummary,
   getOrderRiskAssessment,
+  orderFulfillmentStageLabels,
   orderRiskLevelLabels,
 } from "@/features/commerce/order-insights";
 import {
@@ -29,9 +33,24 @@ import {
   filterOrders,
   getOrderHref,
   getOrderStats,
+  orderFulfillmentStageFilters,
+  orderPaymentStatusFilters,
+  orderRiskLevelFilters,
+  orderSourceFilters,
   orderStatusFilters,
+  parseOrderFulfillmentStageFilter,
+  parseOrderPaymentStatusFilter,
+  parseOrderRiskLevelFilter,
+  parseOrderSourceFilter,
   parseOrderStatusFilter,
 } from "@/features/commerce/orders";
+import {
+  buildDashboardPageHref,
+  dashboardPageSizeOptions,
+  paginateItems,
+  parseDashboardPage,
+  parseDashboardPageSize,
+} from "@/features/commerce/pagination";
 import { formatCurrency } from "@/lib/utils";
 
 function readSearchParam(value: string | string[] | undefined) {
@@ -43,7 +62,16 @@ export default async function OrdersPage({
   searchParams,
 }: {
   params: Promise<{ storeId: string }>;
-  searchParams: Promise<{ q?: string | string[]; status?: string | string[] }>;
+  searchParams: Promise<{
+    q?: string | string[];
+    status?: string | string[];
+    payment?: string | string[];
+    source?: string | string[];
+    fulfillment?: string | string[];
+    risk?: string | string[];
+    page?: string | string[];
+    pageSize?: string | string[];
+  }>;
 }) {
   const { storeId } = await params;
   const query = await searchParams;
@@ -57,11 +85,29 @@ export default async function OrdersPage({
   const { store, products, orders } = workspace;
   const searchQuery = readSearchParam(query.q);
   const selectedStatus = parseOrderStatusFilter(query.status);
+  const selectedPaymentStatus = parseOrderPaymentStatusFilter(query.payment);
+  const selectedSource = parseOrderSourceFilter(query.source);
+  const selectedFulfillment = parseOrderFulfillmentStageFilter(
+    query.fulfillment,
+  );
+  const selectedRisk = parseOrderRiskLevelFilter(query.risk);
+  const selectedPage = parseDashboardPage(query.page);
+  const selectedPageSize = parseDashboardPageSize(query.pageSize);
   const filteredOrders = filterOrders({
     orders,
     query: searchQuery,
     status: selectedStatus,
+    paymentStatus: selectedPaymentStatus,
+    source: selectedSource,
+    fulfillmentStage: selectedFulfillment,
+    risk: selectedRisk,
   });
+  const paginatedOrders = paginateItems({
+    items: filteredOrders,
+    page: selectedPage,
+    pageSize: selectedPageSize,
+  });
+  const ordersBasePath = `/dashboard/stores/${store.id}/orders`;
   const stats = getOrderStats(orders);
   const metricCards = [
     {
@@ -73,6 +119,11 @@ export default async function OrdersPage({
       icon: PackageCheck,
       label: "Needs fulfillment",
       value: String(stats.needsFulfillment),
+    },
+    {
+      icon: TriangleAlert,
+      label: "High risk",
+      value: String(stats.highRiskOrders),
     },
     {
       icon: CircleDollarSign,
@@ -134,7 +185,8 @@ export default async function OrdersPage({
       />
 
       <section className="soft-panel p-4">
-        <form className="grid gap-3 lg:grid-cols-[1fr_auto_auto]" method="get">
+        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto]" method="get">
+          <input name="page" type="hidden" value="1" />
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Search orders
             <span className="relative">
@@ -161,11 +213,83 @@ export default async function OrdersPage({
               ))}
             </select>
           </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Payment
+            <select
+              className="field min-w-44"
+              defaultValue={selectedPaymentStatus}
+              name="payment"
+            >
+              {orderPaymentStatusFilters.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all" ? "All payments" : paymentStatusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Fulfillment
+            <select
+              className="field min-w-48"
+              defaultValue={selectedFulfillment}
+              name="fulfillment"
+            >
+              {orderFulfillmentStageFilters.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage === "all"
+                    ? "All fulfillment"
+                    : orderFulfillmentStageLabels[stage]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Source
+            <select
+              className="field min-w-40"
+              defaultValue={selectedSource}
+              name="source"
+            >
+              {orderSourceFilters.map((source) => (
+                <option key={source} value={source}>
+                  {source === "all" ? "All sources" : orderSourceLabels[source]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Risk
+            <select className="field min-w-36" defaultValue={selectedRisk} name="risk">
+              {orderRiskLevelFilters.map((risk) => (
+                <option key={risk} value={risk}>
+                  {risk === "all" ? "All risk" : orderRiskLevelLabels[risk]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Page size
+            <select
+              className="field min-w-32"
+              defaultValue={selectedPageSize}
+              name="pageSize"
+            >
+              {dashboardPageSizeOptions.map((pageSize) => (
+                <option key={pageSize} value={pageSize}>
+                  {pageSize}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="secondary-button mt-auto min-h-12 px-4 text-sm" type="submit">
             <Filter aria-hidden="true" size={16} />
             Filter
           </button>
         </form>
+        <p className="mt-3 text-xs font-medium text-slate-500">
+          Showing {paginatedOrders.startItem}-{paginatedOrders.endItem} of{" "}
+          {filteredOrders.length} matching orders.
+        </p>
       </section>
 
       <section className="soft-panel overflow-hidden">
@@ -179,7 +303,7 @@ export default async function OrdersPage({
           <span className="hidden xl:inline">Total</span>
           <span>View</span>
         </div>
-        {filteredOrders.map((order) => {
+        {paginatedOrders.items.map((order) => {
           const fulfillmentSummary = getOrderFulfillmentSummary(order);
           const riskAssessment = getOrderRiskAssessment(order, { orders });
 
@@ -270,6 +394,52 @@ export default async function OrdersPage({
           </p>
         ) : null}
       </section>
+      {filteredOrders.length > 0 ? (
+        <nav
+          aria-label="Order workspace pages"
+          className="flex flex-wrap items-center justify-between gap-3 text-sm"
+        >
+          <p className="font-medium text-slate-500">
+            Page {paginatedOrders.page} of {paginatedOrders.totalPages}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              aria-disabled={!paginatedOrders.hasPreviousPage}
+              className={
+                paginatedOrders.hasPreviousPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: ordersBasePath,
+                params: query,
+                page: paginatedOrders.page - 1,
+                pageSize: paginatedOrders.pageSize,
+              })}
+            >
+              <ChevronLeft aria-hidden="true" size={16} />
+              Previous
+            </Link>
+            <Link
+              aria-disabled={!paginatedOrders.hasNextPage}
+              className={
+                paginatedOrders.hasNextPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: ordersBasePath,
+                params: query,
+                page: paginatedOrders.page + 1,
+                pageSize: paginatedOrders.pageSize,
+              })}
+            >
+              Next
+              <ChevronRight aria-hidden="true" size={16} />
+            </Link>
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }

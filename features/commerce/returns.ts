@@ -1,5 +1,6 @@
 import type {
   Order,
+  OrderReturnRequest,
   ReturnRequestReason,
   ReturnRequestStatus,
 } from "@/features/commerce/types";
@@ -50,6 +51,27 @@ const ACTIVE_RETURN_REQUEST_STATUSES = new Set<ReturnRequestStatus>([
   "requested",
   "approved",
 ]);
+
+export type ReturnRequestQueuePriority =
+  | "needs_review"
+  | "awaiting_resolution"
+  | "closed";
+
+export type ReturnRequestQueueItem = {
+  request: OrderReturnRequest;
+  order: Order;
+  priority: ReturnRequestQueuePriority;
+  label: string;
+  detail: string;
+  requestedAgeDays: number;
+  href: string;
+};
+
+const returnQueuePriorityRank: Record<ReturnRequestQueuePriority, number> = {
+  needs_review: 0,
+  awaiting_resolution: 1,
+  closed: 2,
+};
 
 export function canTransitionReturnRequestStatus(
   currentStatus: ReturnRequestStatus,
@@ -159,4 +181,125 @@ export function getCustomerReturnRequestEligibility(
 
 export function canCustomerRequestReturn(order: Order, now = new Date()) {
   return getCustomerReturnRequestEligibility(order, now).eligible;
+}
+
+function getRequestedAgeDays(requestedAt: string, now: Date) {
+  const requestedTime = new Date(requestedAt).getTime();
+
+  if (!Number.isFinite(requestedTime)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((now.getTime() - requestedTime) / 86400000));
+}
+
+function getQueuePriority(status: ReturnRequestStatus): ReturnRequestQueuePriority {
+  if (status === "requested") {
+    return "needs_review";
+  }
+
+  if (status === "approved") {
+    return "awaiting_resolution";
+  }
+
+  return "closed";
+}
+
+function getQueueLabel(priority: ReturnRequestQueuePriority) {
+  if (priority === "needs_review") {
+    return "Needs review";
+  }
+
+  if (priority === "awaiting_resolution") {
+    return "Awaiting resolution";
+  }
+
+  return "Closed";
+}
+
+function getQueueDetail(input: {
+  request: OrderReturnRequest;
+  order: Order;
+  requestedAgeDays: number;
+  priority: ReturnRequestQueuePriority;
+}) {
+  const reason = returnRequestReasonLabels[input.request.reason];
+  const age = `${input.requestedAgeDays} day${
+    input.requestedAgeDays === 1 ? "" : "s"
+  }`;
+
+  if (input.priority === "needs_review") {
+    return `${reason} return request has been waiting ${age}.`;
+  }
+
+  if (input.priority === "awaiting_resolution") {
+    return `Approved return has ${(input.order.refundableCents / 100).toFixed(2)} ${
+      input.order.currency
+    } still refundable.`;
+  }
+
+  return `${reason} return request is ${returnRequestStatusLabels[
+    input.request.status
+  ].toLowerCase()}.`;
+}
+
+export function getReturnRequestQueue(
+  orders: Order[],
+  input: {
+    storeId: string;
+    now?: Date;
+    includeClosed?: boolean;
+  },
+): ReturnRequestQueueItem[] {
+  const now = input.now || new Date();
+
+  return orders
+    .flatMap((order) =>
+      order.returnRequests
+        .filter((request) => input.includeClosed || request.status !== "rejected")
+        .filter((request) => input.includeClosed || request.status !== "resolved")
+        .map((request) => {
+          const priority = getQueuePriority(request.status);
+          const requestedAgeDays = getRequestedAgeDays(request.requestedAt, now);
+
+          return {
+            request,
+            order,
+            priority,
+            label: getQueueLabel(priority),
+            detail: getQueueDetail({
+              request,
+              order,
+              priority,
+              requestedAgeDays,
+            }),
+            requestedAgeDays,
+            href: `/dashboard/stores/${input.storeId}/orders/${order.id}`,
+          };
+        }),
+    )
+    .sort((a, b) => {
+      if (returnQueuePriorityRank[a.priority] !== returnQueuePriorityRank[b.priority]) {
+        return returnQueuePriorityRank[a.priority] - returnQueuePriorityRank[b.priority];
+      }
+
+      if (b.requestedAgeDays !== a.requestedAgeDays) {
+        return b.requestedAgeDays - a.requestedAgeDays;
+      }
+
+      return (
+        new Date(b.request.requestedAt).getTime() -
+        new Date(a.request.requestedAt).getTime()
+      );
+    });
+}
+
+export function getReturnRequestQueueStats(queue: ReturnRequestQueueItem[]) {
+  return {
+    totalOpen: queue.filter((item) => item.priority !== "closed").length,
+    needsReview: queue.filter((item) => item.priority === "needs_review").length,
+    awaitingResolution: queue.filter(
+      (item) => item.priority === "awaiting_resolution",
+    ).length,
+  };
 }

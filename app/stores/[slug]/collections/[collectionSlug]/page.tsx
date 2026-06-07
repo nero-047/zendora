@@ -11,9 +11,12 @@ import {
 } from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import {
+  getCollectionCanonicalUrl,
+  getCollectionJsonLd,
   getStoreSeoDescription,
   getStoreSeoTitle,
   getStoreSocialImages,
+  serializeJsonLd,
 } from "@/features/commerce/seo";
 import type { Product } from "@/features/commerce/types";
 
@@ -63,12 +66,21 @@ export async function generateMetadata({
     };
   }
 
+  const canonicalUrl = getCollectionCanonicalUrl(data.store, data.collection);
+  const title = getStoreSeoTitle(data.store, data.collection.title);
+  const description =
+    data.collection.description || getStoreSeoDescription(data.store);
+
   return {
-    title: getStoreSeoTitle(data.store, data.collection.title),
-    description: data.collection.description || getStoreSeoDescription(data.store),
+    title,
+    description,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
-      title: getStoreSeoTitle(data.store, data.collection.title),
-      description: data.collection.description || getStoreSeoDescription(data.store),
+      title,
+      description,
+      url: canonicalUrl,
       images: getStoreSocialImages(data.store, data.collection.imageUrl),
     },
   };
@@ -91,9 +103,18 @@ export default async function PublicCollectionPage({
   const { store, collection, products, navigationMenus } = data;
   const heroImage = collection.imageUrl || products[0]?.imageUrl;
   const catalogFilters = parseStorefrontCatalogFilters(query);
+  const collectionJsonLd = getCollectionJsonLd({
+    store,
+    collection,
+    products,
+  });
 
   return (
     <main className="liquid-bg min-h-screen">
+      <script
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(collectionJsonLd) }}
+        type="application/ld+json"
+      />
       <StorefrontHeader
         backHref={`/stores/${store.slug}`}
         backLabel={store.name}

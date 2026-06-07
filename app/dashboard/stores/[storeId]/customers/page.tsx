@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Filter,
   Megaphone,
@@ -20,16 +22,32 @@ import { CustomerProfileForm } from "@/features/commerce/components/customer-pro
 import {
   customerSegmentFilters,
   customerSegmentLabels,
+  customerMarketingFilters,
+  customerMarketingFilterLabels,
+  customerOrderActivityFilters,
+  customerOrderActivityFilterLabels,
+  customerSortLabels,
+  customerSortOptions,
   filterCustomers,
   getCustomerSegmentation,
   getCustomerHref,
   getCustomerStats,
   getCustomerSummaries,
+  parseCustomerMarketingFilter,
+  parseCustomerOrderActivityFilter,
   parseCustomerSegmentFilter,
+  parseCustomerSortOption,
   readCustomerSearchParam,
 } from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
 import { orderStatusLabels } from "@/features/commerce/order-status";
+import {
+  buildDashboardPageHref,
+  dashboardPageSizeOptions,
+  paginateItems,
+  parseDashboardPage,
+  parseDashboardPageSize,
+} from "@/features/commerce/pagination";
 import { formatCurrency } from "@/lib/utils";
 
 export default async function CustomersPage({
@@ -37,7 +55,15 @@ export default async function CustomersPage({
   searchParams,
 }: {
   params: Promise<{ storeId: string }>;
-  searchParams: Promise<{ q?: string | string[]; segment?: string | string[] }>;
+  searchParams: Promise<{
+    q?: string | string[];
+    segment?: string | string[];
+    marketing?: string | string[];
+    activity?: string | string[];
+    sort?: string | string[];
+    page?: string | string[];
+    pageSize?: string | string[];
+  }>;
 }) {
   const { storeId } = await params;
   const query = await searchParams;
@@ -56,11 +82,25 @@ export default async function CustomersPage({
   );
   const searchQuery = readCustomerSearchParam(query.q);
   const selectedSegment = parseCustomerSegmentFilter(query.segment);
+  const selectedMarketing = parseCustomerMarketingFilter(query.marketing);
+  const selectedActivity = parseCustomerOrderActivityFilter(query.activity);
+  const selectedSort = parseCustomerSortOption(query.sort);
+  const selectedPage = parseDashboardPage(query.page);
+  const selectedPageSize = parseDashboardPageSize(query.pageSize);
   const filteredCustomers = filterCustomers({
     customers,
     query: searchQuery,
     segment: selectedSegment,
+    marketing: selectedMarketing,
+    activity: selectedActivity,
+    sort: selectedSort,
   });
+  const paginatedCustomers = paginateItems({
+    items: filteredCustomers,
+    page: selectedPage,
+    pageSize: selectedPageSize,
+  });
+  const customersBasePath = `/dashboard/stores/${store.id}/customers`;
   const stats = getCustomerStats(customers);
   const metricCards = [
     {
@@ -142,7 +182,8 @@ export default async function CustomersPage({
       </section>
 
       <section className="soft-panel p-4">
-        <form className="grid gap-3 lg:grid-cols-[1fr_auto_auto]" method="get">
+        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto_auto_auto]" method="get">
+          <input name="page" type="hidden" value="1" />
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Search customers
             <span className="relative">
@@ -175,13 +216,70 @@ export default async function CustomersPage({
               ))}
             </select>
           </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Marketing
+            <select
+              className="field min-w-48"
+              defaultValue={selectedMarketing}
+              name="marketing"
+            >
+              {customerMarketingFilters.map((marketing) => (
+                <option key={marketing} value={marketing}>
+                  {customerMarketingFilterLabels[marketing]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Activity
+            <select
+              className="field min-w-44"
+              defaultValue={selectedActivity}
+              name="activity"
+            >
+              {customerOrderActivityFilters.map((activity) => (
+                <option key={activity} value={activity}>
+                  {customerOrderActivityFilterLabels[activity]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Sort
+            <select
+              className="field min-w-44"
+              defaultValue={selectedSort}
+              name="sort"
+            >
+              {customerSortOptions.map((sort) => (
+                <option key={sort} value={sort}>
+                  {customerSortLabels[sort]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Page size
+            <select
+              className="field min-w-32"
+              defaultValue={selectedPageSize}
+              name="pageSize"
+            >
+              {dashboardPageSizeOptions.map((pageSize) => (
+                <option key={pageSize} value={pageSize}>
+                  {pageSize}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="secondary-button mt-auto min-h-12 px-4 text-sm" type="submit">
             <Filter aria-hidden="true" size={16} />
             Filter
           </button>
         </form>
         <p className="mt-3 text-xs font-medium text-slate-500">
-          Showing {filteredCustomers.length} of {customers.length} customers.
+          Showing {paginatedCustomers.startItem}-{paginatedCustomers.endItem} of{" "}
+          {filteredCustomers.length} matching customers.
         </p>
       </section>
 
@@ -195,7 +293,7 @@ export default async function CustomersPage({
           <span className="hidden lg:inline">Status</span>
           <span>View</span>
         </div>
-        {filteredCustomers.map((customer) => {
+        {paginatedCustomers.items.map((customer) => {
           const segmentation = getCustomerSegmentation(customer);
 
           return (
@@ -276,6 +374,52 @@ export default async function CustomersPage({
           </p>
         ) : null}
       </section>
+      {filteredCustomers.length > 0 ? (
+        <nav
+          aria-label="Customer book pages"
+          className="flex flex-wrap items-center justify-between gap-3 text-sm"
+        >
+          <p className="font-medium text-slate-500">
+            Page {paginatedCustomers.page} of {paginatedCustomers.totalPages}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              aria-disabled={!paginatedCustomers.hasPreviousPage}
+              className={
+                paginatedCustomers.hasPreviousPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: customersBasePath,
+                params: query,
+                page: paginatedCustomers.page - 1,
+                pageSize: paginatedCustomers.pageSize,
+              })}
+            >
+              <ChevronLeft aria-hidden="true" size={16} />
+              Previous
+            </Link>
+            <Link
+              aria-disabled={!paginatedCustomers.hasNextPage}
+              className={
+                paginatedCustomers.hasNextPage
+                  ? "secondary-button px-3 text-sm"
+                  : "secondary-button pointer-events-none px-3 text-sm opacity-50"
+              }
+              href={buildDashboardPageHref({
+                basePath: customersBasePath,
+                params: query,
+                page: paginatedCustomers.page + 1,
+                pageSize: paginatedCustomers.pageSize,
+              })}
+            >
+              Next
+              <ChevronRight aria-hidden="true" size={16} />
+            </Link>
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }
