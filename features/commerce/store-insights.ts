@@ -154,7 +154,7 @@ export function getStoreOperationalInsights(
       severity: signal.urgency === "out_of_stock" ? "critical" : "warning",
       title: `${signal.productName} inventory plan`,
       detail: signal.detail,
-      href: `/dashboard/stores/${workspace.store.id}/products/${signal.productId}/edit`,
+      href: `/dashboard/stores/${workspace.store.id}/inventory?inventory=action_required`,
       actionLabel: "Plan reorder",
     });
   }

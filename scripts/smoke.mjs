@@ -119,6 +119,13 @@ async function run() {
       `${check.path} should return 404. Status: ${result.response.status}`,
     );
 
+    for (const expectedText of check.includes || []) {
+      assert(
+        visibleBody.includes(expectedText),
+        `${check.path} did not render expected 404 text: ${expectedText}`,
+      );
+    }
+
     for (const excludedText of check.excludes || []) {
       assert(
         !visibleBody.includes(excludedText),
@@ -143,6 +150,48 @@ async function run() {
     }
 
     assertHtmlRoute(check, result);
+    checks.push(check.label);
+  }
+
+  async function checkProtectedCsvRoute(check) {
+    const result = await request(check.path);
+
+    if (result.response.status === 307 || result.response.status === 308) {
+      const location = result.response.headers.get("location") || "";
+      assert(
+        location.includes("/sign-in") || location.includes("/dashboard"),
+        `${check.path} redirected to an unexpected location: ${location}`,
+      );
+      checks.push(`${check.label} auth redirect`);
+      return;
+    }
+
+    assert(
+      result.response.status === 200,
+      `${check.path} did not return 200. Status: ${result.response.status}`,
+    );
+    assert(
+      (result.response.headers.get("content-type") || "").includes("text/csv"),
+      `${check.path} did not return a CSV response.`,
+    );
+    assert(
+      (result.response.headers.get("content-disposition") || "").includes(
+        "attachment",
+      ),
+      `${check.path} did not return an attachment download.`,
+    );
+    assert(
+      typeof result.body === "string",
+      `${check.path} did not return a text response.`,
+    );
+
+    for (const expectedText of check.includes) {
+      assert(
+        result.body.includes(expectedText),
+        `${check.path} did not render expected CSV text: ${expectedText}`,
+      );
+    }
+
     checks.push(check.label);
   }
 
@@ -357,6 +406,13 @@ async function run() {
     excludes: ["Order received", "Payment summary", "Request return"],
   });
 
+  await checkNotFoundRoute({
+    label: "missing dashboard store",
+    path: "/dashboard/stores/missing-store",
+    includes: ["Store workspace not found", "Dashboard", "New store"],
+    excludes: ["Northline Supply", "Mira Chen", "Hydra Bottle"],
+  });
+
   await checkAbandonedCheckoutApi();
 
   const dashboardChecks = [
@@ -372,7 +428,9 @@ async function run() {
         "Northline Supply",
         "Launch readiness",
         "Activity center",
+        "Activity workspace",
         "Operations queue",
+        "Recovery workspace",
         "Save collection",
         "Save zone",
         "Save discount",
@@ -383,6 +441,48 @@ async function run() {
       label: "admin analytics content",
       path: "/dashboard/stores/demo-store-outdoor/analytics",
       includes: ["Analytics", "Orders", "Customer concentration", "Refund"],
+    },
+    {
+      label: "admin activity outbox content",
+      path: "/dashboard/stores/demo-store-outdoor/activity?priority=critical&q=tracking",
+      includes: [
+        "Activity and outbox",
+        "Notifications",
+        "Needs review",
+        "Search activity",
+        "Failed Fulfillment update",
+        "Ari Patel",
+        "Tracking details could not be delivered.",
+        "Fulfillment",
+      ],
+    },
+    {
+      label: "admin checkout recovery content",
+      path: "/dashboard/stores/demo-store-outdoor/checkouts?q=bottle&status=open",
+      includes: [
+        "Checkout recovery workspace",
+        "Recoverable carts",
+        "Search checkouts",
+        "Nina Brooks",
+        "Field Carry Pack",
+        "Hydra Bottle",
+        "Open",
+        "Send",
+        "Dismiss",
+      ],
+    },
+    {
+      label: "admin inventory workspace content",
+      path: "/dashboard/stores/demo-store-outdoor/inventory?q=bottle&sort=stock_asc",
+      includes: [
+        "Inventory workspace",
+        "Action required",
+        "Reorder now",
+        "Search inventory",
+        "Hydra Bottle",
+        "Inventory history",
+        "Two bottles removed after inspection.",
+      ],
     },
     {
       label: "admin products content",
@@ -423,17 +523,134 @@ async function run() {
     {
       label: "admin order detail content",
       path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001",
-      includes: ["Settlement", "Payment ledger", "Net collected", "Ledger delta"],
+      includes: [
+        "Fulfillment state",
+        "Risk review",
+        "Payment due",
+        "Settlement",
+        "Items",
+        "Refund",
+        "Payment",
+        "Product reviews",
+        "Clean, durable, and easy to wear",
+        "Payment ledger",
+        "Net collected",
+        "Ledger delta",
+        "Fulfillment",
+        "Add shipment",
+        "Timeline",
+        "Invoice",
+        "Packing slip",
+      ],
+    },
+    {
+      label: "admin order invoice document",
+      path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001/invoice",
+      includes: [
+        "Invoice",
+        "Order demo-ord",
+        "Mira Chen",
+        "Bill to",
+        "Ship to",
+        "Payment",
+        "Field Carry Pack",
+        "Subtotal",
+        "Total",
+      ],
+    },
+    {
+      label: "admin order packing slip document",
+      path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001/packing-slip",
+      includes: [
+        "Packing slip",
+        "Order demo-ord",
+        "Ship to",
+        "Shipment",
+        "Pick",
+        "Field Carry Pack",
+        "Customer note",
+        "Leave at the front desk.",
+      ],
+    },
+    {
+      label: "admin return/refund fulfillment content",
+      path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1002",
+      includes: [
+        "Return requests",
+        "Changed mind",
+        "Save return status",
+        "Refund history",
+        "Bottle returned unopened",
+        "UPS",
+        "Tracking link",
+        "Save review status",
+        "Payment refunds",
+      ],
     },
     {
       label: "admin customers content",
       path: "/dashboard/stores/demo-store-outdoor/customers?segment=vip&sort=risk_priority",
       includes: ["Customers", "Mira", "VIP", "Marketing"],
     },
+    {
+      label: "admin customer detail content",
+      path: "/dashboard/stores/demo-store-outdoor/customers/mira%40example.com",
+      includes: [
+        "Mira Chen",
+        "Customer segment",
+        "Order history",
+        "Customer profile",
+        "Save profile",
+        "Merchant note",
+        "Prefers low-waste packaging",
+        "Shipping",
+        "Customer notes",
+      ],
+    },
   ];
 
   for (const check of dashboardChecks) {
     await checkProtectedDashboardRoute(check);
+  }
+
+  const dashboardCsvChecks = [
+    {
+      label: "admin orders csv export",
+      path: "/dashboard/stores/demo-store-outdoor/orders/export?q=mira",
+      includes: [
+        "order_id,customer_name,customer_email",
+        "demo-order-1001",
+        "Mira Chen",
+      ],
+    },
+    {
+      label: "admin products csv export",
+      path: "/dashboard/stores/demo-store-outdoor/products/export?q=bottle&sort=inventory_asc",
+      includes: [
+        "product_id,name,slug",
+        "demo-product-hydra-bottle",
+        "Hydra Bottle",
+      ],
+    },
+    {
+      label: "admin inventory csv export",
+      path: "/dashboard/stores/demo-store-outdoor/inventory/export?q=bottle&sort=stock_asc",
+      includes: [
+        "product_id,name,sku,category,priority",
+        "demo-product-hydra-bottle",
+        "Hydra Bottle",
+        "Drinkware",
+      ],
+    },
+    {
+      label: "admin customers csv export",
+      path: "/dashboard/stores/demo-store-outdoor/customers/export?segment=vip&sort=risk_priority",
+      includes: ["email,name,phone", "mira@example.com", "Mira Chen"],
+    },
+  ];
+
+  for (const check of dashboardCsvChecks) {
+    await checkProtectedCsvRoute(check);
   }
 
   console.log(

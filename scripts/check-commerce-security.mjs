@@ -5,6 +5,7 @@ const actionsPath = "features/commerce/actions.ts";
 const abandonedCheckoutRoutePath =
   "app/api/stores/[slug]/abandoned-checkouts/route.ts";
 const clerkWebhookRoutePath = "app/api/webhooks/clerk/route.ts";
+const csvExportPath = "features/commerce/csv-export.ts";
 const dataPath = "features/commerce/data.ts";
 const envPath = "lib/env.ts";
 const nextConfigPath = "next.config.ts";
@@ -14,6 +15,7 @@ const smokePath = "scripts/smoke.mjs";
 const sourceText = readFileSync(actionsPath, "utf8");
 const abandonedCheckoutRouteText = readFileSync(abandonedCheckoutRoutePath, "utf8");
 const clerkWebhookRouteText = readFileSync(clerkWebhookRoutePath, "utf8");
+const csvExportText = readFileSync(csvExportPath, "utf8");
 const dataText = readFileSync(dataPath, "utf8");
 const envText = readFileSync(envPath, "utf8");
 const nextConfigText = readFileSync(nextConfigPath, "utf8");
@@ -204,6 +206,14 @@ if (
   !requestGuardsText.includes("consumeRateLimit")
 ) {
   failures.push(`${requestGuardsPath} must enforce JSON body limits and reusable request rate limits.`);
+}
+
+if (
+  !csvExportText.includes("spreadsheetFormulaPattern") ||
+  !csvExportText.includes('"Content-Disposition"') ||
+  !csvExportText.includes('"text/csv; charset=utf-8"')
+) {
+  failures.push(`${csvExportPath} must return attachment CSV responses and neutralize spreadsheet formulas.`);
 }
 
 if (

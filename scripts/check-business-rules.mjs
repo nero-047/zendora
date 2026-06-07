@@ -675,6 +675,176 @@ const tests = [
     },
   ],
   [
+    "inventory workspace filters stats and priority sorting",
+    () => {
+      const makeProduct = (overrides = {}) => ({
+        id: "product_reorder",
+        storeId: "store_1",
+        name: "Field Carry Pack",
+        slug: "field-carry-pack",
+        sku: "PACK-1",
+        category: "Packs",
+        description: "A durable carry pack for replenishment planning.",
+        priceCents: 9000,
+        currency: "USD",
+        inventoryCount: 4,
+        imageUrl: "https://example.com/pack.jpg",
+        status: "active",
+        createdAt: "2026-05-01T10:00:00.000Z",
+        variants: [],
+        ...overrides,
+      });
+      const productsById = new Map([
+        ["product_reorder", makeProduct()],
+        [
+          "product_zero",
+          makeProduct({
+            id: "product_zero",
+            name: "Out Stock Kit",
+            slug: "out-stock-kit",
+            sku: "OUT-1",
+            inventoryCount: 0,
+          }),
+        ],
+        [
+          "product_watch",
+          makeProduct({
+            id: "product_watch",
+            name: "Hydra Bottle",
+            slug: "hydra-bottle",
+            sku: "HYDRA-1",
+            category: "Hydration",
+            inventoryCount: 12,
+          }),
+        ],
+        [
+          "product_healthy",
+          makeProduct({
+            id: "product_healthy",
+            name: "Trail Watch",
+            slug: "trail-watch",
+            sku: "WATCH-1",
+            category: "Accessories",
+            inventoryCount: 40,
+          }),
+        ],
+      ]);
+      const signals = [
+        {
+          productId: "product_reorder",
+          productName: "Field Carry Pack",
+          urgency: "reorder_now",
+          label: "Reorder now",
+          soldQuantity: 30,
+          salesVelocityPerDay: 1,
+          sellableInventoryCount: 4,
+          estimatedDaysUntilStockout: 4,
+          reorderQuantity: 41,
+          detail: "Estimated stockout in 4 days; reorder about 41 units.",
+        },
+        {
+          productId: "product_zero",
+          productName: "Out Stock Kit",
+          urgency: "out_of_stock",
+          label: "Out of stock",
+          soldQuantity: 5,
+          salesVelocityPerDay: 0.2,
+          sellableInventoryCount: 0,
+          reorderQuantity: 9,
+          detail: "Out Stock Kit has no sellable inventory available.",
+        },
+        {
+          productId: "product_watch",
+          productName: "Hydra Bottle",
+          urgency: "watch",
+          label: "Watch stock",
+          soldQuantity: 12,
+          salesVelocityPerDay: 0.4,
+          sellableInventoryCount: 12,
+          estimatedDaysUntilStockout: 30,
+          reorderQuantity: 6,
+          detail: "Estimated stockout in 30 days; watch replenishment timing.",
+        },
+        {
+          productId: "product_healthy",
+          productName: "Trail Watch",
+          urgency: "healthy",
+          label: "Healthy",
+          soldQuantity: 2,
+          salesVelocityPerDay: 0.1,
+          sellableInventoryCount: 40,
+          estimatedDaysUntilStockout: 400,
+          reorderQuantity: 0,
+          detail: "40 sellable units cover about 400 days.",
+        },
+      ];
+
+      const stats = inventoryPlanning.getInventoryPlanningStats(signals);
+
+      assertEqual(stats.actionRequired, 2, "inventory stats should count urgent work");
+      assertEqual(stats.reorderNow, 1, "inventory stats should count reorder rows");
+      assertEqual(
+        stats.totalReorderQuantity,
+        56,
+        "inventory stats should sum recommended reorder units",
+      );
+      assertEqual(
+        inventoryPlanning.parseInventoryPlanningUrgencyFilter("soon"),
+        "all",
+        "invalid inventory workspace filters should fall back to all",
+      );
+      assertEqual(
+        inventoryPlanning.parseInventoryPlanningSortOption("unknown"),
+        "urgency",
+        "invalid inventory workspace sort should fall back to urgency",
+      );
+      assertDeepEqual(
+        inventoryPlanning
+          .filterInventoryPlanningSignals({
+            signals,
+            query: "hydration",
+            urgency: "all",
+            sort: "urgency",
+            productsById,
+          })
+          .map((signal) => signal.productId),
+        ["product_watch"],
+        "inventory search should include SKU and category metadata",
+      );
+      assertDeepEqual(
+        inventoryPlanning
+          .filterInventoryPlanningSignals({
+            signals,
+            query: "",
+            urgency: "action_required",
+            sort: "runway_asc",
+            productsById,
+          })
+          .map((signal) => signal.productId),
+        ["product_zero", "product_reorder"],
+        "action required runway sort should put stockouts first",
+      );
+      assertDeepEqual(
+        inventoryPlanning
+          .filterInventoryPlanningSignals({
+            signals,
+            query: "",
+            urgency: "all",
+            sort: "reorder_desc",
+            productsById,
+          })
+          .map((signal) => signal.productId),
+        [
+          "product_reorder",
+          "product_zero",
+          "product_watch",
+          "product_healthy",
+        ],
+        "largest reorder sort should prioritize the biggest replenishment need",
+      );
+    },
+  ],
+  [
     "gift cards normalize codes and cap redemptions by balance and order total",
     () => {
       assertEqual(
@@ -1325,6 +1495,105 @@ const tests = [
           lines,
         }),
         "recovered checkouts should not queue recovery again",
+      );
+
+      const checkoutRows = [
+        {
+          id: "checkout_open",
+          storeId: "store_1",
+          customerEmail: "nina@example.com",
+          customerName: "Nina Brooks",
+          recoveryToken: "recover-open",
+          status: "open",
+          lines,
+          subtotalCents: 22300,
+          currency: "USD",
+          lastSeenAt: "2026-06-06T15:35:00.000Z",
+          recoveryEmailCount: 1,
+          createdAt: "2026-06-06T15:20:00.000Z",
+          updatedAt: "2026-06-06T16:00:00.000Z",
+        },
+        {
+          id: "checkout_recovered",
+          storeId: "store_1",
+          customerEmail: "leo@example.com",
+          customerName: "Leo Martin",
+          recoveryToken: "recover-done",
+          status: "recovered",
+          lines: lines.slice(0, 1),
+          subtotalCents: 12900,
+          currency: "USD",
+          lastSeenAt: "2026-06-04T15:35:00.000Z",
+          recoveryEmailCount: 2,
+          recoveredOrderId: "order_1",
+          recoveredAt: "2026-06-04T18:00:00.000Z",
+          createdAt: "2026-06-04T15:20:00.000Z",
+          updatedAt: "2026-06-04T18:00:00.000Z",
+        },
+        {
+          id: "checkout_dismissed",
+          storeId: "store_1",
+          customerEmail: "ari@example.com",
+          customerName: "Ari Patel",
+          recoveryToken: "recover-dismissed",
+          status: "dismissed",
+          lines: lines.slice(1),
+          subtotalCents: 8400,
+          currency: "USD",
+          lastSeenAt: "2026-06-05T15:35:00.000Z",
+          recoveryEmailCount: 0,
+          dismissedAt: "2026-06-05T16:00:00.000Z",
+          createdAt: "2026-06-05T15:20:00.000Z",
+          updatedAt: "2026-06-05T16:00:00.000Z",
+        },
+      ];
+
+      assertDeepEqual(
+        abandonedCheckouts.getAbandonedCheckoutStats(checkoutRows),
+        {
+          total: 3,
+          open: 1,
+          recoverable: 1,
+          recovered: 1,
+          dismissed: 1,
+          recoverableValueCents: 22300,
+          recoveredValueCents: 12900,
+        },
+        "abandoned checkout stats should summarize recovery work",
+      );
+      assertDeepEqual(
+        abandonedCheckouts
+          .filterAbandonedCheckouts({
+            checkouts: checkoutRows,
+            query: "bottle",
+            status: "all",
+            sort: "recovery_priority",
+          })
+          .map((checkout) => checkout.id),
+        ["checkout_open", "checkout_dismissed"],
+        "abandoned checkout filtering should search cart line details",
+      );
+      assertDeepEqual(
+        abandonedCheckouts
+          .filterAbandonedCheckouts({
+            checkouts: checkoutRows,
+            query: "",
+            status: "open",
+            sort: "value_desc",
+          })
+          .map((checkout) => checkout.id),
+        ["checkout_open"],
+        "abandoned checkout filtering should apply status filters",
+      );
+      assertEqual(
+        abandonedCheckouts.parseAbandonedCheckoutStatusFilter("missing"),
+        "all",
+        "invalid abandoned checkout status filters should fall back to all",
+      );
+      assertEqual(
+        abandonedCheckouts.parseAbandonedCheckoutSortOption("missing"),
+        "recovery_priority",
+        "invalid abandoned checkout sort options should fall back to priority",
       );
     },
   ],
@@ -3052,6 +3321,55 @@ const tests = [
         "return request notifications should have merchant-readable resource labels",
       );
       assertEqual(items[2].label, "Audit", "audit entries should remain visible");
+      assertDeepEqual(
+        activityCenter
+          .filterActivityCenterItems({
+            items: activityCenter.getActivityCenterItems({
+              auditEvents,
+              notifications,
+              storeId: "store_1",
+            }),
+            kind: "notification",
+            priority: "critical",
+            query: "shipping",
+            sort: "priority",
+          })
+          .map((item) => item.id),
+        ["notification:notification_failed"],
+        "activity filters should find critical notification delivery issues",
+      );
+      assertDeepEqual(
+        activityCenter
+          .filterActivityCenterItems({
+            items: activityCenter.getActivityCenterItems({
+              auditEvents,
+              notifications,
+              storeId: "store_1",
+            }),
+            kind: "audit_event",
+            priority: "all",
+            query: "marked order",
+            sort: "newest",
+          })
+          .map((item) => item.id),
+        ["audit:audit_order"],
+        "activity filters should search audit event summaries",
+      );
+      assertEqual(
+        activityCenter.parseActivityCenterKindFilter("bad"),
+        "all",
+        "invalid activity kind filters should fall back to all",
+      );
+      assertEqual(
+        activityCenter.parseActivityCenterPriorityFilter("bad"),
+        "all",
+        "invalid activity priority filters should fall back to all",
+      );
+      assertEqual(
+        activityCenter.parseActivityCenterSortOption("bad"),
+        "priority",
+        "invalid activity sort options should fall back to priority",
+      );
     },
   ],
   [

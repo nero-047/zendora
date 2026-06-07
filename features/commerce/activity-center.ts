@@ -9,6 +9,34 @@ import type {
 export type ActivityCenterPriority = "critical" | "warning" | "info";
 export type ActivityCenterKind = "notification" | "audit_event";
 
+export const activityCenterKindFilters = [
+  "all",
+  "notification",
+  "audit_event",
+] as const;
+
+export type ActivityCenterKindFilter =
+  (typeof activityCenterKindFilters)[number];
+
+export const activityCenterPriorityFilters = [
+  "all",
+  "critical",
+  "warning",
+  "info",
+] as const;
+
+export type ActivityCenterPriorityFilter =
+  (typeof activityCenterPriorityFilters)[number];
+
+export const activityCenterSortOptions = [
+  "priority",
+  "newest",
+  "oldest",
+] as const;
+
+export type ActivityCenterSortOption =
+  (typeof activityCenterSortOptions)[number];
+
 export type StoreNotificationStats = {
   total: number;
   pending: number;
@@ -35,6 +63,31 @@ export const notificationStatusLabels: Record<NotificationStatus, string> = {
   sent: "Sent",
   failed: "Failed",
   suppressed: "Suppressed",
+};
+
+export const activityCenterKindFilterLabels: Record<
+  ActivityCenterKindFilter,
+  string
+> = {
+  all: "All activity",
+  notification: "Notifications",
+  audit_event: "Audit events",
+};
+
+export const activityCenterPriorityFilterLabels: Record<
+  ActivityCenterPriorityFilter,
+  string
+> = {
+  all: "All priorities",
+  critical: "Critical",
+  warning: "Warning",
+  info: "Info",
+};
+
+export const activityCenterSortLabels: Record<ActivityCenterSortOption, string> = {
+  priority: "Priority",
+  newest: "Newest first",
+  oldest: "Oldest first",
 };
 
 export const notificationTypeLabels: Record<NotificationType, string> = {
@@ -291,6 +344,27 @@ function getTimeValue(value: string) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function sortActivityCenterItems(
+  items: ActivityCenterItem[],
+  sort: ActivityCenterSortOption,
+) {
+  return [...items].sort((a, b) => {
+    if (sort === "newest") {
+      return getTimeValue(b.createdAt) - getTimeValue(a.createdAt);
+    }
+
+    if (sort === "oldest") {
+      return getTimeValue(a.createdAt) - getTimeValue(b.createdAt);
+    }
+
+    if (priorityRank[a.priority] !== priorityRank[b.priority]) {
+      return priorityRank[a.priority] - priorityRank[b.priority];
+    }
+
+    return getTimeValue(b.createdAt) - getTimeValue(a.createdAt);
+  });
+}
+
 export function getNotificationStats(
   notifications: StoreNotification[],
 ): StoreNotificationStats {
@@ -314,6 +388,99 @@ export function getNotificationStats(
   return stats;
 }
 
+export function getActivityCenterItems(input: {
+  auditEvents: StoreAuditEvent[];
+  notifications: StoreNotification[];
+  storeId: string;
+}) {
+  return [
+    ...input.notifications.map((notification) =>
+      toNotificationActivityItem(input.storeId, notification),
+    ),
+    ...input.auditEvents.map((event) =>
+      toAuditActivityItem(input.storeId, event),
+    ),
+  ];
+}
+
+export function readActivityCenterSearchParam(
+  value: string | string[] | undefined,
+) {
+  return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+export function parseActivityCenterKindFilter(
+  value: string | string[] | undefined,
+) {
+  const kind = Array.isArray(value) ? value[0] : value;
+
+  if (activityCenterKindFilters.includes(kind as ActivityCenterKindFilter)) {
+    return kind as ActivityCenterKindFilter;
+  }
+
+  return "all";
+}
+
+export function parseActivityCenterPriorityFilter(
+  value: string | string[] | undefined,
+) {
+  const priority = Array.isArray(value) ? value[0] : value;
+
+  if (
+    activityCenterPriorityFilters.includes(
+      priority as ActivityCenterPriorityFilter,
+    )
+  ) {
+    return priority as ActivityCenterPriorityFilter;
+  }
+
+  return "all";
+}
+
+export function parseActivityCenterSortOption(
+  value: string | string[] | undefined,
+) {
+  const sort = Array.isArray(value) ? value[0] : value;
+
+  if (activityCenterSortOptions.includes(sort as ActivityCenterSortOption)) {
+    return sort as ActivityCenterSortOption;
+  }
+
+  return "priority";
+}
+
+export function filterActivityCenterItems(input: {
+  items: ActivityCenterItem[];
+  kind: ActivityCenterKindFilter;
+  priority: ActivityCenterPriorityFilter;
+  query: string;
+  sort?: ActivityCenterSortOption;
+}) {
+  const normalizedQuery = input.query.trim().toLowerCase();
+  const filteredItems = input.items.filter((item) => {
+    const kindMatches = input.kind === "all" || item.kind === input.kind;
+    const priorityMatches =
+      input.priority === "all" || item.priority === input.priority;
+    const queryMatches =
+      !normalizedQuery ||
+      [
+        item.title,
+        item.detail,
+        item.label,
+        item.resourceLabel,
+        item.kind,
+        item.priority,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery);
+
+    return kindMatches && priorityMatches && queryMatches;
+  });
+
+  return sortActivityCenterItems(filteredItems, input.sort || "priority");
+}
+
 export function getActivityCenter(
   input: {
     auditEvents: StoreAuditEvent[];
@@ -325,22 +492,7 @@ export function getActivityCenter(
   } = {},
 ): ActivityCenterItem[] {
   const limit = Math.max(1, options.limit || 12);
-  const items = [
-    ...input.notifications.map((notification) =>
-      toNotificationActivityItem(input.storeId, notification),
-    ),
-    ...input.auditEvents.map((event) =>
-      toAuditActivityItem(input.storeId, event),
-    ),
-  ];
+  const items = getActivityCenterItems(input);
 
-  return items
-    .sort((a, b) => {
-      if (priorityRank[a.priority] !== priorityRank[b.priority]) {
-        return priorityRank[a.priority] - priorityRank[b.priority];
-      }
-
-      return getTimeValue(b.createdAt) - getTimeValue(a.createdAt);
-    })
-    .slice(0, limit);
+  return sortActivityCenterItems(items, "priority").slice(0, limit);
 }

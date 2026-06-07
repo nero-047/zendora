@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  Download,
   Edit3,
   Filter,
   Package,
@@ -42,6 +43,7 @@ import {
 } from "@/features/commerce/products";
 import {
   buildDashboardPageHref,
+  buildDashboardExportHref,
   dashboardPageSizeOptions,
   paginateItems,
   parseDashboardPage,
@@ -109,6 +111,10 @@ export default async function ProductsPage({
     pageSize: selectedPageSize,
   });
   const productsBasePath = `/dashboard/stores/${store.id}/products`;
+  const productsExportHref = buildDashboardExportHref({
+    basePath: `${productsBasePath}/export`,
+    params: query,
+  });
   const reorderNowCount = inventorySignals.filter(
     (signal) =>
       signal.urgency === "out_of_stock" || signal.urgency === "reorder_now",
@@ -176,13 +182,19 @@ export default async function ProductsPage({
               ready to sell.
             </p>
           </div>
-          <Link
-            className="primary-button px-4 text-sm"
-            href={`/dashboard/stores/${store.id}/products/new`}
-          >
-            <PackagePlus aria-hidden="true" size={17} />
-            Product
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link className="secondary-button px-4 text-sm" href={productsExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
+            <Link
+              className="primary-button px-4 text-sm"
+              href={`/dashboard/stores/${store.id}/products/new`}
+            >
+              <PackagePlus aria-hidden="true" size={17} />
+              Product
+            </Link>
+          </div>
         </div>
       </section>
 

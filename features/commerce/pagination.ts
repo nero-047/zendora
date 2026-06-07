@@ -105,3 +105,28 @@ export function buildDashboardPageHref(input: {
 
   return query ? `${input.basePath}?${query}` : input.basePath;
 }
+
+export function buildDashboardExportHref(input: {
+  basePath: string;
+  params: DashboardSearchParams;
+}) {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(input.params)) {
+    if (key === "page" || key === "pageSize" || value === undefined) {
+      continue;
+    }
+
+    const values = Array.isArray(value) ? value : [value];
+
+    for (const item of values) {
+      if (item) {
+        searchParams.append(key, item);
+      }
+    }
+  }
+
+  const query = searchParams.toString();
+
+  return query ? `${input.basePath}?${query}` : input.basePath;
+}

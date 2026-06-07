@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  Boxes,
   CheckCircle,
   Edit3,
   ExternalLink,
@@ -167,6 +168,14 @@ export default async function StorePage({
             <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/analytics`}>
               <BarChart3 aria-hidden="true" size={17} />
               Analytics
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/activity`}>
+              <Activity aria-hidden="true" size={17} />
+              Activity
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/inventory`}>
+              <Boxes aria-hidden="true" size={17} />
+              Inventory
             </Link>
             <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/orders`}>
               <ReceiptText aria-hidden="true" size={17} />
@@ -519,11 +528,23 @@ export default async function StorePage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-            <Mail aria-hidden="true" size={18} />
-            Abandoned checkouts
-          </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Mail aria-hidden="true" size={18} />
+              Abandoned checkouts
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {openAbandonedCheckoutCount} open / {abandonedCheckouts.length} tracked.
+            </p>
+          </div>
+          <Link
+            className="secondary-button min-h-10 px-3 text-sm"
+            href={`/dashboard/stores/${store.id}/checkouts`}
+          >
+            <ArrowUpRight aria-hidden="true" size={16} />
+            Recovery workspace
+          </Link>
         </div>
         {abandonedCheckouts.length > 0 ? (
           <div className="divide-y divide-slate-100">
@@ -950,6 +971,13 @@ export default async function StorePage({
           <span className="status-pill">
             {notificationStats.actionRequired} needs review
           </span>
+          <Link
+            className="secondary-button min-h-10 px-3 text-sm"
+            href={`/dashboard/stores/${store.id}/activity`}
+          >
+            <ArrowUpRight aria-hidden="true" size={16} />
+            Activity workspace
+          </Link>
         </div>
 
         <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-4">

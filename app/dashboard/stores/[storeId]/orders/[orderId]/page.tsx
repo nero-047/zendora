@@ -7,8 +7,10 @@ import {
   CheckCircle,
   CreditCard,
   ExternalLink,
+  FileText,
   Mail,
   MapPin,
+  PackageCheck,
   Phone,
   ReceiptText,
   RotateCcw,
@@ -143,6 +145,22 @@ export default async function OrderDetailPage({
           <p className="text-3xl font-semibold text-slate-950">
             {formatCurrency(order.totalCents, order.currency)}
           </p>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link
+            className="secondary-button px-4 text-sm"
+            href={`/dashboard/stores/${workspace.store.id}/orders/${order.id}/invoice`}
+          >
+            <FileText aria-hidden="true" size={16} />
+            Invoice
+          </Link>
+          <Link
+            className="secondary-button px-4 text-sm"
+            href={`/dashboard/stores/${workspace.store.id}/orders/${order.id}/packing-slip`}
+          >
+            <PackageCheck aria-hidden="true" size={16} />
+            Packing slip
+          </Link>
         </div>
 
         <form

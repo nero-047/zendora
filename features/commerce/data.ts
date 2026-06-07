@@ -11,6 +11,8 @@ import {
   mockGiftCards,
   mockInventoryAdjustments,
   mockStoreNavigationMenus,
+  mockStoreAuditEvents,
+  mockStoreNotifications,
   mockOrderRefunds,
   mockOrders,
   mockProductReviews,
@@ -2079,8 +2081,10 @@ function getMockStoreWorkspaceForUser(
       },
     ],
     invitations: [],
-    auditEvents: [],
-    notifications: [],
+    auditEvents: mockStoreAuditEvents.filter((event) => event.storeId === store.id),
+    notifications: mockStoreNotifications.filter(
+      (notification) => notification.storeId === store.id,
+    ),
     policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
     customPages: mockStorePages.filter((page) => page.storeId === store.id),
     navigationMenus: mockStoreNavigationMenus.filter(

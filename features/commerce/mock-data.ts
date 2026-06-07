@@ -17,6 +17,8 @@ import type {
   StoreNavigationMenu,
   StorePage,
   StorePolicy,
+  StoreAuditEvent,
+  StoreNotification,
 } from "@/features/commerce/types";
 
 export const mockStores: Store[] = [
@@ -1086,6 +1088,109 @@ export const mockInventoryAdjustments: InventoryAdjustment[] = [
     previousInventory: 12,
     nextInventory: 11,
     createdAt: "2026-06-01T09:10:00.000Z",
+  },
+];
+
+export const mockStoreAuditEvents: StoreAuditEvent[] = [
+  {
+    id: "demo-audit-inventory-1002",
+    storeId: "demo-store-outdoor",
+    clerkUserId: "demo_user_zendora",
+    action: "inventory_adjusted",
+    resourceType: "product",
+    resourceId: "demo-product-hydra-bottle",
+    summary: "founder@zendora.dev adjusted Hydra Bottle inventory after QC.",
+    metadata: {
+      productId: "demo-product-hydra-bottle",
+      previousInventory: 8,
+      nextInventory: 6,
+    },
+    createdAt: "2026-05-27T15:45:00.000Z",
+  },
+  {
+    id: "demo-audit-fulfillment-1002",
+    storeId: "demo-store-outdoor",
+    clerkUserId: "demo_user_zendora",
+    action: "fulfillment_updated",
+    resourceType: "order_fulfillment",
+    resourceId: "demo-fulfillment-1002-1",
+    summary: "founder@zendora.dev updated fulfillment for order demo-ord.",
+    metadata: {
+      orderId: "demo-order-1002",
+      trackingNumber: "1Z999AA10123456784",
+    },
+    createdAt: "2026-06-02T10:25:00.000Z",
+  },
+  {
+    id: "demo-audit-recovery-1004",
+    storeId: "demo-store-outdoor",
+    clerkUserId: "demo_user_zendora",
+    action: "abandoned_checkout_recovery_queued",
+    resourceType: "abandoned_checkout",
+    resourceId: "demo-abandoned-checkout-1004",
+    summary: "founder@zendora.dev queued checkout recovery for nina@example.com.",
+    metadata: {
+      recoveryEmailCount: 1,
+      subtotalCents: 22300,
+    },
+    createdAt: "2026-06-06T16:00:00.000Z",
+  },
+];
+
+export const mockStoreNotifications: StoreNotification[] = [
+  {
+    id: "demo-notification-fulfillment-failed",
+    storeId: "demo-store-outdoor",
+    type: "fulfillment_update",
+    status: "failed",
+    recipientEmail: "ari@example.com",
+    recipientName: "Ari Patel",
+    subject: "Northline Supply shipment update",
+    preview: "Tracking details could not be delivered.",
+    resourceType: "order_fulfillment",
+    resourceId: "demo-fulfillment-1002-1",
+    metadata: {
+      orderId: "demo-order-1002",
+      trackingNumber: "1Z999AA10123456784",
+    },
+    failedAt: "2026-06-02T10:40:00.000Z",
+    createdAt: "2026-06-02T10:30:00.000Z",
+  },
+  {
+    id: "demo-notification-checkout-pending",
+    storeId: "demo-store-outdoor",
+    type: "checkout_recovery",
+    status: "pending",
+    recipientEmail: "nina@example.com",
+    recipientName: "Nina Brooks",
+    subject: "Northline Supply cart is saved",
+    preview: "Your cart is ready when you are.",
+    resourceType: "abandoned_checkout",
+    resourceId: "demo-abandoned-checkout-1004",
+    metadata: {
+      recoveryUrl: "/stores/northline-supply/checkout?recovery=demo-recovery-1004",
+      recoveryEmailCount: 1,
+      subtotalCents: 22300,
+    },
+    createdAt: "2026-06-06T16:00:00.000Z",
+  },
+  {
+    id: "demo-notification-order-sent",
+    storeId: "demo-store-outdoor",
+    type: "order_confirmation",
+    status: "sent",
+    recipientEmail: "mira@example.com",
+    recipientName: "Mira Chen",
+    subject: "Northline Supply order demo-ord received",
+    preview: "Thanks for your order. Total 376.71 USD.",
+    resourceType: "order",
+    resourceId: "demo-order-1001",
+    metadata: {
+      orderId: "demo-order-1001",
+      totalCents: 37671,
+    },
+    sentAt: "2026-05-25T13:23:00.000Z",
+    createdAt: "2026-05-25T13:22:00.000Z",
   },
 ];
 

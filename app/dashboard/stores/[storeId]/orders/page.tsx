@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  Download,
   Filter,
   PackageCheck,
   ReceiptText,
@@ -46,6 +47,7 @@ import {
 } from "@/features/commerce/orders";
 import {
   buildDashboardPageHref,
+  buildDashboardExportHref,
   dashboardPageSizeOptions,
   paginateItems,
   parseDashboardPage,
@@ -108,6 +110,10 @@ export default async function OrdersPage({
     pageSize: selectedPageSize,
   });
   const ordersBasePath = `/dashboard/stores/${store.id}/orders`;
+  const ordersExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/export`,
+    params: query,
+  });
   const stats = getOrderStats(orders);
   const metricCards = [
     {
@@ -161,10 +167,16 @@ export default async function OrdersPage({
               Search, triage, fulfill, and audit every order for this store.
             </p>
           </div>
-          <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
-            <ShoppingBag aria-hidden="true" size={17} />
-            Storefront
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link className="secondary-button px-4 text-sm" href={ordersExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
+            <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
+              <ShoppingBag aria-hidden="true" size={17} />
+              Storefront
+            </Link>
+          </div>
         </div>
       </section>
 
