@@ -12,6 +12,7 @@ const expectedGuards = new Map(
     updateProductAction: "manage_catalog",
     createCollectionAction: "manage_catalog",
     updateCollectionStatusAction: "manage_catalog",
+    updateProductReviewStatusAction: "manage_catalog",
     adjustInventoryAction: "manage_inventory",
     createManualOrderAction: "manage_orders",
     queueAbandonedCheckoutRecoveryAction: "manage_orders",
@@ -19,14 +20,20 @@ const expectedGuards = new Map(
     updateOrderStatusAction: "manage_orders",
     confirmOrderPaymentAction: "manage_orders",
     updateOrderFulfillmentAction: "manage_orders",
+    updateOrderFulfillmentStatusAction: "manage_orders",
     updateReturnRequestStatusAction: "manage_refunds",
     createRefundAction: "manage_refunds",
     createDiscountAction: "manage_discounts",
     updateDiscountStatusAction: "manage_discounts",
+    createGiftCardAction: "manage_discounts",
+    updateGiftCardStatusAction: "manage_discounts",
     createShippingZoneAction: "manage_shipping",
     updateShippingZoneStatusAction: "manage_shipping",
+    upsertCustomerProfileAction: "manage_orders",
     updateStoreAction: "manage_store_settings",
     updateStorePoliciesAction: "manage_store_settings",
+    createStorePageAction: "manage_store_settings",
+    updateStorePageAction: "manage_store_settings",
     publishStoreAction: "manage_store_settings",
     pauseStoreAction: "manage_store_settings",
     createStoreInvitationAction: "manage_team",
@@ -39,8 +46,11 @@ const expectedGuards = new Map(
 const expectedAuditEvents = new Map(
   Object.entries({
     createStoreAction: "store_created",
+    upsertCustomerProfileAction: "customer_profile_updated",
     updateStoreAction: "store_updated",
     updateStorePoliciesAction: "store_policy_updated",
+    createStorePageAction: "store_page_created",
+    updateStorePageAction: "store_page_updated",
     publishStoreAction: "store_published",
     pauseStoreAction: "store_paused",
     createProductAction: "product_created",
@@ -48,6 +58,8 @@ const expectedAuditEvents = new Map(
     adjustInventoryAction: "inventory_adjusted",
     createDiscountAction: "discount_created",
     updateDiscountStatusAction: "discount_status_updated",
+    createGiftCardAction: "gift_card_created",
+    updateGiftCardStatusAction: "gift_card_status_updated",
     createCollectionAction: "collection_created",
     updateCollectionStatusAction: "collection_status_updated",
     createShippingZoneAction: "shipping_zone_created",
@@ -56,9 +68,12 @@ const expectedAuditEvents = new Map(
     createCheckoutOrderAction: "checkout_order_created",
     queueAbandonedCheckoutRecoveryAction: "abandoned_checkout_recovery_queued",
     dismissAbandonedCheckoutAction: "abandoned_checkout_dismissed",
+    createProductReviewAction: "product_review_created",
+    updateProductReviewStatusAction: "product_review_moderated",
     updateOrderStatusAction: "order_status_updated",
     confirmOrderPaymentAction: "payment_confirmed",
     updateOrderFulfillmentAction: "fulfillment_updated",
+    updateOrderFulfillmentStatusAction: "fulfillment_updated",
     createReturnRequestAction: "return_request_created",
     updateReturnRequestStatusAction: "return_request_updated",
     createRefundAction: "refund_created",
@@ -75,8 +90,13 @@ const expectedNotifications = new Map(
     createManualOrderAction: "manual_order_invoice",
     createCheckoutOrderAction: "order_confirmation",
     queueAbandonedCheckoutRecoveryAction: "checkout_recovery",
+    createProductReviewAction: "product_review_received",
+    updateProductReviewStatusAction: "product_review_updated",
+    createGiftCardAction: "gift_card_created",
+    updateGiftCardStatusAction: "gift_card_status_updated",
     confirmOrderPaymentAction: "payment_receipt",
     updateOrderFulfillmentAction: "fulfillment_update",
+    updateOrderFulfillmentStatusAction: "fulfillment_update",
     createReturnRequestAction: "return_request_created",
     updateReturnRequestStatusAction: "return_request_updated",
     createRefundAction: "refund_confirmation",
@@ -119,6 +139,30 @@ if (!schemaText.includes("create table if not exists public.order_return_request
 
 if (!schemaText.includes("create table if not exists public.abandoned_checkouts")) {
   failures.push(`${schemaPath} is missing abandoned_checkouts.`);
+}
+
+if (!schemaText.includes("create table if not exists public.product_reviews")) {
+  failures.push(`${schemaPath} is missing product_reviews.`);
+}
+
+if (!schemaText.includes("create table if not exists public.gift_cards")) {
+  failures.push(`${schemaPath} is missing gift_cards.`);
+}
+
+if (!schemaText.includes("create table if not exists public.gift_card_redemptions")) {
+  failures.push(`${schemaPath} is missing gift_card_redemptions.`);
+}
+
+if (!schemaText.includes("create table if not exists public.store_pages")) {
+  failures.push(`${schemaPath} is missing store_pages.`);
+}
+
+if (!schemaText.includes("create table if not exists public.order_fulfillments")) {
+  failures.push(`${schemaPath} is missing order_fulfillments.`);
+}
+
+if (!schemaText.includes("create table if not exists public.customer_profiles")) {
+  failures.push(`${schemaPath} is missing customer_profiles.`);
 }
 
 if (!sourceText.includes("createCustomerAccessToken()")) {

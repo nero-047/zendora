@@ -67,6 +67,15 @@ function getOrderSearchText(order: Order) {
     order.paymentReference,
     order.trackingCarrier,
     order.trackingNumber,
+    order.fulfillments
+      .flatMap((fulfillment) => [
+        fulfillment.status,
+        fulfillment.trackingCarrier,
+        fulfillment.trackingNumber,
+        fulfillment.note,
+      ])
+      .filter(Boolean)
+      .join(" "),
     order.shippingAddress?.city,
     order.shippingAddress?.region,
     order.items

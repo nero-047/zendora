@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import type { ActionState } from "@/features/commerce/action-state";
 import { initialActionState } from "@/features/commerce/action-state";
@@ -84,7 +84,7 @@ export function CheckoutForm({
   const [customerName, setCustomerName] = useState(initialCustomerName || "");
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail || "");
   const [recoveryToken, setRecoveryToken] = useState(initialRecoveryToken || "");
-  const [restoredRecoveryToken, setRestoredRecoveryToken] = useState("");
+  const restoredRecoveryTokenRef = useRef("");
   const [shippingCountry, setShippingCountry] = useState("United States");
   const { cartItems, clearCart, replaceCart, updateQuantity } = useStoreCart(
     storeSlug,
@@ -126,14 +126,14 @@ export function CheckoutForm({
     if (
       !initialRecoveryToken ||
       !initialCart?.length ||
-      restoredRecoveryToken === initialRecoveryToken
+      restoredRecoveryTokenRef.current === initialRecoveryToken
     ) {
       return;
     }
 
     replaceCart(initialCart);
-    setRestoredRecoveryToken(initialRecoveryToken);
-  }, [initialCart, initialRecoveryToken, replaceCart, restoredRecoveryToken]);
+    restoredRecoveryTokenRef.current = initialRecoveryToken;
+  }, [initialCart, initialRecoveryToken, replaceCart]);
 
   const totalCents = cartItems.reduce(
     (sum, item) =>
@@ -427,6 +427,20 @@ export function CheckoutForm({
           {state.errors?.discountCode ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.discountCode[0]}
+            </span>
+          ) : null}
+        </label>
+
+        <label className="grid gap-2">
+          <span className="label">Gift card</span>
+          <input
+            className="field uppercase"
+            name="giftCardCode"
+            placeholder="SUMMER-5000"
+          />
+          {state.errors?.giftCardCode ? (
+            <span className="text-xs font-medium text-red-600">
+              {state.errors.giftCardCode[0]}
             </span>
           ) : null}
         </label>

@@ -25,6 +25,11 @@ export type PaymentTransactionType =
   | "refund"
   | "void";
 export type PaymentTransactionStatus = "pending" | "succeeded" | "failed";
+export type OrderFulfillmentStatus =
+  | "created"
+  | "in_transit"
+  | "delivered"
+  | "cancelled";
 export type RefundReason =
   | "customer_request"
   | "damaged"
@@ -42,10 +47,14 @@ export type ReturnRequestReason =
   | "quality"
   | "other";
 export type AbandonedCheckoutStatus = "open" | "recovered" | "dismissed";
+export type ProductReviewStatus = "pending" | "approved" | "rejected";
+export type GiftCardStatus = "active" | "disabled" | "expired";
 export type DiscountStatus = "active" | "paused";
 export type DiscountType = "percent" | "fixed";
 export type StorePolicyType = "refund" | "shipping" | "privacy" | "terms";
 export type StorePolicyStatus = "draft" | "published";
+export type StorePageStatus = "draft" | "published";
+export type StoreNavigationMenuLocation = "header" | "footer";
 export type NotificationStatus = "pending" | "sent" | "failed" | "suppressed";
 export type NotificationType =
   | "order_confirmation"
@@ -53,6 +62,10 @@ export type NotificationType =
   | "payment_receipt"
   | "fulfillment_update"
   | "checkout_recovery"
+  | "product_review_received"
+  | "product_review_updated"
+  | "gift_card_created"
+  | "gift_card_status_updated"
   | "return_request_created"
   | "return_request_updated"
   | "refund_confirmation"
@@ -60,7 +73,11 @@ export type NotificationType =
 export type AuditEventAction =
   | "store_created"
   | "store_updated"
+  | "customer_profile_updated"
   | "store_policy_updated"
+  | "store_page_created"
+  | "store_page_updated"
+  | "store_navigation_updated"
   | "store_published"
   | "store_paused"
   | "product_created"
@@ -77,6 +94,10 @@ export type AuditEventAction =
   | "abandoned_checkout_recovered"
   | "abandoned_checkout_recovery_queued"
   | "abandoned_checkout_dismissed"
+  | "product_review_created"
+  | "product_review_moderated"
+  | "gift_card_created"
+  | "gift_card_status_updated"
   | "order_status_updated"
   | "payment_confirmed"
   | "fulfillment_updated"
@@ -169,6 +190,48 @@ export type StorePolicy = {
   body: string;
   status: StorePolicyStatus;
   publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StorePage = {
+  id: string;
+  storeId: string;
+  title: string;
+  slug: string;
+  body: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  status: StorePageStatus;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StoreNavigationLink = {
+  label: string;
+  href: string;
+};
+
+export type StoreNavigationMenu = {
+  id: string;
+  storeId: string;
+  location: StoreNavigationMenuLocation;
+  links: StoreNavigationLink[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CustomerProfile = {
+  id: string;
+  storeId: string;
+  email: string;
+  name?: string;
+  phone?: string;
+  note?: string;
+  tags: string[];
+  acceptsMarketing: boolean;
+  taxExempt: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -272,10 +335,13 @@ export type Order = {
   subtotalCents: number;
   discountCode?: string;
   discountCents: number;
+  giftCardCode?: string;
+  giftCardCents: number;
   shippingCents: number;
   taxCents: number;
   taxRateBps: number;
   totalCents: number;
+  amountDueCents: number;
   refundedCents: number;
   refundableCents: number;
   currency: string;
@@ -289,6 +355,7 @@ export type Order = {
   trackingUrl?: string;
   fulfillmentNote?: string;
   items?: OrderItem[];
+  fulfillments: OrderFulfillment[];
   refunds: OrderRefund[];
   returnRequests: OrderReturnRequest[];
   paymentTransactions: OrderPaymentTransaction[];
@@ -360,6 +427,23 @@ export type OrderPaymentTransaction = {
   createdAt: string;
 };
 
+export type OrderFulfillment = {
+  id: string;
+  storeId: string;
+  orderId: string;
+  clerkUserId?: string;
+  status: OrderFulfillmentStatus;
+  trackingCarrier?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  note?: string;
+  shippedAt?: string;
+  deliveredAt?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AbandonedCheckoutLine = {
   productId: string;
   productVariantId?: string;
@@ -390,6 +474,54 @@ export type AbandonedCheckout = {
   updatedAt: string;
 };
 
+export type ProductReview = {
+  id: string;
+  storeId: string;
+  productId: string;
+  orderId: string;
+  orderItemId?: string;
+  customerEmail: string;
+  customerName: string;
+  rating: number;
+  title?: string;
+  body: string;
+  status: ProductReviewStatus;
+  merchantReply?: string;
+  reviewedAt: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GiftCardRedemption = {
+  id: string;
+  storeId: string;
+  giftCardId: string;
+  orderId: string;
+  amountCents: number;
+  balanceBeforeCents: number;
+  balanceAfterCents: number;
+  createdAt: string;
+};
+
+export type GiftCard = {
+  id: string;
+  storeId: string;
+  code: string;
+  initialBalanceCents: number;
+  balanceCents: number;
+  currency: string;
+  status: GiftCardStatus;
+  recipientEmail?: string;
+  note?: string;
+  expiresAt?: string;
+  createdByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+  redemptions: GiftCardRedemption[];
+};
+
 export type Discount = {
   id: string;
   storeId: string;
@@ -413,26 +545,38 @@ export type StoreWorkspace = {
   auditEvents: StoreAuditEvent[];
   notifications: StoreNotification[];
   policies: StorePolicy[];
+  customPages: StorePage[];
+  navigationMenus: StoreNavigationMenu[];
+  customerProfiles: CustomerProfile[];
   shippingZones: ShippingZone[];
   products: Product[];
   collections: ProductCollection[];
   orders: Order[];
   abandonedCheckouts: AbandonedCheckout[];
+  productReviews: ProductReview[];
+  giftCards: GiftCard[];
   discounts: Discount[];
   inventoryAdjustments: InventoryAdjustment[];
 };
 
 export type CustomerSummary = {
+  profileId?: string;
   email: string;
   name: string;
   phone?: string;
+  note?: string;
+  tags: string[];
+  acceptsMarketing: boolean;
+  taxExempt: boolean;
+  profileCreatedAt?: string;
+  profileUpdatedAt?: string;
   orderCount: number;
   paidOrderCount: number;
   totalSpentCents: number;
   currency: string;
-  firstOrderAt: string;
-  lastOrderAt: string;
-  lastOrderStatus: OrderStatus;
+  firstOrderAt?: string;
+  lastOrderAt?: string;
+  lastOrderStatus?: OrderStatus;
   latestShippingAddress?: ShippingAddress;
   orders: Order[];
 };
@@ -440,6 +584,7 @@ export type CustomerSummary = {
 export type CustomerStats = {
   totalCustomers: number;
   repeatCustomers: number;
+  marketingOptIns: number;
   paidOrders: number;
   totalSpentCents: number;
   averageOrderValueCents: number;

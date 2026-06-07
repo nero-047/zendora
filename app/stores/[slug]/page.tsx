@@ -12,6 +12,10 @@ import {
   storePolicyLabels,
 } from "@/features/commerce/policies";
 import {
+  getPublishedStorePages,
+  getStorePageHref,
+} from "@/features/commerce/store-pages";
+import {
   getStoreSeoDescription,
   getStoreSeoTitle,
   getStoreSocialImages,
@@ -56,9 +60,10 @@ export default async function PublicStorePage({
     notFound();
   }
 
-  const { store, products, collections, policies } = workspace;
+  const { store, products, collections, policies, customPages } = workspace;
   const heroProduct = products[0];
   const publishedPolicies = getPublishedPolicies(policies);
+  const publishedPages = getPublishedStorePages(customPages);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -133,8 +138,17 @@ export default async function PublicStorePage({
 
       <StorefrontCart products={products} storeSlug={store.slug} />
 
-      {publishedPolicies.length > 0 ? (
+      {publishedPolicies.length > 0 || publishedPages.length > 0 ? (
         <footer className="mx-auto flex max-w-7xl flex-wrap gap-3 px-4 pb-10 sm:px-6 lg:px-8">
+          {publishedPages.map((page) => (
+            <Link
+              className="text-sm font-semibold text-slate-600 hover:text-slate-950"
+              href={getStorePageHref(store.slug, page.slug)}
+              key={page.id}
+            >
+              {page.title}
+            </Link>
+          ))}
           {publishedPolicies.map((policy) => (
             <Link
               className="text-sm font-semibold text-slate-600 hover:text-slate-950"

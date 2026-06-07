@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   CircleDollarSign,
+  Megaphone,
   Mail,
   ReceiptText,
   Repeat,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { CustomerProfileForm } from "@/features/commerce/components/customer-profile-form";
 import {
   getCustomerHref,
   getCustomerStats,
@@ -35,7 +37,11 @@ export default async function CustomersPage({
   }
 
   const { store } = workspace;
-  const customers = getCustomerSummaries(workspace.orders, store.currency);
+  const customers = getCustomerSummaries(
+    workspace.orders,
+    store.currency,
+    workspace.customerProfiles,
+  );
   const stats = getCustomerStats(customers);
   const metricCards = [
     {
@@ -49,14 +55,14 @@ export default async function CustomersPage({
       value: String(stats.repeatCustomers),
     },
     {
+      icon: Megaphone,
+      label: "Marketing opt-ins",
+      value: String(stats.marketingOptIns),
+    },
+    {
       icon: CircleDollarSign,
       label: "Paid sales",
       value: formatCurrency(stats.totalSpentCents, store.currency),
-    },
-    {
-      icon: ReceiptText,
-      label: "Avg paid order",
-      value: formatCurrency(stats.averageOrderValueCents, store.currency),
     },
   ];
 
@@ -102,6 +108,10 @@ export default async function CustomersPage({
         ))}
       </section>
 
+      <section className="soft-panel p-5">
+        <CustomerProfileForm storeId={store.id} />
+      </section>
+
       <section className="soft-panel overflow-hidden">
         <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 lg:grid-cols-[1.3fr_auto_auto_auto_auto_auto]">
           <span>Customer</span>
@@ -128,6 +138,23 @@ export default async function CustomersPage({
                 {customer.orderCount} orders /{" "}
                 {formatCurrency(customer.totalSpentCents, customer.currency)}
               </p>
+              {customer.tags.length > 0 ||
+              customer.acceptsMarketing ||
+              customer.taxExempt ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customer.acceptsMarketing ? (
+                    <span className="status-pill">Marketing</span>
+                  ) : null}
+                  {customer.taxExempt ? (
+                    <span className="status-pill">Tax exempt</span>
+                  ) : null}
+                  {customer.tags.slice(0, 3).map((tag) => (
+                    <span className="status-pill" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <span className="hidden text-sm font-semibold text-slate-700 lg:inline">
               {customer.orderCount}
@@ -136,10 +163,14 @@ export default async function CustomersPage({
               {formatCurrency(customer.totalSpentCents, customer.currency)}
             </span>
             <span className="hidden text-sm text-slate-500 lg:inline">
-              {new Date(customer.lastOrderAt).toLocaleDateString()}
+              {customer.lastOrderAt
+                ? new Date(customer.lastOrderAt).toLocaleDateString()
+                : "No orders"}
             </span>
             <span className="status-pill col-span-full w-fit lg:col-auto">
-              {orderStatusLabels[customer.lastOrderStatus]}
+              {customer.lastOrderStatus
+                ? orderStatusLabels[customer.lastOrderStatus]
+                : "Profile"}
             </span>
             <Link
               className="secondary-button min-h-10 px-3 text-sm"
@@ -152,7 +183,7 @@ export default async function CustomersPage({
         ))}
         {customers.length === 0 ? (
           <p className="p-5 text-sm text-slate-500">
-            Customers will appear here after orders are created.
+            Customers and leads will appear here after profiles or orders are created.
           </p>
         ) : null}
       </section>

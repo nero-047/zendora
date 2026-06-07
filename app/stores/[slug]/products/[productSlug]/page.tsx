@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Package, ShoppingBag } from "lucide-react";
+import { ArrowLeft, Package, ShoppingBag, Star } from "lucide-react";
 
 import { ProductDetailActions } from "@/features/commerce/components/product-detail-actions";
 import { getPublicStorefront } from "@/features/commerce/data";
+import { getProductReviewSummary } from "@/features/commerce/reviews";
 import { getStoreSeoTitle, getStoreSocialImages } from "@/features/commerce/seo";
 import { formatCurrency } from "@/lib/utils";
 
@@ -63,7 +64,9 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const { store, product, products } = data;
+  const { store, product, products, productReviews } = data;
+  const reviews = productReviews.filter((review) => review.productId === product.id);
+  const reviewSummary = getProductReviewSummary(reviews);
   const relatedProducts = products
     .filter(
       (item) =>
@@ -103,6 +106,12 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
           <div className="mb-4 flex flex-wrap gap-2">
             {product.category ? <span className="status-pill">{product.category}</span> : null}
             {product.sku ? <span className="status-pill">{product.sku}</span> : null}
+            {reviewSummary.reviewCount > 0 ? (
+              <span className="status-pill">
+                <Star aria-hidden="true" size={14} />
+                {reviewSummary.averageRating} / {reviewSummary.reviewCount} reviews
+              </span>
+            ) : null}
           </div>
           <h1 className="text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">
             {product.name}
@@ -118,6 +127,75 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
             />
           </div>
         </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">Customer reviews</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {reviewSummary.reviewCount > 0
+                ? `${reviewSummary.averageRating} average rating`
+                : "Reviews appear after verified customers submit feedback."}
+            </p>
+          </div>
+          {reviewSummary.reviewCount > 0 ? (
+            <span className="status-pill">
+              <Star aria-hidden="true" size={14} />
+              {reviewSummary.reviewCount} approved
+            </span>
+          ) : null}
+        </div>
+        {reviews.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {reviews.slice(0, 6).map((review) => (
+              <article className="soft-panel p-4" key={review.id}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1 text-slate-950">
+                    {Array.from({ length: 5 }, (_, index) => (
+                      <Star
+                        aria-hidden="true"
+                        className={
+                          index < review.rating
+                            ? "fill-slate-950 text-slate-950"
+                            : "text-slate-300"
+                        }
+                        key={index}
+                        size={15}
+                      />
+                    ))}
+                  </div>
+                  <time
+                    className="text-xs font-semibold text-slate-500"
+                    dateTime={review.reviewedAt}
+                  >
+                    {new Date(review.reviewedAt).toLocaleDateString("en-US")}
+                  </time>
+                </div>
+                {review.title ? (
+                  <h3 className="mt-3 text-sm font-semibold text-slate-950">
+                    {review.title}
+                  </h3>
+                ) : null}
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {review.body}
+                </p>
+                <p className="mt-3 text-xs font-semibold text-slate-500">
+                  {review.customerName}
+                </p>
+                {review.merchantReply ? (
+                  <p className="mt-3 rounded-[8px] bg-white/75 p-3 text-sm leading-6 text-slate-600">
+                    {review.merchantReply}
+                  </p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="soft-panel p-4 text-sm text-slate-500">
+            No approved reviews yet.
+          </p>
+        )}
       </section>
 
       {relatedProducts.length > 0 ? (

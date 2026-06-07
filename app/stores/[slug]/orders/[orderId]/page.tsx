@@ -10,9 +10,11 @@ import {
   Package,
   RotateCcw,
   ShoppingBag,
+  Star,
   Truck,
 } from "lucide-react";
 
+import { ProductReviewForm } from "@/features/commerce/components/product-review-form";
 import { ReturnRequestForm } from "@/features/commerce/components/return-request-form";
 import { getPublicOrderReceipt } from "@/features/commerce/data";
 import {
@@ -27,6 +29,11 @@ import {
   summarizePaymentTransactions,
 } from "@/features/commerce/payments";
 import {
+  fulfillmentStatusLabels,
+  sortFulfillments,
+} from "@/features/commerce/fulfillments";
+import { maskGiftCardCode } from "@/features/commerce/gift-cards";
+import {
   getPolicyHref,
   getPublishedPolicies,
   storePolicyLabels,
@@ -36,6 +43,10 @@ import {
   returnRequestReasonLabels,
   returnRequestStatusLabels,
 } from "@/features/commerce/returns";
+import {
+  canCustomerReviewOrderItem,
+  productReviewStatusLabels,
+} from "@/features/commerce/reviews";
 import { getStoreSeoTitle } from "@/features/commerce/seo";
 import { formatCurrency } from "@/lib/utils";
 
@@ -95,7 +106,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
     notFound();
   }
 
-  const { store, order, policies } = data;
+  const { store, order, policies, productReviews } = data;
   const token = readToken(searchParams.token) || "";
   const shipping = order.shippingAddress;
   const lifecycleEvents = getOrderLifecycleEvents(order);
@@ -107,6 +118,9 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
   );
   const publishedPolicies = getPublishedPolicies(policies);
   const canRequestReturn = canCustomerRequestReturn(order);
+  const fulfillments = sortFulfillments(order.fulfillments).filter(
+    (fulfillment) => fulfillment.status !== "cancelled",
+  );
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -135,7 +149,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
               {store.name} has received order {order.id.slice(0, 8)} for{" "}
               {order.customerEmail}.
             </p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-4">
               <div className="rounded-[8px] border border-slate-100 bg-white/70 p-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">
                   Payment
@@ -160,6 +174,31 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                   {formatCurrency(order.totalCents, order.currency)}
                 </p>
               </div>
+              {order.giftCardCents > 0 ? (
+                <>
+                  <div className="rounded-[8px] border border-slate-100 bg-white/70 p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Gift card
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">
+                      -{formatCurrency(order.giftCardCents, order.currency)}
+                    </p>
+                    {order.giftCardCode ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        {maskGiftCardCode(order.giftCardCode)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="rounded-[8px] border border-slate-100 bg-white/70 p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Amount due
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">
+                      {formatCurrency(order.amountDueCents, order.currency)}
+                    </p>
+                  </div>
+                </>
+              ) : null}
             </div>
           </section>
 
@@ -194,6 +233,103 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                 </p>
               </div>
             ))}
+          </section>
+
+          <section className="soft-panel overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                <Star aria-hidden="true" size={18} />
+                Product reviews
+              </h2>
+            </div>
+            {order.items?.length ? (
+              order.items.map((item) => {
+                const review = productReviews.find((productReview) => {
+                  if (item.id && productReview.orderItemId === item.id) {
+                    return true;
+                  }
+
+                  return productReview.productId === item.productId;
+                });
+                const canReview = canCustomerReviewOrderItem({
+                  orderStatus: order.status,
+                  paymentStatus: order.paymentStatus,
+                  productId: item.productId,
+                  orderItemId: item.id,
+                  existingReviews: productReviews,
+                  orderId: order.id,
+                });
+
+                return (
+                  <div
+                    className="border-b border-slate-100 p-4 last:border-0"
+                    key={item.id}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-950">
+                          {item.productName}
+                        </p>
+                        {item.variantName ? (
+                          <p className="mt-1 truncate text-xs text-slate-500">
+                            {item.variantName}
+                          </p>
+                        ) : null}
+                      </div>
+                      {review ? (
+                        <span className="status-pill">
+                          {productReviewStatusLabels[review.status]}
+                        </span>
+                      ) : null}
+                    </div>
+                    {review ? (
+                      <div className="mt-3 rounded-[8px] bg-slate-50 p-3">
+                        <div className="flex items-center gap-1 text-slate-950">
+                          {Array.from({ length: 5 }, (_, index) => (
+                            <Star
+                              aria-hidden="true"
+                              className={
+                                index < review.rating
+                                  ? "fill-slate-950 text-slate-950"
+                                  : "text-slate-300"
+                              }
+                              key={index}
+                              size={14}
+                            />
+                          ))}
+                        </div>
+                        {review.title ? (
+                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                            {review.title}
+                          </p>
+                        ) : null}
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          {review.body}
+                        </p>
+                      </div>
+                    ) : item.productId ? (
+                      <ProductReviewForm
+                        canReview={canReview}
+                        orderId={order.id}
+                        orderItemId={item.id}
+                        productId={item.productId}
+                        productName={item.productName}
+                        storeSlug={store.slug}
+                        token={token}
+                      />
+                    ) : (
+                      <p className="mt-3 text-sm text-slate-500">
+                        This item is not eligible for reviews.
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <p className="p-4 text-sm text-slate-500">
+                No reviewable items found.
+              </p>
+            )}
           </section>
         </div>
 
@@ -327,6 +463,44 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                   .filter(Boolean)
                   .join(" / ")}
               </p>
+            ) : null}
+            {fulfillments.length > 0 ? (
+              <div className="mt-4 grid gap-3">
+                {fulfillments.map((fulfillment) => (
+                  <div
+                    className="rounded-[8px] border border-slate-100 bg-white/70 p-3"
+                    key={fulfillment.id}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">
+                          {[fulfillment.trackingCarrier, fulfillment.trackingNumber]
+                            .filter(Boolean)
+                            .join(" / ") || `Shipment ${fulfillment.id.slice(0, 8)}`}
+                        </p>
+                        <p className="mt-1 text-xs font-medium text-slate-500">
+                          {new Date(
+                            fulfillment.shippedAt || fulfillment.createdAt,
+                          ).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="status-pill">
+                        {fulfillmentStatusLabels[fulfillment.status]}
+                      </span>
+                    </div>
+                    {fulfillment.trackingUrl ? (
+                      <a
+                        className="mt-2 inline-flex text-sm font-semibold text-sky-700"
+                        href={fulfillment.trackingUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Tracking link
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             ) : null}
           </section>
 

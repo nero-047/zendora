@@ -8,6 +8,7 @@ import {
   CheckCircle,
   Edit3,
   ExternalLink,
+  Gift,
   Layers3,
   Mail,
   PackagePlus,
@@ -17,6 +18,7 @@ import {
   ReceiptText,
   ShieldCheck,
   ShoppingBag,
+  Star,
   Truck,
   UserMinus,
   Users,
@@ -26,16 +28,24 @@ import {
 import { requireAppUser } from "@/features/auth/app-user";
 import { CollectionForm } from "@/features/commerce/components/collection-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
+import { GiftCardForm } from "@/features/commerce/components/gift-card-form";
 import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
+import { StorePageForm } from "@/features/commerce/components/store-page-form";
 import { StorePoliciesForm } from "@/features/commerce/components/store-policies-form";
 import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
 import { TeamInviteForm } from "@/features/commerce/components/team-invite-form";
+import { ProductReviewStatusForm } from "@/features/commerce/components/product-review-status-form";
 import {
   abandonedCheckoutStatusLabels,
   canQueueAbandonedCheckoutRecovery,
   getAbandonedCheckoutRecoveryHref,
   summarizeAbandonedCheckoutLines,
 } from "@/features/commerce/abandoned-checkouts";
+import {
+  giftCardStatusLabels,
+  maskGiftCardCode,
+} from "@/features/commerce/gift-cards";
+import { productReviewStatusLabels } from "@/features/commerce/reviews";
 import {
   getCustomerStats,
   getCustomerSummaries,
@@ -54,6 +64,7 @@ import {
   revokeStoreInvitationAction,
   updateCollectionStatusAction,
   updateDiscountStatusAction,
+  updateGiftCardStatusAction,
   updateOrderStatusAction,
   updateShippingZoneStatusAction,
   updateStoreMemberRoleAction,
@@ -81,19 +92,35 @@ export default async function StorePage({
     shippingZones,
     orders,
     abandonedCheckouts,
+    productReviews,
+    giftCards,
     discounts,
     members,
     invitations,
     auditEvents,
     notifications,
     policies,
+    customPages,
     membershipRole,
   } = workspace;
   const canManageTeam = canStoreRole(membershipRole, "manage_team");
-  const customers = getCustomerSummaries(orders, store.currency);
+  const customers = getCustomerSummaries(
+    orders,
+    store.currency,
+    workspace.customerProfiles,
+  );
   const customerStats = getCustomerStats(customers);
   const openAbandonedCheckoutCount = abandonedCheckouts.filter(
     (checkout) => checkout.status === "open",
+  ).length;
+  const pendingReviewCount = productReviews.filter(
+    (review) => review.status === "pending",
+  ).length;
+  const activeGiftCardBalanceCents = giftCards
+    .filter((giftCard) => giftCard.status === "active")
+    .reduce((sum, giftCard) => sum + giftCard.balanceCents, 0);
+  const publishedPageCount = customPages.filter(
+    (page) => page.status === "published",
   ).length;
 
   return (
@@ -164,6 +191,9 @@ export default async function StorePage({
             "Abandoned",
             `${openAbandonedCheckoutCount}/${abandonedCheckouts.length}`,
           ],
+          ["Reviews", `${pendingReviewCount}/${productReviews.length}`],
+          ["Gift cards", formatCurrency(activeGiftCardBalanceCents, store.currency)],
+          ["Pages", `${publishedPageCount}/${customPages.length}`],
           ["Inventory", String(store.inventoryCount)],
           ["Products", String(store.productCount)],
         ].map(([label, value]) => (
@@ -178,6 +208,12 @@ export default async function StorePage({
 
       <StorePoliciesForm
         policies={policies}
+        storeId={store.id}
+        storeSlug={store.slug}
+      />
+
+      <StorePageForm
+        pages={customPages}
         storeId={store.id}
         storeSlug={store.slug}
       />
@@ -506,6 +542,85 @@ export default async function StorePage({
         </div>
       </section>
 
+      <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <GiftCardForm storeId={store.id} />
+
+        <div className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 p-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Gift aria-hidden="true" size={18} />
+              Gift cards
+            </h2>
+          </div>
+          {giftCards.length > 0 ? (
+            giftCards.map((giftCard) => (
+              <div className="border-b border-slate-100 p-4 last:border-0" key={giftCard.id}>
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-pink-500/10 text-pink-700">
+                    <Gift aria-hidden="true" size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-950">
+                        {maskGiftCardCode(giftCard.code)}
+                      </p>
+                      <span className="status-pill">
+                        {giftCardStatusLabels[giftCard.status]}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-slate-700">
+                      {formatCurrency(giftCard.balanceCents, giftCard.currency)} /{" "}
+                      {formatCurrency(
+                        giftCard.initialBalanceCents,
+                        giftCard.currency,
+                      )}{" "}
+                      remaining
+                    </p>
+                    <p className="mt-1 truncate text-xs text-slate-500">
+                      {[giftCard.recipientEmail, giftCard.expiresAt
+                        ? `expires ${new Date(giftCard.expiresAt).toLocaleDateString("en-US")}`
+                        : null]
+                        .filter(Boolean)
+                        .join(" / ") || "No recipient"}
+                    </p>
+                    {giftCard.redemptions.length > 0 ? (
+                      <p className="mt-2 text-xs font-medium text-slate-500">
+                        {giftCard.redemptions.length} redemptions / last{" "}
+                        {new Date(
+                          giftCard.redemptions[0].createdAt,
+                        ).toLocaleDateString("en-US")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <form
+                  action={updateGiftCardStatusAction.bind(null, store.id, giftCard.id)}
+                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
+                >
+                  <select
+                    aria-label={`Status for ${maskGiftCardCode(giftCard.code)}`}
+                    className="field min-h-10 py-2 text-sm"
+                    defaultValue={giftCard.status}
+                    name="status"
+                  >
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                    <option value="expired">Expired</option>
+                  </select>
+                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                    <CheckCircle aria-hidden="true" size={16} />
+                    Update
+                  </button>
+                </form>
+              </div>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-slate-500">No gift cards issued yet.</p>
+          )}
+        </div>
+      </section>
+
       <section className="soft-panel overflow-hidden">
         <div className="border-b border-slate-100 p-4">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
@@ -615,6 +730,74 @@ export default async function StorePage({
         ) : (
           <p className="p-4 text-sm text-slate-500">
             Recoverable carts will appear after a customer enters an email at checkout.
+          </p>
+        )}
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <Star aria-hidden="true" size={18} />
+            Product reviews
+          </h2>
+        </div>
+        {productReviews.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {productReviews.slice(0, 6).map((review) => {
+              const product = products.find((item) => item.id === review.productId);
+
+              return (
+                <div
+                  className="grid gap-4 p-4 xl:grid-cols-[1fr_360px]"
+                  key={review.id}
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-950">
+                        {product?.name || "Product review"}
+                      </p>
+                      <span className="status-pill">
+                        {productReviewStatusLabels[review.status]}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                      {review.customerEmail} /{" "}
+                      {new Date(review.reviewedAt).toLocaleString("en-US", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </p>
+                    <div className="mt-3 flex items-center gap-1 text-slate-950">
+                      {Array.from({ length: 5 }, (_, index) => (
+                        <Star
+                          aria-hidden="true"
+                          className={
+                            index < review.rating
+                              ? "fill-slate-950 text-slate-950"
+                              : "text-slate-300"
+                          }
+                          key={index}
+                          size={14}
+                        />
+                      ))}
+                    </div>
+                    {review.title ? (
+                      <p className="mt-2 text-sm font-semibold text-slate-950">
+                        {review.title}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">
+                      {review.body}
+                    </p>
+                  </div>
+                  <ProductReviewStatusForm review={review} storeId={store.id} />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Verified customer reviews will appear here for moderation.
           </p>
         )}
       </section>

@@ -7,11 +7,13 @@ import {
   MapPin,
   Phone,
   ReceiptText,
+  Tags,
   ShoppingBag,
   UserRound,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { CustomerProfileForm } from "@/features/commerce/components/customer-profile-form";
 import {
   getCustomerByEmail,
   getCustomerStats,
@@ -35,7 +37,11 @@ export default async function CustomerDetailPage({
   }
 
   const { store } = workspace;
-  const customers = getCustomerSummaries(workspace.orders, store.currency);
+  const customers = getCustomerSummaries(
+    workspace.orders,
+    store.currency,
+    workspace.customerProfiles,
+  );
   const customer = getCustomerByEmail(
     customers,
     decodeURIComponent(customerEmail),
@@ -47,6 +53,8 @@ export default async function CustomerDetailPage({
 
   const stats = getCustomerStats([customer]);
   const shipping = customer.latestShippingAddress;
+  const firstSeenAt =
+    customer.firstOrderAt || customer.profileCreatedAt || customer.lastOrderAt;
   const metricCards = [
     {
       icon: ReceiptText,
@@ -66,7 +74,7 @@ export default async function CustomerDetailPage({
     {
       icon: UserRound,
       label: "First seen",
-      value: new Date(customer.firstOrderAt).toLocaleDateString(),
+      value: firstSeenAt ? new Date(firstSeenAt).toLocaleDateString() : "Profile",
     },
   ];
 
@@ -107,6 +115,26 @@ export default async function CustomerDetailPage({
                   {customer.phone}
                 </p>
               ) : null}
+              {customer.tags.length > 0 ? (
+                <p className="flex flex-wrap items-center gap-2">
+                  <Tags aria-hidden="true" size={16} />
+                  {customer.tags.map((tag) => (
+                    <span className="status-pill" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </p>
+              ) : null}
+              <p className="flex flex-wrap gap-2">
+                {customer.acceptsMarketing ? (
+                  <span className="status-pill">Accepts marketing</span>
+                ) : (
+                  <span className="status-pill">No marketing consent</span>
+                )}
+                {customer.taxExempt ? (
+                  <span className="status-pill">Tax exempt</span>
+                ) : null}
+              </p>
             </div>
           </div>
           <p className="text-3xl font-semibold text-slate-950">
@@ -181,9 +209,18 @@ export default async function CustomerDetailPage({
               </div>
             </div>
           ))}
+          {customer.orders.length === 0 ? (
+            <p className="p-4 text-sm text-slate-500">
+              No orders are linked to this customer profile yet.
+            </p>
+          ) : null}
         </div>
 
         <div className="grid gap-5">
+          <section className="soft-panel p-4">
+            <CustomerProfileForm customer={customer} storeId={store.id} />
+          </section>
+
           <section className="soft-panel p-4">
             <h2 className="text-lg font-semibold text-slate-950">Shipping</h2>
             {shipping ? (
@@ -208,6 +245,9 @@ export default async function CustomerDetailPage({
           <section className="soft-panel p-4">
             <h2 className="text-lg font-semibold text-slate-950">Customer notes</h2>
             <div className="mt-4 grid gap-3 text-sm text-slate-600">
+              {customer.note ? (
+                <p className="rounded-[8px] bg-slate-50 p-3">{customer.note}</p>
+              ) : null}
               {customer.orders
                 .filter((order) => order.customerNote)
                 .map((order) => (
@@ -215,7 +255,7 @@ export default async function CustomerDetailPage({
                     {order.customerNote}
                   </p>
                 ))}
-              {customer.orders.every((order) => !order.customerNote) ? (
+              {!customer.note && customer.orders.every((order) => !order.customerNote) ? (
                 <p>No notes saved.</p>
               ) : null}
             </div>

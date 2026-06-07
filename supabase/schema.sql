@@ -105,6 +105,27 @@ create table if not exists public.store_policies (
   unique (store_id, type)
 );
 
+create table if not exists public.store_pages (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  title text not null,
+  slug text not null,
+  body text not null default '',
+  seo_title text,
+  seo_description text,
+  status text not null default 'draft' check (status in ('draft', 'published')),
+  published_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (store_id, slug)
+);
+
+alter table public.store_pages add column if not exists body text not null default '';
+alter table public.store_pages add column if not exists seo_title text;
+alter table public.store_pages add column if not exists seo_description text;
+alter table public.store_pages add column if not exists status text not null default 'draft' check (status in ('draft', 'published'));
+alter table public.store_pages add column if not exists published_at timestamptz;
+
 create table if not exists public.shipping_zones (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -226,10 +247,13 @@ create table if not exists public.orders (
   subtotal_cents integer not null default 0 check (subtotal_cents >= 0),
   discount_code text,
   discount_cents integer not null default 0 check (discount_cents >= 0),
+  gift_card_code text,
+  gift_card_cents integer not null default 0 check (gift_card_cents >= 0),
   shipping_cents integer not null default 0 check (shipping_cents >= 0),
   tax_cents integer not null default 0 check (tax_cents >= 0),
   tax_rate_bps integer not null default 0 check (tax_rate_bps >= 0 and tax_rate_bps <= 10000),
   total_cents integer not null default 0 check (total_cents >= 0),
+  amount_due_cents integer not null default 0 check (amount_due_cents >= 0),
   currency text not null default 'USD',
   paid_at timestamptz,
   fulfilled_at timestamptz,
@@ -261,9 +285,12 @@ alter table public.orders add column if not exists customer_access_token text;
 alter table public.orders add column if not exists subtotal_cents integer not null default 0 check (subtotal_cents >= 0);
 alter table public.orders add column if not exists discount_code text;
 alter table public.orders add column if not exists discount_cents integer not null default 0 check (discount_cents >= 0);
+alter table public.orders add column if not exists gift_card_code text;
+alter table public.orders add column if not exists gift_card_cents integer not null default 0 check (gift_card_cents >= 0);
 alter table public.orders add column if not exists shipping_cents integer not null default 0 check (shipping_cents >= 0);
 alter table public.orders add column if not exists tax_cents integer not null default 0 check (tax_cents >= 0);
 alter table public.orders add column if not exists tax_rate_bps integer not null default 0 check (tax_rate_bps >= 0 and tax_rate_bps <= 10000);
+alter table public.orders add column if not exists amount_due_cents integer not null default 0 check (amount_due_cents >= 0);
 alter table public.orders add column if not exists paid_at timestamptz;
 alter table public.orders add column if not exists fulfilled_at timestamptz;
 alter table public.orders add column if not exists cancelled_at timestamptz;
@@ -272,6 +299,28 @@ alter table public.orders add column if not exists tracking_carrier text;
 alter table public.orders add column if not exists tracking_number text;
 alter table public.orders add column if not exists tracking_url text;
 alter table public.orders add column if not exists fulfillment_note text;
+
+create table if not exists public.customer_profiles (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  email text not null,
+  name text,
+  phone text,
+  note text,
+  tags text[] not null default '{}',
+  accepts_marketing boolean not null default false,
+  tax_exempt boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (store_id, email)
+);
+
+alter table public.customer_profiles add column if not exists name text;
+alter table public.customer_profiles add column if not exists phone text;
+alter table public.customer_profiles add column if not exists note text;
+alter table public.customer_profiles add column if not exists tags text[] not null default '{}';
+alter table public.customer_profiles add column if not exists accepts_marketing boolean not null default false;
+alter table public.customer_profiles add column if not exists tax_exempt boolean not null default false;
 
 create table if not exists public.abandoned_checkouts (
   id uuid primary key default gen_random_uuid(),
@@ -307,6 +356,60 @@ alter table public.abandoned_checkouts add column if not exists recovered_order_
 alter table public.abandoned_checkouts add column if not exists recovered_at timestamptz;
 alter table public.abandoned_checkouts add column if not exists dismissed_at timestamptz;
 
+create table if not exists public.product_reviews (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  order_item_id uuid references public.order_items(id) on delete set null,
+  customer_email text not null,
+  customer_name text not null,
+  rating integer not null check (rating >= 1 and rating <= 5),
+  title text,
+  body text not null,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  merchant_reply text,
+  reviewed_at timestamptz not null default now(),
+  approved_at timestamptz,
+  rejected_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.product_reviews add column if not exists order_item_id uuid references public.order_items(id) on delete set null;
+alter table public.product_reviews add column if not exists title text;
+alter table public.product_reviews add column if not exists status text not null default 'pending' check (status in ('pending', 'approved', 'rejected'));
+alter table public.product_reviews add column if not exists merchant_reply text;
+alter table public.product_reviews add column if not exists reviewed_at timestamptz not null default now();
+alter table public.product_reviews add column if not exists approved_at timestamptz;
+alter table public.product_reviews add column if not exists rejected_at timestamptz;
+
+create table if not exists public.gift_cards (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  code text not null,
+  initial_balance_cents integer not null check (initial_balance_cents > 0),
+  balance_cents integer not null check (balance_cents >= 0),
+  currency text not null default 'USD',
+  status text not null default 'active' check (status in ('active', 'disabled', 'expired')),
+  recipient_email text,
+  note text,
+  expires_at timestamptz,
+  created_by_user_id text references public.profiles(clerk_user_id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (store_id, code)
+);
+
+alter table public.gift_cards add column if not exists initial_balance_cents integer not null default 0 check (initial_balance_cents >= 0);
+alter table public.gift_cards add column if not exists balance_cents integer not null default 0 check (balance_cents >= 0);
+alter table public.gift_cards add column if not exists currency text not null default 'USD';
+alter table public.gift_cards add column if not exists status text not null default 'active' check (status in ('active', 'disabled', 'expired'));
+alter table public.gift_cards add column if not exists recipient_email text;
+alter table public.gift_cards add column if not exists note text;
+alter table public.gift_cards add column if not exists expires_at timestamptz;
+alter table public.gift_cards add column if not exists created_by_user_id text references public.profiles(clerk_user_id) on delete set null;
+
 create table if not exists public.discount_codes (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -340,6 +443,45 @@ create table if not exists public.order_items (
 alter table public.order_items add column if not exists product_variant_id uuid references public.product_variants(id) on delete set null;
 alter table public.order_items add column if not exists variant_name text;
 alter table public.order_items add column if not exists variant_sku text;
+
+create table if not exists public.order_fulfillments (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  clerk_user_id text references public.profiles(clerk_user_id) on delete set null,
+  status text not null default 'created' check (status in ('created', 'in_transit', 'delivered', 'cancelled')),
+  tracking_carrier text,
+  tracking_number text,
+  tracking_url text,
+  note text,
+  shipped_at timestamptz,
+  delivered_at timestamptz,
+  cancelled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.order_fulfillments add column if not exists clerk_user_id text references public.profiles(clerk_user_id) on delete set null;
+alter table public.order_fulfillments add column if not exists status text not null default 'created' check (status in ('created', 'in_transit', 'delivered', 'cancelled'));
+alter table public.order_fulfillments add column if not exists tracking_carrier text;
+alter table public.order_fulfillments add column if not exists tracking_number text;
+alter table public.order_fulfillments add column if not exists tracking_url text;
+alter table public.order_fulfillments add column if not exists note text;
+alter table public.order_fulfillments add column if not exists shipped_at timestamptz;
+alter table public.order_fulfillments add column if not exists delivered_at timestamptz;
+alter table public.order_fulfillments add column if not exists cancelled_at timestamptz;
+
+create table if not exists public.gift_card_redemptions (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  gift_card_id uuid not null references public.gift_cards(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  amount_cents integer not null check (amount_cents > 0),
+  balance_before_cents integer not null check (balance_before_cents >= 0),
+  balance_after_cents integer not null check (balance_after_cents >= 0),
+  created_at timestamptz not null default now(),
+  unique (gift_card_id, order_id)
+);
 
 create table if not exists public.order_refunds (
   id uuid primary key default gen_random_uuid(),
@@ -455,6 +597,11 @@ create trigger store_policies_set_updated_at
 before update on public.store_policies
 for each row execute function public.set_updated_at();
 
+drop trigger if exists store_pages_set_updated_at on public.store_pages;
+create trigger store_pages_set_updated_at
+before update on public.store_pages
+for each row execute function public.set_updated_at();
+
 drop trigger if exists shipping_zones_set_updated_at on public.shipping_zones;
 create trigger shipping_zones_set_updated_at
 before update on public.shipping_zones
@@ -480,9 +627,29 @@ create trigger orders_set_updated_at
 before update on public.orders
 for each row execute function public.set_updated_at();
 
+drop trigger if exists customer_profiles_set_updated_at on public.customer_profiles;
+create trigger customer_profiles_set_updated_at
+before update on public.customer_profiles
+for each row execute function public.set_updated_at();
+
+drop trigger if exists order_fulfillments_set_updated_at on public.order_fulfillments;
+create trigger order_fulfillments_set_updated_at
+before update on public.order_fulfillments
+for each row execute function public.set_updated_at();
+
 drop trigger if exists abandoned_checkouts_set_updated_at on public.abandoned_checkouts;
 create trigger abandoned_checkouts_set_updated_at
 before update on public.abandoned_checkouts
+for each row execute function public.set_updated_at();
+
+drop trigger if exists product_reviews_set_updated_at on public.product_reviews;
+create trigger product_reviews_set_updated_at
+before update on public.product_reviews
+for each row execute function public.set_updated_at();
+
+drop trigger if exists gift_cards_set_updated_at on public.gift_cards;
+create trigger gift_cards_set_updated_at
+before update on public.gift_cards
 for each row execute function public.set_updated_at();
 
 drop trigger if exists order_return_requests_set_updated_at on public.order_return_requests;
@@ -514,6 +681,10 @@ create index if not exists store_notifications_recipient_email_idx
 on public.store_notifications(lower(recipient_email));
 create index if not exists store_policies_store_id_status_idx
 on public.store_policies(store_id, status);
+create index if not exists store_pages_store_id_status_idx
+on public.store_pages(store_id, status);
+create index if not exists store_pages_store_id_slug_idx
+on public.store_pages(store_id, slug);
 create index if not exists shipping_zones_store_id_status_idx on public.shipping_zones(store_id, status);
 create index if not exists products_store_id_status_idx on public.products(store_id, status);
 create index if not exists products_store_id_category_idx on public.products(store_id, category);
@@ -538,6 +709,10 @@ create index if not exists orders_customer_email_idx on public.orders(customer_e
 create unique index if not exists orders_customer_access_token_unique_idx
 on public.orders(customer_access_token)
 where customer_access_token is not null and customer_access_token <> '';
+create index if not exists customer_profiles_store_id_updated_at_idx
+on public.customer_profiles(store_id, updated_at desc);
+create index if not exists customer_profiles_email_idx
+on public.customer_profiles(lower(email));
 create index if not exists abandoned_checkouts_store_id_last_seen_idx
 on public.abandoned_checkouts(store_id, last_seen_at desc);
 create index if not exists abandoned_checkouts_store_id_status_idx
@@ -547,8 +722,34 @@ on public.abandoned_checkouts(store_id, recovery_token)
 where recovery_token <> '';
 create index if not exists abandoned_checkouts_customer_email_idx
 on public.abandoned_checkouts(lower(customer_email));
+create index if not exists product_reviews_store_id_created_at_idx
+on public.product_reviews(store_id, created_at desc);
+create index if not exists product_reviews_product_id_status_idx
+on public.product_reviews(product_id, status, created_at desc);
+create index if not exists product_reviews_order_id_idx
+on public.product_reviews(order_id, created_at desc);
+create unique index if not exists product_reviews_order_item_unique_idx
+on public.product_reviews(store_id, order_item_id)
+where order_item_id is not null;
+create index if not exists gift_cards_store_id_created_at_idx
+on public.gift_cards(store_id, created_at desc);
+create index if not exists gift_cards_store_id_status_idx
+on public.gift_cards(store_id, status, created_at desc);
+create index if not exists gift_cards_recipient_email_idx
+on public.gift_cards(lower(recipient_email))
+where recipient_email is not null and recipient_email <> '';
+create index if not exists gift_card_redemptions_gift_card_id_created_at_idx
+on public.gift_card_redemptions(gift_card_id, created_at desc);
+create index if not exists gift_card_redemptions_order_id_idx
+on public.gift_card_redemptions(order_id);
 create index if not exists order_items_order_id_idx on public.order_items(order_id);
 create index if not exists order_items_product_variant_id_idx on public.order_items(product_variant_id);
+create index if not exists order_fulfillments_store_id_created_at_idx
+on public.order_fulfillments(store_id, created_at desc);
+create index if not exists order_fulfillments_order_id_created_at_idx
+on public.order_fulfillments(order_id, created_at desc);
+create index if not exists order_fulfillments_order_id_status_idx
+on public.order_fulfillments(order_id, status);
 create index if not exists order_refunds_store_id_created_at_idx on public.order_refunds(store_id, created_at desc);
 create index if not exists order_refunds_order_id_created_at_idx on public.order_refunds(order_id, created_at desc);
 create index if not exists order_return_requests_store_id_status_idx
@@ -578,14 +779,20 @@ alter table public.store_invitations enable row level security;
 alter table public.store_audit_events enable row level security;
 alter table public.store_notifications enable row level security;
 alter table public.store_policies enable row level security;
+alter table public.store_pages enable row level security;
 alter table public.shipping_zones enable row level security;
 alter table public.products enable row level security;
 alter table public.collections enable row level security;
 alter table public.collection_products enable row level security;
 alter table public.product_variants enable row level security;
 alter table public.orders enable row level security;
+alter table public.customer_profiles enable row level security;
 alter table public.abandoned_checkouts enable row level security;
+alter table public.product_reviews enable row level security;
+alter table public.gift_cards enable row level security;
+alter table public.gift_card_redemptions enable row level security;
 alter table public.order_items enable row level security;
+alter table public.order_fulfillments enable row level security;
 alter table public.order_refunds enable row level security;
 alter table public.order_return_requests enable row level security;
 alter table public.order_payment_transactions enable row level security;
@@ -617,6 +824,18 @@ using (
   and exists (
     select 1 from public.stores
     where stores.id = store_policies.store_id
+    and stores.status = 'active'
+  )
+);
+
+drop policy if exists "public published store page reads" on public.store_pages;
+create policy "public published store page reads"
+on public.store_pages for select
+using (
+  status = 'published'
+  and exists (
+    select 1 from public.stores
+    where stores.id = store_pages.store_id
     and stores.status = 'active'
   )
 );

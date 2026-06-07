@@ -84,9 +84,14 @@ const businessRules = loadTsModule("features/commerce/business-rules.ts");
 const analytics = loadTsModule("features/commerce/analytics.ts");
 const orderStatus = loadTsModule("features/commerce/order-status.ts");
 const policies = loadTsModule("features/commerce/policies.ts");
+const storePages = loadTsModule("features/commerce/store-pages.ts");
 const seo = loadTsModule("features/commerce/seo.ts");
 const payments = loadTsModule("features/commerce/payments.ts");
 const returns = loadTsModule("features/commerce/returns.ts");
+const reviews = loadTsModule("features/commerce/reviews.ts");
+const giftCards = loadTsModule("features/commerce/gift-cards.ts");
+const fulfillments = loadTsModule("features/commerce/fulfillments.ts");
+const customers = loadTsModule("features/commerce/customers.ts");
 const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
@@ -94,6 +99,167 @@ const permissions = loadTsModule("features/commerce/permissions.ts");
 const mockData = loadTsModule("features/commerce/mock-data.ts");
 
 const tests = [
+  [
+    "gift cards normalize codes and cap redemptions by balance and order total",
+    () => {
+      assertEqual(
+        giftCards.normalizeGiftCardCode(" summer 5000 "),
+        "SUMMER-5000",
+        "gift card codes should normalize to uppercase dashed format",
+      );
+      assertEqual(
+        giftCards.maskGiftCardCode("SUMMER-5000"),
+        "**** 5000",
+        "gift card masks should reveal only the last four characters",
+      );
+      assertTrue(
+        giftCards.canRedeemGiftCard({
+          status: "active",
+          balanceCents: 5000,
+        }),
+        "active cards with balance should be redeemable",
+      );
+      assertFalse(
+        giftCards.canRedeemGiftCard(
+          {
+            status: "active",
+            balanceCents: 5000,
+            expiresAt: "2026-01-01T00:00:00.000Z",
+          },
+          new Date("2026-06-07T00:00:00.000Z"),
+        ),
+        "expired gift cards should not be redeemable",
+      );
+      assertEqual(
+        giftCards.calculateGiftCardRedemptionAmount({
+          balanceCents: 3000,
+          orderTotalCents: 5000,
+        }),
+        3000,
+        "gift card redemption should not exceed balance",
+      );
+      assertEqual(
+        giftCards.calculateGiftCardRedemptionAmount({
+          balanceCents: 7000,
+          orderTotalCents: 5000,
+        }),
+        5000,
+        "gift card redemption should not exceed order total",
+      );
+    },
+  ],
+  [
+    "fulfillments sort active shipments and enforce terminal states",
+    () => {
+      const shipmentRows = [
+        {
+          id: "old",
+          status: "in_transit",
+          createdAt: "2026-06-01T10:00:00.000Z",
+          shippedAt: "2026-06-02T10:00:00.000Z",
+        },
+        {
+          id: "cancelled",
+          status: "cancelled",
+          createdAt: "2026-06-03T10:00:00.000Z",
+        },
+        {
+          id: "new",
+          status: "created",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ];
+
+      assertEqual(
+        fulfillments.getLatestFulfillment(shipmentRows).id,
+        "new",
+        "latest fulfillment should ignore cancelled shipments",
+      );
+      assertTrue(
+        fulfillments.canTransitionFulfillmentStatus("created", "in_transit"),
+        "created shipments should move to in transit",
+      );
+      assertTrue(
+        fulfillments.canTransitionFulfillmentStatus("in_transit", "delivered"),
+        "in transit shipments should move to delivered",
+      );
+      assertFalse(
+        fulfillments.canTransitionFulfillmentStatus("delivered", "in_transit"),
+        "delivered shipments should be terminal",
+      );
+      assertFalse(
+        fulfillments.canTransitionFulfillmentStatus("cancelled", "created"),
+        "cancelled shipments should be terminal",
+      );
+    },
+  ],
+  [
+    "product reviews summarize approved ratings and prevent duplicate item reviews",
+    () => {
+      const reviewRows = [
+        {
+          rating: 5,
+          status: "approved",
+        },
+        {
+          rating: 3,
+          status: "approved",
+        },
+        {
+          rating: 1,
+          status: "pending",
+        },
+      ];
+
+      assertDeepEqual(
+        reviews.getProductReviewSummary(reviewRows),
+        {
+          reviewCount: 2,
+          averageRating: 4,
+        },
+        "review summary should use approved reviews only",
+      );
+      assertTrue(
+        reviews.canCustomerReviewOrderItem({
+          orderStatus: "fulfilled",
+          paymentStatus: "paid",
+          productId: "p1",
+          orderItemId: "item_1",
+          orderId: "order_1",
+          existingReviews: [],
+        }),
+        "fulfilled paid items should be reviewable",
+      );
+      assertFalse(
+        reviews.canCustomerReviewOrderItem({
+          orderStatus: "pending",
+          paymentStatus: "paid",
+          productId: "p1",
+          orderItemId: "item_1",
+          orderId: "order_1",
+          existingReviews: [],
+        }),
+        "pending orders should not be reviewable",
+      );
+      assertFalse(
+        reviews.canCustomerReviewOrderItem({
+          orderStatus: "fulfilled",
+          paymentStatus: "paid",
+          productId: "p1",
+          orderItemId: "item_1",
+          orderId: "order_1",
+          existingReviews: [
+            {
+              productId: "p1",
+              orderId: "order_1",
+              orderItemId: "item_1",
+            },
+          ],
+        }),
+        "an order item should not accept duplicate reviews",
+      );
+    },
+  ],
   [
     "abandoned checkouts summarize carts and protect recovery eligibility",
     () => {
@@ -247,6 +413,26 @@ const tests = [
     },
   ],
   [
+    "mock product reviews have unique reviewed order items",
+    () => {
+      const orderItemIds = mockData.mockProductReviews
+        .map((review) => review.orderItemId)
+        .filter(Boolean);
+
+      assertEqual(
+        new Set(orderItemIds).size,
+        orderItemIds.length,
+        "mock product reviews should not duplicate order item ids",
+      );
+      assertTrue(
+        mockData.mockProductReviews.every(
+          (review) => review.rating >= 1 && review.rating <= 5,
+        ),
+        "mock product reviews should use 1-5 star ratings",
+      );
+    },
+  ],
+  [
     "abandoned checkout recovery tokens are unique and present",
     () => {
       const tokens = mockData.mockAbandonedCheckouts.map(
@@ -335,6 +521,50 @@ const tests = [
         policies.getPolicyHref("northline-supply", "refund"),
         "/stores/northline-supply/policies/refund",
         "policy href should point at storefront policy route",
+      );
+    },
+  ],
+  [
+    "store custom pages expose only published content",
+    () => {
+      const pages = [
+        {
+          id: "page_1",
+          title: "About",
+          slug: "about",
+          body: "Northline Supply curates durable goods for everyday travel.",
+          status: "published",
+        },
+        {
+          id: "page_2",
+          title: "Wholesale",
+          slug: "wholesale",
+          body: "Draft wholesale copy",
+          status: "draft",
+        },
+        {
+          id: "page_3",
+          title: "Empty",
+          slug: "empty",
+          body: "",
+          status: "published",
+        },
+      ];
+
+      assertDeepEqual(
+        storePages.getPublishedStorePages(pages).map((page) => page.id),
+        ["page_1"],
+        "only published custom pages with body content should be public",
+      );
+      assertEqual(
+        storePages.getStorePageHref("northline-supply", "about"),
+        "/stores/northline-supply/pages/about",
+        "custom page href should point at storefront page route",
+      );
+      assertEqual(
+        storePages.getStorePageDescription(pages[0]),
+        "Northline Supply curates durable goods for everyday travel.",
+        "custom page description should fall back to body copy",
       );
     },
   ],
@@ -601,6 +831,106 @@ const tests = [
         ],
         "cart normalization should merge product and variant lines",
       );
+    },
+  ],
+  [
+    "customer profiles merge with order-derived customer summaries",
+    () => {
+      assertDeepEqual(
+        customers.parseCustomerTags("VIP, vip\nWholesale,  Trail Team "),
+        ["VIP", "Wholesale", "Trail Team"],
+        "customer tags should trim, dedupe, and preserve display casing",
+      );
+
+      const summaries = customers.getCustomerSummaries(
+        [
+          {
+            id: "order_1",
+            customerName: "Mira Chen",
+            customerEmail: "mira@example.com",
+            customerPhone: "+1 415 000 0000",
+            status: "paid",
+            totalCents: 12000,
+            refundedCents: 2000,
+            currency: "USD",
+            createdAt: "2026-05-01T10:00:00.000Z",
+            fulfillments: [],
+            refunds: [],
+            returnRequests: [],
+            paymentTransactions: [],
+          },
+          {
+            id: "order_2",
+            customerName: "Mira Chen",
+            customerEmail: "mira@example.com",
+            status: "fulfilled",
+            totalCents: 8000,
+            refundedCents: 0,
+            currency: "USD",
+            createdAt: "2026-05-10T10:00:00.000Z",
+            fulfillments: [],
+            refunds: [],
+            returnRequests: [],
+            paymentTransactions: [],
+          },
+          {
+            id: "order_3",
+            customerName: "Ari Patel",
+            customerEmail: "ari@example.com",
+            status: "cancelled",
+            totalCents: 5000,
+            refundedCents: 0,
+            currency: "USD",
+            createdAt: "2026-05-03T10:00:00.000Z",
+            fulfillments: [],
+            refunds: [],
+            returnRequests: [],
+            paymentTransactions: [],
+          },
+        ],
+        "USD",
+        [
+          {
+            id: "profile_mira",
+            storeId: "store_1",
+            email: "MIRA@example.com",
+            name: "Mira C.",
+            phone: "+1 415 111 1111",
+            note: "Prefers low-waste packaging.",
+            tags: ["vip"],
+            acceptsMarketing: true,
+            taxExempt: false,
+            createdAt: "2026-04-30T10:00:00.000Z",
+            updatedAt: "2026-05-11T10:00:00.000Z",
+          },
+          {
+            id: "profile_lead",
+            storeId: "store_1",
+            email: "lead@example.com",
+            name: "Lead Buyer",
+            tags: ["lead"],
+            acceptsMarketing: true,
+            taxExempt: true,
+            createdAt: "2026-05-12T10:00:00.000Z",
+            updatedAt: "2026-05-12T10:00:00.000Z",
+          },
+        ],
+      );
+      const mira = customers.getCustomerByEmail(summaries, "MIRA@example.com");
+      const lead = customers.getCustomerByEmail(summaries, "lead@example.com");
+      const stats = customers.getCustomerStats(summaries);
+
+      assertEqual(summaries.length, 3, "profiles should add customers without orders");
+      assertEqual(mira.name, "Mira C.", "profile name should override order name");
+      assertEqual(mira.phone, "+1 415 111 1111", "profile phone should override order phone");
+      assertEqual(mira.totalSpentCents, 18000, "paid spend should subtract refunds");
+      assertEqual(mira.lastOrderStatus, "fulfilled", "latest order should drive status");
+      assertEqual(lead.orderCount, 0, "profile-only customers should have zero orders");
+      assertEqual(lead.lastOrderStatus, undefined, "profile-only customers should not fake order status");
+      assertTrue(lead.taxExempt, "profile-only tax flags should be preserved");
+      assertEqual(stats.totalCustomers, 3, "stats should include profile-only customers");
+      assertEqual(stats.repeatCustomers, 1, "repeat stats should still use order counts");
+      assertEqual(stats.marketingOptIns, 2, "stats should count marketing consent");
     },
   ],
   [

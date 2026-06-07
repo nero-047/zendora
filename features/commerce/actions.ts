@@ -18,20 +18,24 @@ import {
   normalizeCartLines,
   parseShippingCountries,
 } from "@/features/commerce/business-rules";
+import { parseCustomerTags } from "@/features/commerce/customers";
 import type {
   AuditEventAction,
   NotificationType,
+  OrderFulfillmentStatus,
   PaymentMethod,
   PaymentStatus,
   PaymentTransactionStatus,
   PaymentTransactionType,
   Product,
+  ProductReviewStatus,
   ProductVariant,
   StoreMembershipRole,
 } from "@/features/commerce/types";
 import {
   getAvailableCollectionSlug,
   getAvailableProductSlug,
+  getAvailableStorePageSlug,
   getAvailableStoreSlug,
   getLivePublicStorefront,
   getPublicOrderReceipt,
@@ -43,6 +47,11 @@ import {
   isRevenueOrderStatus,
 } from "@/features/commerce/order-status";
 import { storePolicyTypes } from "@/features/commerce/policies";
+import { storePageStatuses } from "@/features/commerce/store-pages";
+import {
+  canTransitionFulfillmentStatus,
+  fulfillmentStatuses,
+} from "@/features/commerce/fulfillments";
 import {
   canStoreRole,
   getStorePermissionLabel,
@@ -53,6 +62,17 @@ import {
   returnRequestReasons,
   returnRequestStatuses,
 } from "@/features/commerce/returns";
+import {
+  canCustomerReviewOrderItem,
+  productReviewStatuses,
+} from "@/features/commerce/reviews";
+import {
+  calculateGiftCardRedemptionAmount,
+  canRedeemGiftCard,
+  giftCardStatuses,
+  maskGiftCardCode,
+  normalizeGiftCardCode,
+} from "@/features/commerce/gift-cards";
 import { isSupabaseConfigured } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { uploadProductImageObject } from "@/lib/supabase/storage";
@@ -139,6 +159,41 @@ const storePolicyUpdateSchema = z
     }
   });
 
+const storePageSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(2, "Add a page title.")
+      .max(100, "Keep page titles under 100 characters."),
+    slug: z
+      .string()
+      .trim()
+      .max(90, "Keep page URLs under 90 characters.")
+      .optional(),
+    body: z.string().trim().max(20000, "Keep pages under 20000 characters."),
+    seoTitle: z
+      .string()
+      .trim()
+      .max(70, "Keep SEO titles under 70 characters.")
+      .optional(),
+    seoDescription: z
+      .string()
+      .trim()
+      .max(180, "Keep SEO descriptions under 180 characters.")
+      .optional(),
+    status: z.enum(storePageStatuses),
+  })
+  .superRefine((page, context) => {
+    if (page.status === "published" && page.body.length < 20) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Published pages need at least 20 characters.",
+        path: ["body"],
+      });
+    }
+  });
+
 const productUpdateSchema = productSchema.extend({
   status: z.enum(["draft", "active", "archived"]),
 });
@@ -208,6 +263,11 @@ const checkoutSchema = z.object({
     .max(400, "Keep notes under 400 characters.")
     .optional(),
   discountCode: z.string().trim().max(32, "Keep discount codes under 32 characters.").optional(),
+  giftCardCode: z
+    .string()
+    .trim()
+    .max(40, "Keep gift card codes under 40 characters.")
+    .optional(),
   abandonedCheckoutToken: z
     .string()
     .trim()
@@ -231,6 +291,24 @@ const discountSchema = z.object({
   status: z.enum(["active", "paused"]),
   startsAt: z.string().trim().optional(),
   endsAt: z.string().trim().optional(),
+});
+
+const giftCardSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .max(40, "Keep gift card codes under 40 characters.")
+    .optional(),
+  amount: z.string().trim().min(1, "Add a gift card amount."),
+  recipientEmail: z
+    .string()
+    .trim()
+    .email("Add a valid recipient email.")
+    .optional()
+    .or(z.literal("")),
+  note: z.string().trim().max(300, "Keep notes under 300 characters.").optional(),
+  expiresAt: z.string().trim().optional(),
+  status: z.enum(["active", "disabled"]),
 });
 
 const collectionSchema = z.object({
@@ -368,7 +446,22 @@ const manualOrderSchema = z.object({
     .optional(),
 });
 
+const customerProfileSchema = z.object({
+  email: z.string().trim().email("Add a valid customer email."),
+  name: z
+    .string()
+    .trim()
+    .max(80, "Keep the name under 80 characters.")
+    .optional(),
+  phone: z.string().trim().max(32, "Keep phone under 32 characters.").optional(),
+  note: z.string().trim().max(1000, "Keep notes under 1000 characters.").optional(),
+  tags: z.string().trim().max(500, "Keep tags under 500 characters.").optional(),
+  acceptsMarketing: z.boolean(),
+  taxExempt: z.boolean(),
+});
+
 const orderFulfillmentSchema = z.object({
+  status: z.enum(fulfillmentStatuses),
   trackingCarrier: z
     .string()
     .trim()
@@ -390,6 +483,10 @@ const orderFulfillmentSchema = z.object({
     .max(400, "Keep fulfillment notes under 400 characters.")
     .optional(),
   markFulfilled: z.boolean(),
+});
+
+const orderFulfillmentStatusSchema = z.object({
+  status: z.enum(fulfillmentStatuses),
 });
 
 const refundSchema = z.object({
@@ -418,8 +515,42 @@ const returnRequestStatusSchema = z.object({
     .optional(),
 });
 
+const productReviewSchema = z.object({
+  token: z.string().trim().min(12, "Order access token is missing."),
+  orderItemId: z.string().trim().min(1, "Order item is missing."),
+  productId: z.string().trim().min(1, "Product is missing."),
+  rating: z.coerce
+    .number()
+    .int("Choose a whole-star rating.")
+    .min(1, "Choose at least 1 star.")
+    .max(5, "Choose 5 stars or fewer."),
+  title: z
+    .string()
+    .trim()
+    .max(80, "Keep review titles under 80 characters.")
+    .optional(),
+  body: z
+    .string()
+    .trim()
+    .min(10, "Add a little more detail to the review.")
+    .max(1200, "Keep reviews under 1200 characters."),
+});
+
+const productReviewStatusSchema = z.object({
+  status: z.enum(productReviewStatuses),
+  merchantReply: z
+    .string()
+    .trim()
+    .max(800, "Keep merchant replies under 800 characters.")
+    .optional(),
+});
+
 const discountStatusSchema = z.object({
   status: z.enum(["active", "paused"]),
+});
+
+const giftCardStatusSchema = z.object({
+  status: z.enum(giftCardStatuses),
 });
 
 const teamInvitationSchema = z.object({
@@ -444,6 +575,15 @@ type CheckoutDiscountRow = {
   ends_at: string | null;
 };
 
+type CheckoutGiftCardRow = {
+  id: string;
+  code: string;
+  balance_cents: number;
+  currency: string;
+  status: "active" | "disabled" | "expired";
+  expires_at: string | null;
+};
+
 type OrderLifecycleRow = {
   customer_email: string;
   customer_name: string | null;
@@ -458,6 +598,20 @@ type OrderLifecycleRow = {
   fulfilled_at: string | null;
   cancelled_at: string | null;
   inventory_restocked_at: string | null;
+};
+
+type OrderFulfillmentActionRow = {
+  id: string;
+  store_id: string;
+  order_id: string;
+  status: OrderFulfillmentStatus;
+  tracking_carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  note: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  cancelled_at: string | null;
 };
 
 type OrderInventoryItemRow = {
@@ -551,6 +705,13 @@ function checkoutDisabledState(): ActionState {
 
 function createCustomerAccessToken() {
   return randomBytes(32).toString("hex");
+}
+
+function createGiftCardCode() {
+  const partA = randomBytes(3).toString("hex").toUpperCase();
+  const partB = randomBytes(3).toString("hex").toUpperCase();
+
+  return `GIFT-${partA}-${partB}`;
 }
 
 function getCustomerOrderStatusHref(input: {
@@ -1130,6 +1291,82 @@ async function getCheckoutDiscount(input: {
     code: discount.code,
     cents: calculateDiscountCents(discount, input.subtotalCents),
     row: discount,
+    error: null,
+  };
+}
+
+async function getCheckoutGiftCard(input: {
+  code: string | null;
+  currency: string;
+  orderTotalCents: number;
+  storeId: string;
+}) {
+  if (!input.code) {
+    return {
+      code: null,
+      cents: 0,
+      row: null,
+      error: null,
+    };
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("gift_cards")
+    .select("id, code, balance_cents, currency, status, expires_at")
+    .eq("store_id", input.storeId)
+    .eq("code", input.code)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      code: null,
+      cents: 0,
+      row: null,
+      error: error.message,
+    };
+  }
+
+  if (!data) {
+    return {
+      code: null,
+      cents: 0,
+      row: null,
+      error: "Gift card was not found.",
+    };
+  }
+
+  const giftCard = data as CheckoutGiftCardRow;
+
+  if (giftCard.currency !== input.currency) {
+    return {
+      code: null,
+      cents: 0,
+      row: null,
+      error: "Gift card currency does not match this store.",
+    };
+  }
+
+  if (!canRedeemGiftCard({
+    balanceCents: giftCard.balance_cents,
+    expiresAt: giftCard.expires_at || undefined,
+    status: giftCard.status,
+  })) {
+    return {
+      code: null,
+      cents: 0,
+      row: null,
+      error: "Gift card is not redeemable.",
+    };
+  }
+
+  return {
+    code: giftCard.code,
+    cents: calculateGiftCardRedemptionAmount({
+      balanceCents: giftCard.balance_cents,
+      orderTotalCents: input.orderTotalCents,
+    }),
+    row: giftCard,
     error: null,
   };
 }
@@ -2029,6 +2266,178 @@ export async function updateStorePoliciesAction(
   };
 }
 
+export async function createStorePageAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = storePageSchema.safeParse({
+    title: formData.get("title"),
+    slug: formData.get("slug") || undefined,
+    body: formData.get("body"),
+    seoTitle: formData.get("seoTitle") || undefined,
+    seoDescription: formData.get("seoDescription") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the storefront page.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
+  const db = getSupabaseAdmin();
+  const slug = await getAvailableStorePageSlug(
+    storeId,
+    parsed.data.slug || parsed.data.title,
+  );
+  const publishedAt =
+    parsed.data.status === "published" ? new Date().toISOString() : null;
+  const { data: page, error } = await db
+    .from("store_pages")
+    .insert({
+      store_id: storeId,
+      title: parsed.data.title,
+      slug,
+      body: parsed.data.body,
+      seo_title: optionalText(parsed.data.seoTitle),
+      seo_description: optionalText(parsed.data.seoDescription),
+      status: parsed.data.status,
+      published_at: publishedAt,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_page_created",
+    resourceType: "store_page",
+    resourceId: page.id,
+    summary: `${user.email} created storefront page ${parsed.data.title}.`,
+    metadata: {
+      slug,
+      status: parsed.data.status,
+      hasSeoTitle: Boolean(optionalText(parsed.data.seoTitle)),
+      hasSeoDescription: Boolean(optionalText(parsed.data.seoDescription)),
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/pages/${slug}`);
+
+  return {
+    status: "success",
+    message: `Page ${parsed.data.title} saved.`,
+  };
+}
+
+export async function updateStorePageAction(
+  storeId: string,
+  pageId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = storePageSchema.safeParse({
+    title: formData.get("title"),
+    slug: formData.get("slug") || undefined,
+    body: formData.get("body"),
+    seoTitle: formData.get("seoTitle") || undefined,
+    seoDescription: formData.get("seoDescription") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the storefront page.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
+  const currentPage = workspace.customPages.find((page) => page.id === pageId);
+
+  if (!currentPage) {
+    return formError("Storefront page not found.");
+  }
+
+  const db = getSupabaseAdmin();
+  const slug = await getAvailableStorePageSlug(
+    storeId,
+    parsed.data.slug || parsed.data.title,
+    pageId,
+  );
+  const publishedAt =
+    parsed.data.status === "published"
+      ? currentPage.publishedAt || new Date().toISOString()
+      : null;
+  const { error } = await db
+    .from("store_pages")
+    .update({
+      title: parsed.data.title,
+      slug,
+      body: parsed.data.body,
+      seo_title: optionalText(parsed.data.seoTitle),
+      seo_description: optionalText(parsed.data.seoDescription),
+      status: parsed.data.status,
+      published_at: publishedAt,
+    })
+    .eq("id", pageId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_page_updated",
+    resourceType: "store_page",
+    resourceId: pageId,
+    summary: `${user.email} updated storefront page ${parsed.data.title}.`,
+    metadata: {
+      previousSlug: currentPage.slug,
+      slug,
+      previousStatus: currentPage.status,
+      status: parsed.data.status,
+      hasSeoTitle: Boolean(optionalText(parsed.data.seoTitle)),
+      hasSeoDescription: Boolean(optionalText(parsed.data.seoDescription)),
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/pages/${currentPage.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/pages/${slug}`);
+
+  return {
+    status: "success",
+    message: `Page ${parsed.data.title} updated.`,
+  };
+}
+
 export async function updateProductAction(
   storeId: string,
   productId: string,
@@ -2421,6 +2830,122 @@ export async function createDiscountAction(
   return {
     status: "success",
     message: "Discount saved.",
+  };
+}
+
+export async function createGiftCardAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = giftCardSchema.safeParse({
+    code: formData.get("code") || undefined,
+    amount: formData.get("amount"),
+    recipientEmail: formData.get("recipientEmail") || undefined,
+    note: formData.get("note") || undefined,
+    expiresAt: formData.get("expiresAt") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the gift card details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const amountCents = toPriceCents(parsed.data.amount);
+
+  if (amountCents === null || amountCents <= 0) {
+    return formError("Add a valid gift card amount.", {
+      amount: ["Gift card amount must be greater than zero."],
+    });
+  }
+
+  const code = normalizeGiftCardCode(parsed.data.code) || createGiftCardCode();
+
+  if (!/^[A-Z0-9_-]{4,40}$/.test(code)) {
+    return formError("Use letters, numbers, hyphens, or underscores.", {
+      code: ["Use letters, numbers, hyphens, or underscores."],
+    });
+  }
+
+  const expiresAt = parseDateTime(parsed.data.expiresAt);
+
+  if (expiresAt === "invalid") {
+    return formError("Add a valid expiration date.", {
+      expiresAt: ["Add a valid expiration date."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_discounts",
+  );
+  const db = getSupabaseAdmin();
+  const { data: giftCard, error } = await db
+    .from("gift_cards")
+    .insert({
+      store_id: storeId,
+      code,
+      initial_balance_cents: amountCents,
+      balance_cents: amountCents,
+      currency: workspace.store.currency,
+      status: parsed.data.status,
+      recipient_email: optionalText(parsed.data.recipientEmail),
+      note: optionalText(parsed.data.note),
+      expires_at: expiresAt,
+      created_by_user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "gift_card_created",
+    resourceType: "gift_card",
+    resourceId: giftCard.id,
+    summary: `${user.email} created gift card ${maskGiftCardCode(code)}.`,
+    metadata: {
+      amountCents,
+      code: maskGiftCardCode(code),
+      status: parsed.data.status,
+      hasRecipient: Boolean(optionalText(parsed.data.recipientEmail)),
+    },
+  });
+
+  if (optionalText(parsed.data.recipientEmail)) {
+    await queueNotification({
+      db,
+      storeId,
+      type: "gift_card_created",
+      recipientEmail: parsed.data.recipientEmail || "",
+      subject: `${workspace.store.name} gift card`,
+      preview: `A gift card for ${(amountCents / 100).toFixed(2)} ${workspace.store.currency} is ready.`,
+      resourceType: "gift_card",
+      resourceId: giftCard.id,
+      metadata: {
+        amountCents,
+        code,
+        expiresAt,
+      },
+    });
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+
+  return {
+    status: "success",
+    message: `Gift card ${maskGiftCardCode(code)} created.`,
   };
 }
 
@@ -2872,10 +3397,13 @@ export async function createManualOrderAction(
       subtotal_cents: subtotalCents,
       discount_code: manualDiscountCents > 0 ? "MANUAL" : null,
       discount_cents: manualDiscountCents,
+      gift_card_code: null,
+      gift_card_cents: 0,
       shipping_cents: manualShippingCents,
       tax_cents: taxCents,
       tax_rate_bps: workspace.store.taxRateBps,
       total_cents: totalCents,
+      amount_due_cents: totalCents,
       currency: workspace.store.currency,
       paid_at: paidAt,
     })
@@ -3009,6 +3537,7 @@ export async function createCheckoutOrderAction(
     paymentMethod: formData.get("paymentMethod"),
     customerNote: formData.get("customerNote") || undefined,
     discountCode: formData.get("discountCode") || undefined,
+    giftCardCode: formData.get("giftCardCode") || undefined,
     abandonedCheckoutToken:
       formData.get("abandonedCheckoutToken") || undefined,
     cart: readCartPayload(formData.get("cart")),
@@ -3136,6 +3665,21 @@ export async function createCheckoutOrderAction(
     storefront.store.taxRateBps,
   );
   const totalCents = discountedSubtotalCents + shippingCents + taxCents;
+  const giftCard = await getCheckoutGiftCard({
+    code: normalizeGiftCardCode(parsed.data.giftCardCode) || null,
+    currency: storefront.store.currency,
+    orderTotalCents: totalCents,
+    storeId: storefront.store.id,
+  });
+
+  if (giftCard.error) {
+    return formError(giftCard.error, {
+      giftCardCode: [giftCard.error],
+    });
+  }
+
+  const giftCardCents = giftCard.cents;
+  const amountDueCents = Math.max(0, totalCents - giftCardCents);
   const customerAccessToken = createCustomerAccessToken();
   const reservedInventory: ReservedInventory[] = [];
   const productInventoryById = new Map(
@@ -3150,6 +3694,13 @@ export async function createCheckoutOrderAction(
   }
 
   let discountRedemptionReserved = false;
+  let reservedGiftCard:
+    | {
+        id: string;
+        balanceBeforeCents: number;
+        balanceAfterCents: number;
+      }
+    | null = null;
 
   for (const item of orderItems) {
     const productInventory = productInventoryById.get(item.product.id);
@@ -3244,6 +3795,42 @@ export async function createCheckoutOrderAction(
     discountRedemptionReserved = true;
   }
 
+  if (giftCard.row && giftCardCents > 0) {
+    const balanceAfterCents = giftCard.row.balance_cents - giftCardCents;
+    const { data, error } = await db
+      .from("gift_cards")
+      .update({ balance_cents: balanceAfterCents })
+      .eq("id", giftCard.row.id)
+      .eq("store_id", storefront.store.id)
+      .eq("balance_cents", giftCard.row.balance_cents)
+      .select("id")
+      .maybeSingle();
+
+    if (error || !data) {
+      await rollbackReservedInventory(db, reservedInventory);
+
+      if (discount.row && discountRedemptionReserved) {
+        await db
+          .from("discount_codes")
+          .update({ redemption_count: discount.row.redemption_count })
+          .eq("id", discount.row.id);
+      }
+
+      return formError(
+        error?.message || "Gift card balance changed while checkout was in progress.",
+        {
+          giftCardCode: ["Gift card balance changed while checkout was in progress."],
+        },
+      );
+    }
+
+    reservedGiftCard = {
+      id: giftCard.row.id,
+      balanceBeforeCents: giftCard.row.balance_cents,
+      balanceAfterCents,
+    };
+  }
+
   const { data: order, error: orderError } = await db
     .from("orders")
     .insert({
@@ -3258,10 +3845,10 @@ export async function createCheckoutOrderAction(
       shipping_postal_code: parsed.data.shippingPostalCode,
       shipping_country: parsed.data.shippingCountry,
       customer_note: parsed.data.customerNote || null,
-      status: "pending",
+      status: amountDueCents === 0 ? "paid" : "pending",
       order_source: "storefront",
       internal_note: null,
-      payment_status: "pending",
+      payment_status: amountDueCents === 0 ? "paid" : "pending",
       payment_method: parsed.data.paymentMethod,
       payment_provider: getManualPaymentProvider(parsed.data.paymentMethod),
       payment_reference: null,
@@ -3269,17 +3856,28 @@ export async function createCheckoutOrderAction(
       subtotal_cents: subtotalCents,
       discount_code: discount.code,
       discount_cents: discount.cents,
+      gift_card_code: giftCard.code,
+      gift_card_cents: giftCardCents,
       shipping_cents: shippingCents,
       tax_cents: taxCents,
       tax_rate_bps: storefront.store.taxRateBps,
       total_cents: totalCents,
+      amount_due_cents: amountDueCents,
       currency: storefront.store.currency,
+      paid_at: amountDueCents === 0 ? new Date().toISOString() : null,
     })
     .select("id")
     .single();
 
   if (orderError) {
     await rollbackReservedInventory(db, reservedInventory);
+
+    if (reservedGiftCard) {
+      await db
+        .from("gift_cards")
+        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
+        .eq("id", reservedGiftCard.id);
+    }
 
     if (discount.row && discountRedemptionReserved) {
       await db
@@ -3308,6 +3906,13 @@ export async function createCheckoutOrderAction(
     await db.from("orders").delete().eq("id", order.id);
     await rollbackReservedInventory(db, reservedInventory);
 
+    if (reservedGiftCard) {
+      await db
+        .from("gift_cards")
+        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
+        .eq("id", reservedGiftCard.id);
+    }
+
     if (discount.row && discountRedemptionReserved) {
       await db
         .from("discount_codes")
@@ -3316,6 +3921,37 @@ export async function createCheckoutOrderAction(
     }
 
     return formError(itemError.message);
+  }
+
+  if (reservedGiftCard && giftCard.row && giftCardCents > 0) {
+    const { error: redemptionError } = await db
+      .from("gift_card_redemptions")
+      .insert({
+        store_id: storefront.store.id,
+        gift_card_id: giftCard.row.id,
+        order_id: order.id,
+        amount_cents: giftCardCents,
+        balance_before_cents: reservedGiftCard.balanceBeforeCents,
+        balance_after_cents: reservedGiftCard.balanceAfterCents,
+      });
+
+    if (redemptionError) {
+      await db.from("orders").delete().eq("id", order.id);
+      await rollbackReservedInventory(db, reservedInventory);
+      await db
+        .from("gift_cards")
+        .update({ balance_cents: reservedGiftCard.balanceBeforeCents })
+        .eq("id", reservedGiftCard.id);
+
+      if (discount.row && discountRedemptionReserved) {
+        await db
+          .from("discount_codes")
+          .update({ redemption_count: discount.row.redemption_count })
+          .eq("id", discount.row.id);
+      }
+
+      return formError(redemptionError.message);
+    }
   }
 
   const abandonedCheckoutToken = optionalText(
@@ -3358,8 +3994,11 @@ export async function createCheckoutOrderAction(
       customerEmail: parsed.data.customerEmail,
       itemCount: orderItems.length,
       totalCents,
+      amountDueCents,
       paymentMethod: parsed.data.paymentMethod,
       discountCode: discount.code,
+      giftCardCode: giftCard.code,
+      giftCardCents,
       recoveredAbandonedCheckoutId,
     },
   });
@@ -3377,6 +4016,7 @@ export async function createCheckoutOrderAction(
         orderId: order.id,
         customerEmail: parsed.data.customerEmail,
         totalCents,
+        amountDueCents,
       },
     });
   }
@@ -3402,6 +4042,8 @@ export async function createCheckoutOrderAction(
       orderStatusUrl,
       paymentMethod: parsed.data.paymentMethod,
       totalCents,
+      amountDueCents,
+      giftCardCents,
       currency: storefront.store.currency,
     },
   });
@@ -3657,6 +4299,86 @@ export async function pauseStoreAction(storeId: string) {
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
+}
+
+export async function upsertCustomerProfileAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = customerProfileSchema.safeParse({
+    email: formData.get("email"),
+    name: formData.get("name") || undefined,
+    phone: formData.get("phone") || undefined,
+    note: formData.get("note") || undefined,
+    tags: formData.get("tags") || undefined,
+    acceptsMarketing: formData.get("acceptsMarketing") === "on",
+    taxExempt: formData.get("taxExempt") === "on",
+  });
+
+  if (!parsed.success) {
+    return formError("Check the customer profile.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(user.id, storeId, "manage_orders");
+  const db = getSupabaseAdmin();
+  const email = parsed.data.email.toLowerCase();
+  const tags = parseCustomerTags(parsed.data.tags || "");
+  const { data: profile, error } = await db
+    .from("customer_profiles")
+    .upsert(
+      {
+        store_id: storeId,
+        email,
+        name: optionalText(parsed.data.name),
+        phone: optionalText(parsed.data.phone),
+        note: optionalText(parsed.data.note),
+        tags,
+        accepts_marketing: parsed.data.acceptsMarketing,
+        tax_exempt: parsed.data.taxExempt,
+      },
+      { onConflict: "store_id,email" },
+    )
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "customer_profile_updated",
+    resourceType: "customer_profile",
+    resourceId: profile.id,
+    summary: `${user.email} updated customer profile ${email}.`,
+    metadata: {
+      customerEmail: email,
+      tagCount: tags.length,
+      acceptsMarketing: parsed.data.acceptsMarketing,
+      taxExempt: parsed.data.taxExempt,
+      hasNote: Boolean(optionalText(parsed.data.note)),
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/customers`);
+  revalidatePath(
+    `/dashboard/stores/${storeId}/customers/${encodeURIComponent(email)}`,
+  );
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `Customer profile ${email} saved.`,
+  };
 }
 
 export async function updateOrderStatusAction(
@@ -4009,6 +4731,7 @@ export async function updateOrderFulfillmentAction(
 ) {
   const user = await requireAppUser();
   const parsed = orderFulfillmentSchema.safeParse({
+    status: formData.get("status"),
     trackingCarrier: formData.get("trackingCarrier") || undefined,
     trackingNumber: formData.get("trackingNumber") || undefined,
     trackingUrl: formData.get("trackingUrl") || undefined,
@@ -4067,6 +4790,10 @@ export async function updateOrderFulfillmentAction(
     throw new Error("Cancelled orders cannot be fulfilled.");
   }
 
+  if (parsed.data.status === "cancelled") {
+    throw new Error("New shipments cannot be created as cancelled.");
+  }
+
   const now = new Date().toISOString();
   const updatePayload: {
     tracking_carrier: string | null;
@@ -4085,6 +4812,13 @@ export async function updateOrderFulfillmentAction(
     fulfillment_note: optionalText(parsed.data.fulfillmentNote),
   };
   let paymentTransactionId: string | null = null;
+  let fulfillmentId: string | null = null;
+  const hasShipmentDetails = Boolean(
+    optionalText(parsed.data.trackingCarrier) ||
+      optionalText(parsed.data.trackingNumber) ||
+      optionalText(parsed.data.trackingUrl) ||
+      optionalText(parsed.data.fulfillmentNote),
+  );
 
   if (parsed.data.markFulfilled) {
     if (order.status !== "paid" && order.status !== "fulfilled") {
@@ -4143,6 +4877,43 @@ export async function updateOrderFulfillmentAction(
     }
   }
 
+  if (!hasShipmentDetails && !parsed.data.markFulfilled) {
+    throw new Error("Add tracking details or mark the order fulfilled.");
+  }
+
+  const fulfillmentStatus = parsed.data.status;
+  const shippedAt =
+    parsed.data.markFulfilled ||
+    fulfillmentStatus === "in_transit" ||
+    fulfillmentStatus === "delivered"
+      ? now
+      : null;
+  const deliveredAt = fulfillmentStatus === "delivered" ? now : null;
+  const { data: fulfillment, error: fulfillmentError } = await db
+    .from("order_fulfillments")
+    .insert({
+      store_id: storeId,
+      order_id: orderId,
+      clerk_user_id: user.id,
+      status: fulfillmentStatus,
+      tracking_carrier: updatePayload.tracking_carrier,
+      tracking_number: updatePayload.tracking_number,
+      tracking_url: updatePayload.tracking_url,
+      note: updatePayload.fulfillment_note,
+      shipped_at: shippedAt,
+      delivered_at: deliveredAt,
+      cancelled_at: null,
+    })
+    .select("id")
+    .single();
+
+  if (fulfillmentError) {
+    await deletePaymentTransaction(db, paymentTransactionId);
+    throw fulfillmentError;
+  }
+
+  fulfillmentId = fulfillment.id;
+
   const { data: updatedOrder, error } = await db
     .from("orders")
     .update(updatePayload)
@@ -4154,11 +4925,13 @@ export async function updateOrderFulfillmentAction(
 
   if (error) {
     await deletePaymentTransaction(db, paymentTransactionId);
+    await db.from("order_fulfillments").delete().eq("id", fulfillmentId);
     throw error;
   }
 
   if (!updatedOrder) {
     await deletePaymentTransaction(db, paymentTransactionId);
+    await db.from("order_fulfillments").delete().eq("id", fulfillmentId);
     throw new Error("Order changed while fulfillment was being updated.");
   }
 
@@ -4171,8 +4944,10 @@ export async function updateOrderFulfillmentAction(
     resourceId: orderId,
     summary: `${user.email} updated fulfillment for order ${orderId.slice(0, 8)}.`,
     metadata: {
+      fulfillmentId,
       previousStatus: order.status,
       status: updatePayload.status || order.status,
+      fulfillmentStatus,
       markFulfilled: parsed.data.markFulfilled,
       hasTrackingNumber: Boolean(optionalText(parsed.data.trackingNumber)),
     },
@@ -4192,9 +4967,196 @@ export async function updateOrderFulfillmentAction(
     resourceId: orderId,
     metadata: {
       orderId,
+      fulfillmentId,
+      fulfillmentStatus,
       markFulfilled: parsed.data.markFulfilled,
       trackingCarrier: optionalText(parsed.data.trackingCarrier),
       hasTrackingNumber: Boolean(optionalText(parsed.data.trackingNumber)),
+    },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+}
+
+export async function updateOrderFulfillmentStatusAction(
+  storeId: string,
+  orderId: string,
+  fulfillmentId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = orderFulfillmentStatusSchema.safeParse({
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    throw new Error("Choose a valid fulfillment status.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
+  const order = workspace.orders.find((item) => item.id === orderId);
+
+  if (!order) {
+    throw new Error("Order not found.");
+  }
+
+  if (order.status === "cancelled" || order.cancelledAt) {
+    throw new Error("Cancelled orders cannot be fulfilled.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: fulfillmentData, error: fulfillmentError } = await db
+    .from("order_fulfillments")
+    .select(
+      "id, store_id, order_id, status, tracking_carrier, tracking_number, tracking_url, note, shipped_at, delivered_at, cancelled_at",
+    )
+    .eq("id", fulfillmentId)
+    .eq("store_id", storeId)
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  if (fulfillmentError) {
+    throw fulfillmentError;
+  }
+
+  if (!fulfillmentData) {
+    throw new Error("Fulfillment not found.");
+  }
+
+  const fulfillment = fulfillmentData as OrderFulfillmentActionRow;
+
+  if (fulfillment.status === parsed.data.status) {
+    return;
+  }
+
+  if (
+    !canTransitionFulfillmentStatus(fulfillment.status, parsed.data.status)
+  ) {
+    throw new Error("This fulfillment cannot move to that status.");
+  }
+
+  const now = new Date().toISOString();
+  const updatePayload: {
+    status: OrderFulfillmentStatus;
+    shipped_at?: string | null;
+    delivered_at?: string | null;
+    cancelled_at?: string | null;
+  } = {
+    status: parsed.data.status,
+  };
+
+  if (
+    parsed.data.status === "in_transit" ||
+    parsed.data.status === "delivered"
+  ) {
+    updatePayload.shipped_at = fulfillment.shipped_at || now;
+  }
+
+  if (parsed.data.status === "delivered") {
+    updatePayload.delivered_at = fulfillment.delivered_at || now;
+  }
+
+  if (parsed.data.status === "cancelled") {
+    updatePayload.cancelled_at = fulfillment.cancelled_at || now;
+  }
+
+  const { error } = await db
+    .from("order_fulfillments")
+    .update(updatePayload)
+    .eq("id", fulfillmentId)
+    .eq("store_id", storeId)
+    .eq("order_id", orderId)
+    .eq("status", fulfillment.status);
+
+  if (error) {
+    throw error;
+  }
+
+  const activeFulfillments = order.fulfillments
+    .filter((item) => item.status !== "cancelled" && item.id !== fulfillmentId)
+    .sort(
+      (a, b) =>
+        new Date(b.shippedAt || b.createdAt).getTime() -
+        new Date(a.shippedAt || a.createdAt).getTime(),
+    );
+  const latestExistingFulfillment = order.fulfillments
+    .filter((item) => item.status !== "cancelled")
+    .sort(
+      (a, b) =>
+        new Date(b.shippedAt || b.createdAt).getTime() -
+        new Date(a.shippedAt || a.createdAt).getTime(),
+    )[0];
+  const isLatestFulfillment = latestExistingFulfillment?.id === fulfillmentId;
+
+  if (isLatestFulfillment && parsed.data.status !== "cancelled") {
+    await db
+      .from("orders")
+      .update({
+        tracking_carrier: fulfillment.tracking_carrier,
+        tracking_number: fulfillment.tracking_number,
+        tracking_url: fulfillment.tracking_url,
+        fulfillment_note: fulfillment.note,
+      })
+      .eq("id", orderId)
+      .eq("store_id", storeId);
+  } else if (isLatestFulfillment && parsed.data.status === "cancelled") {
+    const nextFulfillment = activeFulfillments[0];
+
+    await db
+      .from("orders")
+      .update({
+        tracking_carrier: nextFulfillment?.trackingCarrier || null,
+        tracking_number: nextFulfillment?.trackingNumber || null,
+        tracking_url: nextFulfillment?.trackingUrl || null,
+        fulfillment_note: nextFulfillment?.note || null,
+      })
+      .eq("id", orderId)
+      .eq("store_id", storeId);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "fulfillment_updated",
+    resourceType: "order_fulfillment",
+    resourceId: fulfillmentId,
+    summary: `${user.email} changed fulfillment ${fulfillmentId.slice(0, 8)} to ${parsed.data.status}.`,
+    metadata: {
+      orderId,
+      previousStatus: fulfillment.status,
+      status: parsed.data.status,
+      hasTrackingNumber: Boolean(fulfillment.tracking_number),
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "fulfillment_update",
+    recipientEmail: order.customerEmail,
+    recipientName: order.customerName,
+    subject: `${workspace.store.name} shipment update`,
+    preview: `Shipment ${fulfillmentId.slice(0, 8)} is ${parsed.data.status.replaceAll("_", " ")}.`,
+    resourceType: "order_fulfillment",
+    resourceId: fulfillmentId,
+    metadata: {
+      orderId,
+      fulfillmentId,
+      status: parsed.data.status,
+      trackingCarrier: fulfillment.tracking_carrier,
+      hasTrackingNumber: Boolean(fulfillment.tracking_number),
     },
   });
 
@@ -4394,6 +5356,233 @@ export async function updateReturnRequestStatusAction(
   return {
     status: "success",
     message: `Return request marked ${parsed.data.status}.`,
+  };
+}
+
+export async function createProductReviewAction(
+  storeSlug: string,
+  orderId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = productReviewSchema.safeParse({
+    token: formData.get("token"),
+    orderItemId: formData.get("orderItemId"),
+    productId: formData.get("productId"),
+    rating: formData.get("rating"),
+    title: formData.get("title") || undefined,
+    body: formData.get("body"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the review details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const receipt = await getPublicOrderReceipt({
+    slug: storeSlug,
+    orderId,
+    token: parsed.data.token,
+  });
+
+  if (!receipt) {
+    return formError("This order link is no longer valid.");
+  }
+
+  const item = receipt.order.items?.find(
+    (orderItem) =>
+      orderItem.id === parsed.data.orderItemId &&
+      orderItem.productId === parsed.data.productId,
+  );
+
+  if (!item?.productId) {
+    return formError("This order item cannot be reviewed.");
+  }
+
+  const canReview = canCustomerReviewOrderItem({
+    orderStatus: receipt.order.status,
+    paymentStatus: receipt.order.paymentStatus,
+    productId: item.productId,
+    orderItemId: item.id,
+    existingReviews: receipt.productReviews,
+    orderId: receipt.order.id,
+  });
+
+  if (!canReview) {
+    return formError("This item is not eligible for a new review right now.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      status: "success",
+      message: "Review submitted. Demo mode will not persist it.",
+    };
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: review, error } = await db
+    .from("product_reviews")
+    .insert({
+      store_id: receipt.store.id,
+      product_id: item.productId,
+      order_id: receipt.order.id,
+      order_item_id: item.id,
+      customer_email: receipt.order.customerEmail,
+      customer_name: receipt.order.customerName,
+      rating: parsed.data.rating,
+      title: optionalText(parsed.data.title),
+      body: parsed.data.body,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(
+      error.message.includes("duplicate")
+        ? "This item already has a submitted review."
+        : error.message,
+    );
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId: receipt.store.id,
+    clerkUserId: null,
+    action: "product_review_created",
+    resourceType: "product_review",
+    resourceId: review.id,
+    summary: `Customer submitted a product review for ${item.productName}.`,
+    metadata: {
+      orderId: receipt.order.id,
+      productId: item.productId,
+      rating: parsed.data.rating,
+      status: "pending",
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId: receipt.store.id,
+    type: "product_review_received",
+    recipientEmail: receipt.order.customerEmail,
+    recipientName: receipt.order.customerName,
+    subject: `${receipt.store.name} review received`,
+    preview: `Your review for ${item.productName} is pending moderation.`,
+    resourceType: "product_review",
+    resourceId: review.id,
+    metadata: {
+      orderId: receipt.order.id,
+      productId: item.productId,
+      rating: parsed.data.rating,
+    },
+  });
+
+  revalidatePath(`/stores/${receipt.store.slug}/orders/${receipt.order.id}`);
+  revalidatePath(`/dashboard/stores/${receipt.store.id}`);
+  revalidatePath(`/dashboard/stores/${receipt.store.id}/orders/${receipt.order.id}`);
+
+  return {
+    status: "success",
+    message: "Review submitted for moderation.",
+  };
+}
+
+export async function updateProductReviewStatusAction(
+  storeId: string,
+  reviewId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = productReviewStatusSchema.safeParse({
+    status: formData.get("status"),
+    merchantReply: formData.get("merchantReply") || undefined,
+  });
+
+  if (!parsed.success) {
+    return formError("Check the review status.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
+  const review = workspace.productReviews.find((item) => item.id === reviewId);
+
+  if (!review) {
+    return formError("Product review not found.");
+  }
+
+  const now = new Date().toISOString();
+  const status = parsed.data.status as ProductReviewStatus;
+  const updatePayload = {
+    status,
+    merchant_reply: optionalText(parsed.data.merchantReply),
+    approved_at: status === "approved" ? review.approvedAt || now : null,
+    rejected_at: status === "rejected" ? review.rejectedAt || now : null,
+  };
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("product_reviews")
+    .update(updatePayload)
+    .eq("id", reviewId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "product_review_moderated",
+    resourceType: "product_review",
+    resourceId: reviewId,
+    summary: `${user.email} changed product review ${reviewId.slice(0, 8)} to ${status}.`,
+    metadata: {
+      productId: review.productId,
+      orderId: review.orderId,
+      previousStatus: review.status,
+      status,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "product_review_updated",
+    recipientEmail: review.customerEmail,
+    recipientName: review.customerName,
+    subject: `${workspace.store.name} review update`,
+    preview: `Your product review is ${status}.`,
+    resourceType: "product_review",
+    resourceId: reviewId,
+    metadata: {
+      productId: review.productId,
+      orderId: review.orderId,
+      status,
+    },
+  });
+
+  const product = workspace.products.find((item) => item.id === review.productId);
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders/${review.orderId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/orders/${review.orderId}`);
+
+  if (product) {
+    revalidatePath(`/stores/${workspace.store.slug}/products/${product.slug}`);
+  }
+
+  return {
+    status: "success",
+    message: `Review marked ${status}.`,
   };
 }
 
@@ -4704,6 +5893,92 @@ export async function updateDiscountStatusAction(
       status: parsed.data.status,
     },
   });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+}
+
+export async function updateGiftCardStatusAction(
+  storeId: string,
+  giftCardId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = giftCardStatusSchema.safeParse({
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    throw new Error("Choose a valid gift card status.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  await assertStorePermission(user.id, storeId, "manage_discounts");
+  const db = getSupabaseAdmin();
+  const { data: giftCard, error: giftCardError } = await db
+    .from("gift_cards")
+    .select("code, status, recipient_email")
+    .eq("id", giftCardId)
+    .eq("store_id", storeId)
+    .maybeSingle();
+
+  if (giftCardError) {
+    throw giftCardError;
+  }
+
+  if (!giftCard) {
+    throw new Error("Gift card not found.");
+  }
+
+  const { error } = await db
+    .from("gift_cards")
+    .update({ status: parsed.data.status })
+    .eq("id", giftCardId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    throw error;
+  }
+
+  const giftCardRow = giftCard as {
+    code: string;
+    recipient_email: string | null;
+    status: string;
+  };
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "gift_card_status_updated",
+    resourceType: "gift_card",
+    resourceId: giftCardId,
+    summary: `${user.email} changed gift card ${maskGiftCardCode(giftCardRow.code)} to ${parsed.data.status}.`,
+    metadata: {
+      code: maskGiftCardCode(giftCardRow.code),
+      previousStatus: giftCardRow.status,
+      status: parsed.data.status,
+    },
+  });
+
+  if (giftCardRow.recipient_email) {
+    await queueNotification({
+      db,
+      storeId,
+      type: "gift_card_status_updated",
+      recipientEmail: giftCardRow.recipient_email,
+      subject: "Gift card status updated",
+      preview: `Your gift card is ${parsed.data.status}.`,
+      resourceType: "gift_card",
+      resourceId: giftCardId,
+      metadata: {
+        code: maskGiftCardCode(giftCardRow.code),
+        status: parsed.data.status,
+      },
+    });
+  }
 
   revalidatePath(`/dashboard/stores/${storeId}`);
 }

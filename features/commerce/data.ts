@@ -6,10 +6,14 @@ import type { AppUser } from "@/features/auth/app-user";
 import {
   mockAbandonedCheckouts,
   mockCollections,
+  mockCustomerProfiles,
   mockDiscounts,
+  mockGiftCards,
   mockInventoryAdjustments,
   mockOrderRefunds,
   mockOrders,
+  mockProductReviews,
+  mockStorePages,
   mockProducts,
   mockShippingZones,
   mockStorePolicies,
@@ -24,10 +28,16 @@ import type {
   AuditEventAction,
   ProductCollection,
   CollectionStatus,
+  CustomerProfile,
   Discount,
   DiscountStatus,
   DiscountType,
+  GiftCard,
+  GiftCardRedemption,
+  GiftCardStatus,
   Order,
+  OrderFulfillment,
+  OrderFulfillmentStatus,
   OrderItem,
   OrderPaymentTransaction,
   OrderRefund,
@@ -41,6 +51,8 @@ import type {
   PaymentTransactionStatus,
   PaymentTransactionType,
   Product,
+  ProductReview,
+  ProductReviewStatus,
   ProductVariant,
   ProductVariantStatus,
   ProductStatus,
@@ -54,6 +66,8 @@ import type {
   StoreMember,
   StoreMembershipRole,
   StoreNotification,
+  StorePage,
+  StorePageStatus,
   StorePolicy,
   StorePolicyStatus,
   StorePolicyType,
@@ -167,6 +181,34 @@ type StorePolicyRow = {
   updated_at: string;
 };
 
+type StorePageRow = {
+  id: string;
+  store_id: string;
+  title: string;
+  slug: string;
+  body: string | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  status: StorePageStatus;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type CustomerProfileRow = {
+  id: string;
+  store_id: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  note: string | null;
+  tags: string[] | null;
+  accepts_marketing: boolean | null;
+  tax_exempt: boolean | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type ProductRow = {
   id: string;
   store_id: string;
@@ -256,10 +298,13 @@ type OrderRow = {
   subtotal_cents: number | null;
   discount_code: string | null;
   discount_cents: number | null;
+  gift_card_code: string | null;
+  gift_card_cents: number | null;
   shipping_cents: number | null;
   tax_cents: number | null;
   tax_rate_bps: number | null;
   total_cents: number;
+  amount_due_cents: number | null;
   currency: string;
   created_at: string;
   paid_at: string | null;
@@ -287,6 +332,33 @@ type DiscountRow = {
   created_at: string;
 };
 
+type GiftCardRow = {
+  id: string;
+  store_id: string;
+  code: string;
+  initial_balance_cents: number;
+  balance_cents: number;
+  currency: string;
+  status: GiftCardStatus;
+  recipient_email: string | null;
+  note: string | null;
+  expires_at: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GiftCardRedemptionRow = {
+  id: string;
+  store_id: string;
+  gift_card_id: string;
+  order_id: string;
+  amount_cents: number;
+  balance_before_cents: number;
+  balance_after_cents: number;
+  created_at: string;
+};
+
 type OrderItemRow = {
   id: string;
   order_id: string;
@@ -298,6 +370,23 @@ type OrderItemRow = {
   unit_price_cents: number;
   quantity: number;
   created_at: string;
+};
+
+type OrderFulfillmentRow = {
+  id: string;
+  store_id: string;
+  order_id: string;
+  clerk_user_id: string | null;
+  status: OrderFulfillmentStatus;
+  tracking_carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  note: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type OrderRefundRow = {
@@ -360,6 +449,26 @@ type AbandonedCheckoutRow = {
   recovered_order_id: string | null;
   recovered_at: string | null;
   dismissed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProductReviewRow = {
+  id: string;
+  store_id: string;
+  product_id: string;
+  order_id: string;
+  order_item_id: string | null;
+  customer_email: string;
+  customer_name: string;
+  rating: number;
+  title: string | null;
+  body: string;
+  status: ProductReviewStatus;
+  merchant_reply: string | null;
+  reviewed_at: string;
+  approved_at: string | null;
+  rejected_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -467,6 +576,25 @@ function mapOrderRefund(row: OrderRefundRow): OrderRefund {
     note: row.note || undefined,
     restockedInventory: row.restocked_inventory,
     createdAt: row.created_at,
+  };
+}
+
+function mapOrderFulfillment(row: OrderFulfillmentRow): OrderFulfillment {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    orderId: row.order_id,
+    clerkUserId: row.clerk_user_id || undefined,
+    status: row.status,
+    trackingCarrier: row.tracking_carrier || undefined,
+    trackingNumber: row.tracking_number || undefined,
+    trackingUrl: row.tracking_url || undefined,
+    note: row.note || undefined,
+    shippedAt: row.shipped_at || undefined,
+    deliveredAt: row.delivered_at || undefined,
+    cancelledAt: row.cancelled_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -585,9 +713,32 @@ function mapAbandonedCheckout(row: AbandonedCheckoutRow): AbandonedCheckout {
   };
 }
 
+function mapProductReview(row: ProductReviewRow): ProductReview {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    productId: row.product_id,
+    orderId: row.order_id,
+    orderItemId: row.order_item_id || undefined,
+    customerEmail: row.customer_email,
+    customerName: row.customer_name,
+    rating: row.rating,
+    title: row.title || undefined,
+    body: row.body,
+    status: row.status,
+    merchantReply: row.merchant_reply || undefined,
+    reviewedAt: row.reviewed_at,
+    approvedAt: row.approved_at || undefined,
+    rejectedAt: row.rejected_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapOrder(
   row: OrderRow,
   items: OrderItem[] = [],
+  fulfillments: OrderFulfillment[] = [],
   refunds: OrderRefund[] = [],
   returnRequests: OrderReturnRequest[] = [],
   paymentTransactions: OrderPaymentTransaction[] = [],
@@ -636,10 +787,16 @@ function mapOrder(
         : row.total_cents,
     discountCode: row.discount_code || undefined,
     discountCents: row.discount_cents || 0,
+    giftCardCode: row.gift_card_code || undefined,
+    giftCardCents: row.gift_card_cents || 0,
     shippingCents: row.shipping_cents || 0,
     taxCents: row.tax_cents || 0,
     taxRateBps: row.tax_rate_bps || 0,
     totalCents: row.total_cents,
+    amountDueCents:
+      row.amount_due_cents && row.amount_due_cents > 0
+        ? row.amount_due_cents
+        : Math.max(0, row.total_cents - (row.gift_card_cents || 0)),
     refundedCents,
     refundableCents: Math.max(0, row.total_cents - refundedCents),
     currency: row.currency,
@@ -653,6 +810,7 @@ function mapOrder(
     trackingUrl: row.tracking_url || undefined,
     fulfillmentNote: row.fulfillment_note || undefined,
     items,
+    fulfillments,
     refunds,
     returnRequests,
     paymentTransactions,
@@ -673,6 +831,41 @@ function mapDiscount(row: DiscountRow): Discount {
     startsAt: row.starts_at || undefined,
     endsAt: row.ends_at || undefined,
     createdAt: row.created_at,
+  };
+}
+
+function mapGiftCardRedemption(row: GiftCardRedemptionRow): GiftCardRedemption {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    giftCardId: row.gift_card_id,
+    orderId: row.order_id,
+    amountCents: row.amount_cents,
+    balanceBeforeCents: row.balance_before_cents,
+    balanceAfterCents: row.balance_after_cents,
+    createdAt: row.created_at,
+  };
+}
+
+function mapGiftCard(
+  row: GiftCardRow,
+  redemptions: GiftCardRedemption[] = [],
+): GiftCard {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    code: row.code,
+    initialBalanceCents: row.initial_balance_cents,
+    balanceCents: row.balance_cents,
+    currency: row.currency,
+    status: row.status,
+    recipientEmail: row.recipient_email || undefined,
+    note: row.note || undefined,
+    expiresAt: row.expires_at || undefined,
+    createdByUserId: row.created_by_user_id || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    redemptions,
   };
 }
 
@@ -789,6 +982,38 @@ function mapStorePolicy(row: StorePolicyRow): StorePolicy {
   };
 }
 
+function mapStorePage(row: StorePageRow): StorePage {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    title: row.title,
+    slug: row.slug,
+    body: row.body || "",
+    seoTitle: row.seo_title || undefined,
+    seoDescription: row.seo_description || undefined,
+    status: row.status,
+    publishedAt: row.published_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapCustomerProfile(row: CustomerProfileRow): CustomerProfile {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    email: row.email.trim().toLowerCase(),
+    name: row.name || undefined,
+    phone: row.phone || undefined,
+    note: row.note || undefined,
+    tags: row.tags || [],
+    acceptsMarketing: Boolean(row.accepts_marketing),
+    taxExempt: Boolean(row.tax_exempt),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function byStoreId<T extends { storeId: string }>(items: T[]) {
   const grouped = new Map<string, T[]>();
 
@@ -819,6 +1044,16 @@ function refundsByOrderId(items: OrderRefund[]) {
   return grouped;
 }
 
+function fulfillmentsByOrderId(items: OrderFulfillment[]) {
+  const grouped = new Map<string, OrderFulfillment[]>();
+
+  for (const item of items) {
+    grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
 function returnRequestsByOrderId(items: OrderReturnRequest[]) {
   const grouped = new Map<string, OrderReturnRequest[]>();
 
@@ -834,6 +1069,19 @@ function paymentTransactionsByOrderId(items: OrderPaymentTransaction[]) {
 
   for (const item of items) {
     grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
+function giftCardRedemptionsByGiftCardId(items: GiftCardRedemption[]) {
+  const grouped = new Map<string, GiftCardRedemption[]>();
+
+  for (const item of items) {
+    grouped.set(item.giftCardId, [
+      ...(grouped.get(item.giftCardId) || []),
+      item,
+    ]);
   }
 
   return grouped;
@@ -1104,6 +1352,29 @@ async function loadOrderRefunds(orderIds: string[]) {
   return ((data || []) as OrderRefundRow[]).map(mapOrderRefund);
 }
 
+async function loadOrderFulfillments(orderIds: string[]) {
+  if (orderIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("order_fulfillments")
+    .select("*")
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as OrderFulfillmentRow[]).map(mapOrderFulfillment);
+}
+
 async function loadOrderReturnRequests(orderIds: string[]) {
   if (orderIds.length === 0) {
     return [];
@@ -1170,13 +1441,21 @@ async function loadOrders(storeIds: string[]) {
 
   const rows = (data || []) as OrderRow[];
   const orderIds = rows.map((row) => row.id);
-  const [items, refunds, returnRequests, paymentTransactions] = await Promise.all([
+  const [
+    items,
+    fulfillments,
+    refunds,
+    returnRequests,
+    paymentTransactions,
+  ] = await Promise.all([
     loadOrderItems(orderIds),
+    loadOrderFulfillments(orderIds),
     loadOrderRefunds(orderIds),
     loadOrderReturnRequests(orderIds),
     loadOrderPaymentTransactions(orderIds),
   ]);
   const itemsByOrder = byOrderId(items);
+  const fulfillmentsByOrder = fulfillmentsByOrderId(fulfillments);
   const refundsByOrder = refundsByOrderId(refunds);
   const returnRequestsByOrder = returnRequestsByOrderId(returnRequests);
   const paymentTransactionsByOrder =
@@ -1186,6 +1465,7 @@ async function loadOrders(storeIds: string[]) {
     mapOrder(
       row,
       itemsByOrder.get(row.id) || [],
+      fulfillmentsByOrder.get(row.id) || [],
       refundsByOrder.get(row.id) || [],
       returnRequestsByOrder.get(row.id) || [],
       paymentTransactionsByOrder.get(row.id) || [],
@@ -1216,6 +1496,58 @@ async function loadAbandonedCheckouts(storeIds: string[]) {
   return ((data || []) as AbandonedCheckoutRow[]).map(mapAbandonedCheckout);
 }
 
+async function loadProductReviews(
+  storeIds: string[],
+  approvedOnly = false,
+  client?: SupabaseClient,
+) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("product_reviews")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false });
+
+  if (approvedOnly) {
+    query = query.eq("status", "approved");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as ProductReviewRow[]).map(mapProductReview);
+}
+
+async function loadProductReviewsByOrder(orderId: string) {
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("product_reviews")
+    .select("*")
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as ProductReviewRow[]).map(mapProductReview);
+}
+
 async function loadDiscounts(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -1233,6 +1565,58 @@ async function loadDiscounts(storeIds: string[]) {
   }
 
   return ((data || []) as DiscountRow[]).map(mapDiscount);
+}
+
+async function loadGiftCardRedemptions(giftCardIds: string[]) {
+  if (giftCardIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("gift_card_redemptions")
+    .select("*")
+    .in("gift_card_id", giftCardIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as GiftCardRedemptionRow[]).map(mapGiftCardRedemption);
+}
+
+async function loadGiftCards(storeIds: string[]) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("gift_cards")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const rows = (data || []) as GiftCardRow[];
+  const redemptions = await loadGiftCardRedemptions(rows.map((row) => row.id));
+  const redemptionsByGiftCard = giftCardRedemptionsByGiftCardId(redemptions);
+
+  return rows.map((row) =>
+    mapGiftCard(row, redemptionsByGiftCard.get(row.id) || []),
+  );
 }
 
 async function loadInventoryAdjustments(storeIds: string[]) {
@@ -1409,6 +1793,64 @@ async function loadStorePolicies(
   return ((data || []) as StorePolicyRow[]).map(mapStorePolicy);
 }
 
+async function loadStorePages(
+  storeIds: string[],
+  publishedOnly = false,
+  client?: SupabaseClient,
+): Promise<StorePage[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("store_pages")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: true });
+
+  if (publishedOnly) {
+    query = query.eq("status", "published");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as StorePageRow[]).map(mapStorePage);
+}
+
+async function loadCustomerProfiles(
+  storeIds: string[],
+): Promise<CustomerProfile[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("customer_profiles")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as CustomerProfileRow[]).map(mapCustomerProfile);
+}
+
 function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   const store = mockStores.find((item) => item.slug === slug);
 
@@ -1425,6 +1867,10 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
     policies: mockStorePolicies.filter(
       (policy) => policy.storeId === store.id && policy.status === "published",
     ),
+    customPages: mockStorePages.filter(
+      (page) => page.storeId === store.id && page.status === "published",
+    ),
+    customerProfiles: [],
     shippingZones: mockShippingZones.filter(
       (zone) => zone.storeId === store.id && zone.status === "active",
     ),
@@ -1436,6 +1882,10 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
     ),
     orders: [],
     abandonedCheckouts: [],
+    productReviews: mockProductReviews.filter(
+      (review) => review.storeId === store.id && review.status === "approved",
+    ),
+    giftCards: [],
     discounts: [],
     inventoryAdjustments: [],
   };
@@ -1496,11 +1946,14 @@ async function loadPublicStorefrontFromClient(
   }
 
   const productRowsMapped = ((productRows || []) as ProductRow[]).map(mapProduct);
-  const [variants, shippingZones, policies] = await Promise.all([
-    loadProductVariants([row.id], true, db),
-    loadShippingZones([row.id], true, db),
-    loadStorePolicies([row.id], true, db),
-  ]);
+  const [variants, shippingZones, policies, customPages, productReviews] =
+    await Promise.all([
+      loadProductVariants([row.id], true, db),
+      loadShippingZones([row.id], true, db),
+      loadStorePolicies([row.id], true, db),
+      loadStorePages([row.id], true, db),
+      loadProductReviews([row.id], true, db),
+    ]);
   const products = attachProductVariants(productRowsMapped, variants);
   const allCollections = await loadCollections([row.id], true, db);
   const activeProductIds = new Set(products.map((product) => product.id));
@@ -1525,11 +1978,15 @@ async function loadPublicStorefrontFromClient(
     auditEvents: [],
     notifications: [],
     policies,
+    customPages,
+    customerProfiles: [],
     shippingZones,
     products,
     collections,
     orders: [],
     abandonedCheckouts: [],
+    productReviews,
+    giftCards: [],
     discounts: [],
     inventoryAdjustments: [],
   };
@@ -1735,6 +2192,10 @@ export async function getStoreWorkspace(
       auditEvents: [],
       notifications: [],
       policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
+      customPages: mockStorePages.filter((page) => page.storeId === store.id),
+      customerProfiles: mockCustomerProfiles.filter(
+        (profile) => profile.storeId === store.id,
+      ),
       shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
       products: mockProducts.filter((product) => product.storeId === store.id),
       collections: mockCollections.filter(
@@ -1744,6 +2205,10 @@ export async function getStoreWorkspace(
       abandonedCheckouts: mockAbandonedCheckouts.filter(
         (checkout) => checkout.storeId === store.id,
       ),
+      productReviews: mockProductReviews.filter(
+        (review) => review.storeId === store.id,
+      ),
+      giftCards: mockGiftCards.filter((giftCard) => giftCard.storeId === store.id),
       discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
       inventoryAdjustments: mockInventoryAdjustments.filter(
         (adjustment) => adjustment.storeId === store.id,
@@ -1795,6 +2260,8 @@ export async function getStoreWorkspace(
     collections,
     orders,
     abandonedCheckouts,
+    productReviews,
+    giftCards,
     discounts,
     inventoryAdjustments,
     members,
@@ -1802,6 +2269,8 @@ export async function getStoreWorkspace(
     auditEvents,
     notifications,
     policies,
+    customPages,
+    customerProfiles,
   ] =
     await Promise.all([
       loadProducts([storeId]),
@@ -1809,6 +2278,8 @@ export async function getStoreWorkspace(
       loadCollections([storeId]),
       loadOrders([storeId]),
       loadAbandonedCheckouts([storeId]),
+      loadProductReviews([storeId]),
+      loadGiftCards([storeId]),
       loadDiscounts([storeId]),
       loadInventoryAdjustments([storeId]),
       loadStoreMembers([storeId]),
@@ -1816,6 +2287,8 @@ export async function getStoreWorkspace(
       loadStoreAuditEvents([storeId]),
       loadStoreNotifications([storeId]),
       loadStorePolicies([storeId]),
+      loadStorePages([storeId]),
+      loadCustomerProfiles([storeId]),
     ]);
 
   return {
@@ -1826,11 +2299,15 @@ export async function getStoreWorkspace(
     auditEvents,
     notifications,
     policies,
+    customPages,
+    customerProfiles,
     shippingZones,
     products,
     collections,
     orders,
     abandonedCheckouts,
+    productReviews,
+    giftCards,
     discounts,
     inventoryAdjustments,
   };
@@ -1965,6 +2442,7 @@ export async function getPublicOrderReceipt(input: {
   store: Store;
   order: Order;
   policies: StorePolicy[];
+  productReviews: ProductReview[];
 } | null> {
   const token = input.token?.trim();
 
@@ -1996,6 +2474,9 @@ export async function getPublicOrderReceipt(input: {
       store: mapDemoStoreForUser(store, store.ownerId),
       order,
       policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
+      productReviews: mockProductReviews.filter(
+        (review) => review.orderId === order.id,
+      ),
     };
   }
 
@@ -2036,17 +2517,27 @@ export async function getPublicOrderReceipt(input: {
     return null;
   }
 
-  const [items, refunds, returnRequests, paymentTransactions, policies] =
-    await Promise.all([
+  const [
+    items,
+    fulfillments,
+    refunds,
+    returnRequests,
+    paymentTransactions,
+    policies,
+    productReviews,
+  ] = await Promise.all([
     loadOrderItems([input.orderId]),
+    loadOrderFulfillments([input.orderId]),
     loadOrderRefunds([input.orderId]),
     loadOrderReturnRequests([input.orderId]),
     loadOrderPaymentTransactions([input.orderId]),
     loadStorePolicies([store.id]),
+    loadProductReviewsByOrder(input.orderId),
   ]);
   const order = mapOrder(
     orderRow as OrderRow,
     items,
+    fulfillments,
     refunds,
     returnRequests,
     paymentTransactions,
@@ -2056,6 +2547,7 @@ export async function getPublicOrderReceipt(input: {
     store: mapStore(store, [], [order]),
     order,
     policies,
+    productReviews,
   };
 }
 
@@ -2140,6 +2632,47 @@ export async function getAvailableCollectionSlug(storeId: string, title: string)
       .eq("store_id", storeId)
       .eq("slug", candidate)
       .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return candidate;
+    }
+
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+}
+
+export async function getAvailableStorePageSlug(
+  storeId: string,
+  title: string,
+  ignorePageId?: string,
+) {
+  const base = slugify(title) || "page";
+
+  if (!getSupabaseConfig()) {
+    return base;
+  }
+
+  const db = getSupabaseAdmin();
+  let candidate = base;
+  let suffix = 2;
+
+  while (true) {
+    let query = db
+      .from("store_pages")
+      .select("id")
+      .eq("store_id", storeId)
+      .eq("slug", candidate);
+
+    if (ignorePageId) {
+      query = query.neq("id", ignorePageId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       throw error;

@@ -12,15 +12,18 @@ import {
   ReceiptText,
   RotateCcw,
   ShoppingBag,
+  Star,
   Truck,
 } from "lucide-react";
 
+import { ProductReviewStatusForm } from "@/features/commerce/components/product-review-status-form";
 import { requireAppUser } from "@/features/auth/app-user";
 import { RefundForm } from "@/features/commerce/components/refund-form";
 import { ReturnRequestStatusForm } from "@/features/commerce/components/return-request-status-form";
 import {
   confirmOrderPaymentAction,
   updateOrderFulfillmentAction,
+  updateOrderFulfillmentStatusAction,
   updateOrderStatusAction,
 } from "@/features/commerce/actions";
 import { getStoreWorkspace } from "@/features/commerce/data";
@@ -38,9 +41,16 @@ import {
   summarizePaymentTransactions,
 } from "@/features/commerce/payments";
 import {
+  fulfillmentStatuses,
+  fulfillmentStatusLabels,
+  sortFulfillments,
+} from "@/features/commerce/fulfillments";
+import { maskGiftCardCode } from "@/features/commerce/gift-cards";
+import {
   returnRequestReasonLabels,
   returnRequestStatusLabels,
 } from "@/features/commerce/returns";
+import { productReviewStatusLabels } from "@/features/commerce/reviews";
 import type { RefundReason } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -81,6 +91,10 @@ export default async function OrderDetailPage({
   const canConfirmPayment =
     order.status !== "cancelled" &&
     (order.paymentStatus === "pending" || order.paymentStatus === "authorized");
+  const productReviews = workspace.productReviews.filter(
+    (review) => review.orderId === order.id,
+  );
+  const fulfillments = sortFulfillments(order.fulfillments);
 
   return (
     <div className="grid gap-5">
@@ -188,10 +202,27 @@ export default async function OrderDetailPage({
                 <span>Tax {(order.taxRateBps / 100).toFixed(2)}%</span>
                 <span>{formatCurrency(order.taxCents, order.currency)}</span>
               </div>
+              {order.giftCardCents > 0 ? (
+                <div className="flex items-center justify-between gap-3 text-pink-700">
+                  <span>
+                    Gift card{" "}
+                    {order.giftCardCode
+                      ? maskGiftCardCode(order.giftCardCode)
+                      : ""}
+                  </span>
+                  <span>-{formatCurrency(order.giftCardCents, order.currency)}</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-3 pt-2 text-base font-semibold text-slate-950">
                 <span>Total</span>
                 <span>{formatCurrency(order.totalCents, order.currency)}</span>
               </div>
+              {order.giftCardCents > 0 ? (
+                <div className="flex items-center justify-between gap-3 text-base font-semibold text-slate-950">
+                  <span>Amount due</span>
+                  <span>{formatCurrency(order.amountDueCents, order.currency)}</span>
+                </div>
+              ) : null}
               {order.refundedCents > 0 ? (
                 <>
                   <div className="flex items-center justify-between gap-3 text-red-600">
@@ -340,6 +371,76 @@ export default async function OrderDetailPage({
             ) : (
               <p className="p-4 text-sm text-slate-500">
                 No return requests submitted.
+              </p>
+            )}
+          </section>
+
+          <section className="soft-panel overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                <Star aria-hidden="true" size={18} />
+                Product reviews
+              </h2>
+            </div>
+            {productReviews.length > 0 ? (
+              productReviews.map((review) => {
+                const orderItem = order.items?.find(
+                  (item) =>
+                    item.id === review.orderItemId ||
+                    item.productId === review.productId,
+                );
+
+                return (
+                  <div
+                    className="border-b border-slate-100 p-4 last:border-0"
+                    key={review.id}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-950">
+                          {orderItem?.productName || "Product review"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {review.customerEmail} /{" "}
+                          {new Date(review.reviewedAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="status-pill">
+                        {productReviewStatusLabels[review.status]}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-1 text-slate-950">
+                      {Array.from({ length: 5 }, (_, index) => (
+                        <Star
+                          aria-hidden="true"
+                          className={
+                            index < review.rating
+                              ? "fill-slate-950 text-slate-950"
+                              : "text-slate-300"
+                          }
+                          key={index}
+                          size={14}
+                        />
+                      ))}
+                    </div>
+                    {review.title ? (
+                      <p className="mt-2 text-sm font-semibold text-slate-950">
+                        {review.title}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 rounded-[8px] bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                      {review.body}
+                    </p>
+                    <ProductReviewStatusForm
+                      review={review}
+                      storeId={workspace.store.id}
+                    />
+                  </div>
+                );
+              })
+            ) : (
+              <p className="p-4 text-sm text-slate-500">
+                Product reviews for this order will appear here.
               </p>
             )}
           </section>
@@ -510,31 +611,100 @@ export default async function OrderDetailPage({
               <Truck aria-hidden="true" className="text-sky-700" size={18} />
             </div>
             <div className="mt-4 grid gap-2 text-sm text-slate-600">
-              {order.trackingCarrier || order.trackingNumber ? (
-                <p>
-                  {[order.trackingCarrier, order.trackingNumber]
-                    .filter(Boolean)
-                    .join(" / ")}
-                </p>
+              {fulfillments.length > 0 ? (
+                fulfillments.map((fulfillment) => (
+                  <div
+                    className="rounded-[8px] border border-slate-100 bg-white/70 p-3"
+                    key={fulfillment.id}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-950">
+                          {[fulfillment.trackingCarrier, fulfillment.trackingNumber]
+                            .filter(Boolean)
+                            .join(" / ") || `Shipment ${fulfillment.id.slice(0, 8)}`}
+                        </p>
+                        <p className="mt-1 text-xs font-medium text-slate-500">
+                          {new Date(
+                            fulfillment.shippedAt || fulfillment.createdAt,
+                          ).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="status-pill">
+                        {fulfillmentStatusLabels[fulfillment.status]}
+                      </span>
+                    </div>
+                    {fulfillment.trackingUrl ? (
+                      <a
+                        className="mt-2 inline-flex items-center gap-2 font-semibold text-sky-700"
+                        href={fulfillment.trackingUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Tracking link
+                        <ExternalLink aria-hidden="true" size={14} />
+                      </a>
+                    ) : null}
+                    {fulfillment.note ? (
+                      <p className="mt-2 rounded-[8px] bg-slate-50 p-3">
+                        {fulfillment.note}
+                      </p>
+                    ) : null}
+                    <form
+                      action={updateOrderFulfillmentStatusAction.bind(
+                        null,
+                        workspace.store.id,
+                        order.id,
+                        fulfillment.id,
+                      )}
+                      className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
+                    >
+                      <select
+                        aria-label={`Status for fulfillment ${fulfillment.id.slice(0, 8)}`}
+                        className="field min-h-10 py-2 text-sm"
+                        defaultValue={fulfillment.status}
+                        name="status"
+                      >
+                        {fulfillmentStatuses.map((status) => (
+                          <option key={status} value={status}>
+                            {fulfillmentStatusLabels[status]}
+                          </option>
+                        ))}
+                      </select>
+                      <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                        <CheckCircle aria-hidden="true" size={16} />
+                        Update
+                      </button>
+                    </form>
+                  </div>
+                ))
+              ) : order.trackingCarrier || order.trackingNumber ? (
+                <div className="rounded-[8px] border border-slate-100 bg-white/70 p-3">
+                  <p className="font-semibold text-slate-950">
+                    {[order.trackingCarrier, order.trackingNumber]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </p>
+                  {order.trackingUrl ? (
+                    <a
+                      className="mt-2 inline-flex items-center gap-2 font-semibold text-sky-700"
+                      href={order.trackingUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Tracking link
+                      <ExternalLink aria-hidden="true" size={14} />
+                    </a>
+                  ) : null}
+                  {order.fulfillmentNote ? (
+                    <p className="mt-2 rounded-[8px] bg-slate-50 p-3">
+                      {order.fulfillmentNote}
+                    </p>
+                  ) : null}
+                </div>
               ) : (
-                <p>No tracking saved yet.</p>
+                <p>No shipments saved yet.</p>
               )}
-              {order.trackingUrl ? (
-                <a
-                  className="inline-flex items-center gap-2 font-semibold text-sky-700"
-                  href={order.trackingUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Tracking link
-                  <ExternalLink aria-hidden="true" size={14} />
-                </a>
-              ) : null}
-              {order.fulfillmentNote ? (
-                <p className="rounded-[8px] bg-slate-50 p-3">
-                  {order.fulfillmentNote}
-                </p>
-              ) : null}
             </div>
 
             <form
@@ -545,6 +715,18 @@ export default async function OrderDetailPage({
               )}
               className="mt-4 grid gap-3"
             >
+              <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                Shipment status
+                <select className="field" defaultValue="in_transit" name="status">
+                  {fulfillmentStatuses
+                    .filter((status) => status !== "cancelled")
+                    .map((status) => (
+                      <option key={status} value={status}>
+                        {fulfillmentStatusLabels[status]}
+                      </option>
+                    ))}
+                </select>
+              </label>
               <label className="grid gap-1 text-sm font-semibold text-slate-700">
                 Carrier
                 <input
@@ -594,7 +776,7 @@ export default async function OrderDetailPage({
               ) : null}
               <button className="secondary-button w-fit px-4 text-sm" type="submit">
                 <CheckCircle aria-hidden="true" size={16} />
-                Save fulfillment
+                Add shipment
               </button>
             </form>
           </section>
