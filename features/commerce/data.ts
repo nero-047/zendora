@@ -1,10 +1,13 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import type { AppUser } from "@/features/auth/app-user";
 import { mockOrders, mockProducts, mockStores } from "@/features/commerce/mock-data";
 import type {
   DashboardOverview,
   Order,
+  OrderItem,
   OrderStatus,
   Product,
   ProductStatus,
@@ -12,8 +15,13 @@ import type {
   StoreStatus,
   StoreWorkspace,
 } from "@/features/commerce/types";
-import { getSupabaseConfig, isSupabaseConfigured } from "@/lib/env";
+import {
+  getSupabaseConfig,
+  isSupabaseConfigured,
+  isSupabasePublicConfigured,
+} from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getSupabasePublic } from "@/lib/supabase/public";
 import { isUuid, slugify } from "@/lib/utils";
 
 type StoreRow = {
@@ -54,6 +62,16 @@ type OrderRow = {
   created_at: string;
 };
 
+type OrderItemRow = {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  product_name: string;
+  unit_price_cents: number;
+  quantity: number;
+  created_at: string;
+};
+
 function mapProduct(row: ProductRow): Product {
   return {
     id: row.id,
@@ -73,7 +91,19 @@ function mapProduct(row: ProductRow): Product {
   };
 }
 
-function mapOrder(row: OrderRow): Order {
+function mapOrderItem(row: OrderItemRow): OrderItem {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    productId: row.product_id || undefined,
+    productName: row.product_name,
+    unitPriceCents: row.unit_price_cents,
+    quantity: row.quantity,
+    createdAt: row.created_at,
+  };
+}
+
+function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
   return {
     id: row.id,
     storeId: row.store_id,
@@ -83,6 +113,7 @@ function mapOrder(row: OrderRow): Order {
     totalCents: row.total_cents,
     currency: row.currency,
     createdAt: row.created_at,
+    items,
   };
 }
 
@@ -124,6 +155,16 @@ function byStoreId<T extends { storeId: string }>(items: T[]) {
   return grouped;
 }
 
+function byOrderId(items: OrderItem[]) {
+  const grouped = new Map<string, OrderItem[]>();
+
+  for (const item of items) {
+    grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
 async function loadProducts(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -143,6 +184,25 @@ async function loadProducts(storeIds: string[]) {
   return ((data || []) as ProductRow[]).map(mapProduct);
 }
 
+async function loadOrderItems(orderIds: string[]) {
+  if (orderIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("order_items")
+    .select("*")
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as OrderItemRow[]).map(mapOrderItem);
+}
+
 async function loadOrders(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -159,7 +219,90 @@ async function loadOrders(storeIds: string[]) {
     throw error;
   }
 
-  return ((data || []) as OrderRow[]).map(mapOrder);
+  const rows = (data || []) as OrderRow[];
+  const items = await loadOrderItems(rows.map((row) => row.id));
+  const itemsByOrder = byOrderId(items);
+
+  return rows.map((row) => mapOrder(row, itemsByOrder.get(row.id) || []));
+}
+
+function getMockPublicStorefront(slug: string): StoreWorkspace | null {
+  const store = mockStores.find((item) => item.slug === slug);
+
+  if (!store || store.status !== "active") {
+    return null;
+  }
+
+  return {
+    store,
+    products: mockProducts.filter(
+      (product) => product.storeId === store.id && product.status === "active",
+    ),
+    orders: [],
+  };
+}
+
+function getCatalogErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message || "");
+  }
+
+  return "";
+}
+
+function shouldUseDemoCatalogFallback(error: unknown) {
+  const message = getCatalogErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes("could not find the table") ||
+    message.includes("schema cache") ||
+    message.includes("relation") ||
+    message.includes("does not exist")
+  );
+}
+
+async function loadPublicStorefrontFromClient(
+  db: SupabaseClient,
+  slug: string,
+): Promise<StoreWorkspace | null> {
+  const { data: storeRow, error: storeError } = await db
+    .from("stores")
+    .select("*")
+    .eq("slug", slug)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (storeError) {
+    throw new Error(storeError.message);
+  }
+
+  if (!storeRow) {
+    return null;
+  }
+
+  const row = storeRow as StoreRow;
+  const { data: productRows, error: productError } = await db
+    .from("products")
+    .select("*")
+    .eq("store_id", row.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (productError) {
+    throw new Error(productError.message);
+  }
+
+  const products = ((productRows || []) as ProductRow[]).map(mapProduct);
+
+  return {
+    store: mapStore(row, products, []),
+    products,
+    orders: [],
+  };
 }
 
 export async function upsertProfileForUser(user: AppUser) {
@@ -385,57 +528,43 @@ export async function getStoreWorkspace(
 export async function getPublicStorefront(
   slug: string,
 ): Promise<StoreWorkspace | null> {
-  if (!isSupabaseConfigured()) {
-    const store = mockStores.find((item) => item.slug === slug);
+  const demoStorefront = getMockPublicStorefront(slug);
 
-    if (!store || store.status !== "active") {
-      return null;
+  if (isSupabaseConfigured()) {
+    try {
+      return await loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
+    } catch (error) {
+      if (demoStorefront && shouldUseDemoCatalogFallback(error)) {
+        return demoStorefront;
+      }
+
+      throw error;
     }
-
-    return {
-      store,
-      products: mockProducts.filter(
-        (product) => product.storeId === store.id && product.status === "active",
-      ),
-      orders: [],
-    };
   }
 
-  const db = getSupabaseAdmin();
-  const { data: storeRow, error: storeError } = await db
-    .from("stores")
-    .select("*")
-    .eq("slug", slug)
-    .eq("status", "active")
-    .maybeSingle();
+  if (isSupabasePublicConfigured()) {
+    try {
+      return await loadPublicStorefrontFromClient(getSupabasePublic(), slug);
+    } catch (error) {
+      if (demoStorefront && shouldUseDemoCatalogFallback(error)) {
+        return demoStorefront;
+      }
 
-  if (storeError) {
-    throw storeError;
+      throw error;
+    }
   }
 
-  if (!storeRow) {
+  return demoStorefront;
+}
+
+export async function getLivePublicStorefront(
+  slug: string,
+): Promise<StoreWorkspace | null> {
+  if (!isSupabaseConfigured()) {
     return null;
   }
 
-  const row = storeRow as StoreRow;
-  const { data: productRows, error: productError } = await db
-    .from("products")
-    .select("*")
-    .eq("store_id", row.id)
-    .eq("status", "active")
-    .order("created_at", { ascending: false });
-
-  if (productError) {
-    throw productError;
-  }
-
-  const products = ((productRows || []) as ProductRow[]).map(mapProduct);
-
-  return {
-    store: mapStore(row, products, []),
-    products,
-    orders: [],
-  };
+  return loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
 }
 
 export async function getAvailableStoreSlug(name: string) {

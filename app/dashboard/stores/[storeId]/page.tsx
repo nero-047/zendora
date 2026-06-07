@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import {
   ArrowUpRight,
+  CheckCircle,
   ExternalLink,
   PackagePlus,
   PauseCircle,
@@ -15,6 +16,7 @@ import { getStoreWorkspace } from "@/features/commerce/data";
 import {
   pauseStoreAction,
   publishStoreAction,
+  updateOrderStatusAction,
 } from "@/features/commerce/actions";
 import { formatCurrency } from "@/lib/utils";
 
@@ -133,15 +135,48 @@ export default async function StorePage({
           <div className="soft-panel overflow-hidden">
             {orders.length > 0 ? (
               orders.slice(0, 6).map((order) => (
-                <div className="flex items-center gap-3 border-b border-slate-100 p-4 last:border-0" key={order.id}>
-                  <span className="flex h-10 w-10 items-center justify-center rounded-[8px] bg-sky-500/10 text-sky-700">
-                    <ShoppingBag aria-hidden="true" size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-950">{order.customerName}</p>
-                    <p className="text-xs text-slate-500">{order.status}</p>
+                <div className="border-b border-slate-100 p-4 last:border-0" key={order.id}>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-sky-500/10 text-sky-700">
+                      <ShoppingBag aria-hidden="true" size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-950">{order.customerName}</p>
+                      <p className="truncate text-xs text-slate-500">{order.customerEmail}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-950">{formatCurrency(order.totalCents, order.currency)}</span>
                   </div>
-                  <span className="text-sm font-semibold text-slate-950">{formatCurrency(order.totalCents, order.currency)}</span>
+
+                  {order.items?.length ? (
+                    <div className="mt-3 grid gap-1 pl-[52px] text-xs text-slate-500">
+                      {order.items.slice(0, 3).map((item) => (
+                        <p className="truncate" key={item.id}>
+                          {item.quantity} x {item.productName}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <form
+                    action={updateOrderStatusAction.bind(null, store.id, order.id)}
+                    className="mt-3 grid grid-cols-[1fr_auto] gap-2"
+                  >
+                    <select
+                      aria-label={`Status for ${order.customerName}`}
+                      className="field min-h-10 py-2 text-sm"
+                      defaultValue={order.status}
+                      name="status"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="paid">Paid</option>
+                      <option value="fulfilled">Fulfilled</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                    <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                      <CheckCircle aria-hidden="true" size={16} />
+                      Update
+                    </button>
+                  </form>
                 </div>
               ))
             ) : (

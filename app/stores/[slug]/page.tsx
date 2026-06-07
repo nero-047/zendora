@@ -3,8 +3,8 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ShoppingBag, Sparkles } from "lucide-react";
 
+import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
 import { getPublicStorefront } from "@/features/commerce/data";
-import { formatCurrency } from "@/lib/utils";
 
 export default async function PublicStorePage({
   params,
@@ -62,33 +62,7 @@ export default async function PublicStorePage({
         ) : null}
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-20 sm:px-6 md:grid-cols-2 lg:grid-cols-4 lg:px-8">
-        {products.map((product) => (
-          <article className="soft-panel overflow-hidden" key={product.id}>
-            <Image
-              alt={product.name}
-              className="product-image"
-              height={675}
-              sizes="(max-width: 768px) 100vw, 25vw"
-              src={product.imageUrl}
-              width={900}
-            />
-            <div className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="font-semibold text-slate-950">{product.name}</h2>
-                <span className="text-sm font-semibold text-slate-950">
-                  {formatCurrency(product.priceCents, product.currency)}
-                </span>
-              </div>
-              <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500">{product.description}</p>
-              <button className="primary-button mt-4 w-full px-3 text-sm" type="button">
-                <ShoppingBag aria-hidden="true" size={16} />
-                Add to cart
-              </button>
-            </div>
-          </article>
-        ))}
-      </section>
+      <StorefrontCart products={products} storeSlug={store.slug} />
     </main>
   );
 }

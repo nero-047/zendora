@@ -101,6 +101,12 @@ create trigger orders_set_updated_at
 before update on public.orders
 for each row execute function public.set_updated_at();
 
+create index if not exists stores_owner_id_idx on public.stores(owner_id);
+create index if not exists store_memberships_clerk_user_id_idx on public.store_memberships(clerk_user_id);
+create index if not exists products_store_id_status_idx on public.products(store_id, status);
+create index if not exists orders_store_id_created_at_idx on public.orders(store_id, created_at desc);
+create index if not exists order_items_order_id_idx on public.order_items(order_id);
+
 alter table public.profiles enable row level security;
 alter table public.stores enable row level security;
 alter table public.store_memberships enable row level security;

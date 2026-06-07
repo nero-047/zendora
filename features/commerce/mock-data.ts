@@ -136,6 +136,26 @@ export const mockOrders: Order[] = [
     totalCents: 34800,
     currency: "USD",
     createdAt: "2026-05-25T13:20:00.000Z",
+    items: [
+      {
+        id: "demo-order-item-1001-1",
+        orderId: "demo-order-1001",
+        productId: "demo-product-trail-watch",
+        productName: "Trail Watch",
+        unitPriceCents: 21900,
+        quantity: 1,
+        createdAt: "2026-05-25T13:20:00.000Z",
+      },
+      {
+        id: "demo-order-item-1001-2",
+        orderId: "demo-order-1001",
+        productId: "demo-product-carry-pack",
+        productName: "Field Carry Pack",
+        unitPriceCents: 12900,
+        quantity: 1,
+        createdAt: "2026-05-25T13:20:00.000Z",
+      },
+    ],
   },
   {
     id: "demo-order-1002",
@@ -146,6 +166,26 @@ export const mockOrders: Order[] = [
     totalCents: 17100,
     currency: "USD",
     createdAt: "2026-05-29T09:40:00.000Z",
+    items: [
+      {
+        id: "demo-order-item-1002-1",
+        orderId: "demo-order-1002",
+        productId: "demo-product-hydra-bottle",
+        productName: "Hydra Bottle",
+        unitPriceCents: 4200,
+        quantity: 1,
+        createdAt: "2026-05-29T09:40:00.000Z",
+      },
+      {
+        id: "demo-order-item-1002-2",
+        orderId: "demo-order-1002",
+        productId: "demo-product-carry-pack",
+        productName: "Field Carry Pack",
+        unitPriceCents: 12900,
+        quantity: 1,
+        createdAt: "2026-05-29T09:40:00.000Z",
+      },
+    ],
   },
   {
     id: "demo-order-1003",
@@ -156,5 +196,16 @@ export const mockOrders: Order[] = [
     totalCents: 12900,
     currency: "USD",
     createdAt: "2026-06-02T16:12:00.000Z",
+    items: [
+      {
+        id: "demo-order-item-1003-1",
+        orderId: "demo-order-1003",
+        productId: "demo-product-carry-pack",
+        productName: "Field Carry Pack",
+        unitPriceCents: 12900,
+        quantity: 1,
+        createdAt: "2026-06-02T16:12:00.000Z",
+      },
+    ],
   },
 ];

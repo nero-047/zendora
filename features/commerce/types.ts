@@ -42,6 +42,17 @@ export type Order = {
   totalCents: number;
   currency: string;
   createdAt: string;
+  items?: OrderItem[];
+};
+
+export type OrderItem = {
+  id: string;
+  orderId: string;
+  productId?: string;
+  productName: string;
+  unitPriceCents: number;
+  quantity: number;
+  createdAt: string;
 };
 
 export type StoreWorkspace = {
