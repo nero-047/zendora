@@ -1,4 +1,5 @@
 export type StoreStatus = "draft" | "active" | "paused";
+export type StoreMembershipRole = "owner" | "admin" | "staff";
 export type ShippingZoneStatus = "active" | "paused";
 export type ProductStatus = "draft" | "active" | "archived";
 export type ProductVariantStatus = "active" | "paused";
@@ -25,6 +26,39 @@ export type RefundReason =
   | "other";
 export type DiscountStatus = "active" | "paused";
 export type DiscountType = "percent" | "fixed";
+export type NotificationStatus = "pending" | "sent" | "failed" | "suppressed";
+export type NotificationType =
+  | "order_confirmation"
+  | "manual_order_invoice"
+  | "payment_receipt"
+  | "fulfillment_update"
+  | "refund_confirmation"
+  | "team_invitation";
+export type AuditEventAction =
+  | "store_created"
+  | "store_updated"
+  | "store_published"
+  | "store_paused"
+  | "product_created"
+  | "product_updated"
+  | "inventory_adjusted"
+  | "discount_created"
+  | "discount_status_updated"
+  | "collection_created"
+  | "collection_status_updated"
+  | "shipping_zone_created"
+  | "shipping_zone_status_updated"
+  | "checkout_order_created"
+  | "manual_order_created"
+  | "order_status_updated"
+  | "payment_confirmed"
+  | "fulfillment_updated"
+  | "refund_created"
+  | "team_invited"
+  | "team_invite_revoked"
+  | "team_member_role_updated"
+  | "team_member_removed"
+  | "team_invite_accepted";
 
 export type Store = {
   id: string;
@@ -43,6 +77,56 @@ export type Store = {
   shippingRateCents: number;
   freeShippingThresholdCents: number;
   taxRateBps: number;
+};
+
+export type StoreMember = {
+  storeId: string;
+  userId: string;
+  email: string;
+  name: string;
+  role: StoreMembershipRole;
+  createdAt: string;
+};
+
+export type StoreInvitation = {
+  id: string;
+  storeId: string;
+  email: string;
+  role: Exclude<StoreMembershipRole, "owner">;
+  invitedByUserId: string;
+  acceptedAt?: string;
+  revokedAt?: string;
+  expiresAt: string;
+  createdAt: string;
+};
+
+export type StoreAuditEvent = {
+  id: string;
+  storeId: string;
+  clerkUserId?: string;
+  action: AuditEventAction;
+  resourceType: string;
+  resourceId?: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type StoreNotification = {
+  id: string;
+  storeId: string;
+  type: NotificationType;
+  status: NotificationStatus;
+  recipientEmail: string;
+  recipientName?: string;
+  subject: string;
+  preview: string;
+  resourceType: string;
+  resourceId?: string;
+  metadata: Record<string, unknown>;
+  sentAt?: string;
+  failedAt?: string;
+  createdAt: string;
 };
 
 export type ShippingZone = {
@@ -213,7 +297,12 @@ export type Discount = {
 };
 
 export type StoreWorkspace = {
+  membershipRole?: StoreMembershipRole;
   store: Store;
+  members: StoreMember[];
+  invitations: StoreInvitation[];
+  auditEvents: StoreAuditEvent[];
+  notifications: StoreNotification[];
   shippingZones: ShippingZone[];
   products: Product[];
   collections: ProductCollection[];

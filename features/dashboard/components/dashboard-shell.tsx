@@ -84,7 +84,7 @@ export function DashboardShell({
             {isClerkConfigured() ? (
               <UserButton />
             ) : (
-              <span className="status-pill">Demo</span>
+              <span className="status-pill">Local</span>
             )}
           </div>
         </div>
@@ -114,7 +114,7 @@ export function DashboardShell({
               </Link>
               <Link className="secondary-button px-3 text-sm" href="/stores/northline-supply">
                 <ExternalLink aria-hidden="true" size={16} />
-                Demo store
+                Sample store
               </Link>
             </div>
             <div className="flex flex-wrap gap-2 text-sm">
@@ -124,7 +124,7 @@ export function DashboardShell({
               </span>
               <span className="status-pill">
                 <BarChart3 aria-hidden="true" size={14} />
-                MVP
+                Operations
               </span>
             </div>
           </div>

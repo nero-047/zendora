@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Zendora | Multi-store commerce MVP",
+  title: "Zendora | Multi-store commerce platform",
   description:
-    "Zendora is a portfolio-grade Shopify-style MVP for creating stores, managing products, and syncing merchant accounts.",
+    "Zendora is a Shopify-style commerce platform for creating stores, managing products, running checkout, and operating orders.",
 };
 
 export default function RootLayout({

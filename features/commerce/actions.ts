@@ -6,12 +6,21 @@ import { z } from "zod";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import type { ActionState } from "@/features/commerce/action-state";
+import {
+  calculateDiscountCents,
+  calculateShippingQuote,
+  calculateTaxCents,
+  normalizeCartLines,
+  parseShippingCountries,
+} from "@/features/commerce/business-rules";
 import type {
+  AuditEventAction,
+  NotificationType,
   PaymentMethod,
   PaymentStatus,
   Product,
   ProductVariant,
-  ShippingZone,
+  StoreMembershipRole,
 } from "@/features/commerce/types";
 import {
   getAvailableCollectionSlug,
@@ -25,6 +34,11 @@ import {
   canTransitionOrderStatus,
   isRevenueOrderStatus,
 } from "@/features/commerce/order-status";
+import {
+  canStoreRole,
+  getStorePermissionLabel,
+  type StorePermission,
+} from "@/features/commerce/permissions";
 import { isSupabaseConfigured } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { uploadProductImageObject } from "@/lib/supabase/storage";
@@ -332,6 +346,15 @@ const discountStatusSchema = z.object({
   status: z.enum(["active", "paused"]),
 });
 
+const teamInvitationSchema = z.object({
+  email: z.string().trim().email("Add a valid team email."),
+  role: z.enum(["admin", "staff"]),
+});
+
+const teamMemberRoleSchema = z.object({
+  role: z.enum(["admin", "staff"]),
+});
+
 type CheckoutDiscountRow = {
   id: string;
   code: string;
@@ -346,6 +369,8 @@ type CheckoutDiscountRow = {
 };
 
 type OrderLifecycleRow = {
+  customer_email: string;
+  customer_name: string | null;
   status: z.infer<typeof orderStatusSchema>["status"];
   payment_status: PaymentStatus | null;
   payment_method: PaymentMethod | null;
@@ -370,6 +395,28 @@ type ProductInventoryRow = {
 type VariantInventoryRow = {
   inventory_count: number;
 };
+
+type StoreInvitationActionRow = {
+  id: string;
+  store_id: string;
+  email: string;
+  role: Exclude<StoreMembershipRole, "owner">;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  expires_at: string;
+};
+
+type StoreMemberActionRow = {
+  clerk_user_id: string;
+  role: StoreMembershipRole;
+};
+
+type AuditMetadata = Record<
+  string,
+  string | number | boolean | null | undefined
+>;
+
+type NotificationMetadata = AuditMetadata;
 
 type InventoryAdjustmentReason = z.infer<
   typeof inventoryAdjustmentSchema
@@ -422,6 +469,66 @@ function checkoutDisabledState(): ActionState {
     message:
       "Checkout needs SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY before it can create orders.",
   };
+}
+
+async function recordAuditEvent(input: {
+  db: ReturnType<typeof getSupabaseAdmin>;
+  storeId: string;
+  clerkUserId?: string | null;
+  action: AuditEventAction;
+  resourceType: string;
+  resourceId?: string | null;
+  summary: string;
+  metadata?: AuditMetadata;
+}) {
+  const { error } = await input.db.from("store_audit_events").insert({
+    store_id: input.storeId,
+    clerk_user_id: input.clerkUserId || null,
+    action: input.action,
+    resource_type: input.resourceType,
+    resource_id: input.resourceId || null,
+    summary: input.summary,
+    metadata: input.metadata || {},
+  });
+
+  if (error) {
+    console.warn(`Could not record audit event: ${error.message}`);
+  }
+}
+
+async function queueNotification(input: {
+  db: ReturnType<typeof getSupabaseAdmin>;
+  storeId: string;
+  type: NotificationType;
+  recipientEmail: string;
+  recipientName?: string | null;
+  subject: string;
+  preview: string;
+  resourceType: string;
+  resourceId?: string | null;
+  metadata?: NotificationMetadata;
+}) {
+  const recipientEmail = input.recipientEmail.trim().toLowerCase();
+
+  if (!recipientEmail) {
+    return;
+  }
+
+  const { error } = await input.db.from("store_notifications").insert({
+    store_id: input.storeId,
+    type: input.type,
+    recipient_email: recipientEmail,
+    recipient_name: optionalText(input.recipientName || undefined),
+    subject: input.subject,
+    preview: input.preview,
+    resource_type: input.resourceType,
+    resource_id: input.resourceId || null,
+    metadata: input.metadata || {},
+  });
+
+  if (error) {
+    console.warn(`Could not queue notification: ${error.message}`);
+  }
 }
 
 function formError(message: string, errors?: ActionState["errors"]): ActionState {
@@ -597,19 +704,6 @@ function parseProductVariantRows(input: {
   return { variants };
 }
 
-function normalizeShippingCountry(value: string) {
-  return value.trim().toLowerCase().replace(/[.]/g, "").replace(/\s+/g, " ");
-}
-
-function parseShippingCountries(value: string) {
-  const countries = value
-    .split(/[\n,]+/)
-    .map((country) => country.trim())
-    .filter(Boolean);
-
-  return [...new Set(countries)];
-}
-
 function getManualPaymentProvider(method: PaymentMethod) {
   if (method === "bank_transfer") {
     return "Bank transfer";
@@ -744,23 +838,6 @@ function getManualOrderItems(input: {
   return { items };
 }
 
-function getMatchingShippingZone(zones: ShippingZone[], country: string) {
-  const normalizedCountry = normalizeShippingCountry(country);
-
-  if (!normalizedCountry) {
-    return undefined;
-  }
-
-  return zones.find(
-    (zone) =>
-      zone.status === "active" &&
-      zone.countries.some(
-        (zoneCountry) =>
-          normalizeShippingCountry(zoneCountry) === normalizedCountry,
-      ),
-  );
-}
-
 function getVariantCatalogTotals(
   fallbackPriceCents: number,
   fallbackInventoryCount: number,
@@ -782,63 +859,6 @@ function getVariantCatalogTotals(
       0,
     ),
   };
-}
-
-function calculateDiscountCents(
-  discount: CheckoutDiscountRow,
-  subtotalCents: number,
-) {
-  if (discount.type === "percent") {
-    return Math.min(
-      subtotalCents,
-      Math.floor((subtotalCents * discount.value) / 100),
-    );
-  }
-
-  return Math.min(subtotalCents, discount.value);
-}
-
-function calculateShippingQuote(input: {
-  discountedSubtotalCents: number;
-  freeShippingThresholdCents: number;
-  shippingCountry: string;
-  shippingRateCents: number;
-  shippingZones: ShippingZone[];
-}) {
-  const zone = getMatchingShippingZone(input.shippingZones, input.shippingCountry);
-  const freeShippingThresholdCents =
-    zone?.freeShippingThresholdCents ?? input.freeShippingThresholdCents;
-  const shippingRateCents = zone?.rateCents ?? input.shippingRateCents;
-
-  if (input.discountedSubtotalCents <= 0) {
-    return {
-      shippingCents: 0,
-      zone,
-    };
-  }
-
-  if (
-    freeShippingThresholdCents > 0 &&
-    input.discountedSubtotalCents >= freeShippingThresholdCents
-  ) {
-    return {
-      shippingCents: 0,
-      zone,
-    };
-  }
-
-  return {
-    shippingCents: shippingRateCents,
-    zone,
-  };
-}
-
-function calculateTaxCents(discountedSubtotalCents: number, taxRateBps: number) {
-  if (discountedSubtotalCents <= 0 || taxRateBps <= 0) {
-    return 0;
-  }
-
-  return Math.round((discountedSubtotalCents * taxRateBps) / 10000);
 }
 
 async function getCheckoutDiscount(input: {
@@ -952,34 +972,21 @@ function readCartPayload(value: FormDataEntryValue | null) {
   }
 }
 
-function normalizeCartLines(
-  lines: Array<z.infer<typeof checkoutLineSchema>>,
+async function assertStorePermission(
+  userId: string,
+  storeId: string,
+  permission: StorePermission,
 ) {
-  const quantitiesByLine = new Map<
-    string,
-    { productId: string; variantId?: string; quantity: number }
-  >();
-
-  for (const line of lines) {
-    const variantId = optionalText(line.variantId);
-    const key = `${line.productId}:${variantId || ""}`;
-    const existing = quantitiesByLine.get(key);
-
-    quantitiesByLine.set(key, {
-      productId: line.productId,
-      variantId: variantId || undefined,
-      quantity: (existing?.quantity || 0) + line.quantity,
-    });
-  }
-
-  return [...quantitiesByLine.values()];
-}
-
-async function assertStoreAccess(userId: string, storeId: string) {
   const workspace = await getStoreWorkspace(userId, storeId);
 
   if (!workspace) {
     throw new Error("You do not have access to this store.");
+  }
+
+  if (!canStoreRole(workspace.membershipRole, permission)) {
+    throw new Error(
+      `You do not have permission to ${getStorePermissionLabel(permission)}.`,
+    );
   }
 
   return workspace;
@@ -1484,6 +1491,20 @@ export async function createStoreAction(
     return formError(membershipError.message);
   }
 
+  await recordAuditEvent({
+    db,
+    storeId: store.id,
+    clerkUserId: user.id,
+    action: "store_created",
+    resourceType: "store",
+    resourceId: store.id,
+    summary: `${user.email} created ${parsed.data.name}.`,
+    metadata: {
+      currency: parsed.data.currency.toUpperCase(),
+      status: "draft",
+    },
+  });
+
   revalidatePath("/dashboard");
   redirect(`/dashboard/stores/${store.id}`);
 }
@@ -1537,7 +1558,11 @@ export async function createProductAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
   const db = getSupabaseAdmin();
   const slug = await getAvailableProductSlug(storeId, parsed.data.name);
 
@@ -1581,6 +1606,22 @@ export async function createProductAction(
         return formError(variantError.message);
       }
     }
+
+    await recordAuditEvent({
+      db,
+      storeId,
+      clerkUserId: user.id,
+      action: "product_created",
+      resourceType: "product",
+      resourceId: product.id,
+      summary: `${user.email} created product ${parsed.data.name}.`,
+      metadata: {
+        status: parsed.data.status,
+        priceCents: catalogTotals.priceCents,
+        inventoryCount: catalogTotals.inventoryCount,
+        variantCount: parsedVariants.variants.length,
+      },
+    });
   } catch (error) {
     return formError(error instanceof Error ? error.message : "Could not save product.");
   }
@@ -1619,7 +1660,11 @@ export async function updateStoreAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
   const nextCurrency = parsed.data.currency.toUpperCase();
   const shippingRateCents = parseOptionalPriceCents(parsed.data.shippingRate);
   const freeShippingThresholdCents = parseOptionalPriceCents(
@@ -1679,6 +1724,23 @@ export async function updateStoreAction(
       return formError(productCurrencyError.message);
     }
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_updated",
+    resourceType: "store",
+    resourceId: storeId,
+    summary: `${user.email} updated store settings.`,
+    metadata: {
+      status: parsed.data.status,
+      currency: nextCurrency,
+      shippingRateCents,
+      freeShippingThresholdCents,
+      taxRateBps,
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
@@ -1740,7 +1802,11 @@ export async function updateProductAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
   const product = workspace.products.find((item) => item.id === productId);
 
   if (!product) {
@@ -1817,6 +1883,23 @@ export async function updateProductAction(
         return formError(adjustmentError.message);
       }
     }
+
+    await recordAuditEvent({
+      db,
+      storeId,
+      clerkUserId: user.id,
+      action: "product_updated",
+      resourceType: "product",
+      resourceId: productId,
+      summary: `${user.email} updated product ${parsed.data.name}.`,
+      metadata: {
+        previousStatus: product.status,
+        status: parsed.data.status,
+        priceCents: catalogTotals.priceCents,
+        inventoryCount: catalogTotals.inventoryCount,
+        variantCount: parsedVariants.variants.length,
+      },
+    });
   } catch (error) {
     return formError(error instanceof Error ? error.message : "Could not update product.");
   }
@@ -1854,7 +1937,11 @@ export async function adjustInventoryAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_inventory",
+  );
   const product = workspace.products.find((item) => item.id === productId);
 
   if (!product) {
@@ -1909,6 +1996,22 @@ export async function adjustInventoryAction(
 
     return formError(adjustmentError.message);
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "inventory_adjusted",
+    resourceType: "product",
+    resourceId: productId,
+    summary: `${user.email} adjusted ${product.name} inventory by ${parsed.data.delta}.`,
+    metadata: {
+      delta: parsed.data.delta,
+      reason: parsed.data.reason,
+      previousInventory: product.inventoryCount,
+      nextInventory,
+    },
+  });
 
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/products`);
@@ -1997,24 +2100,44 @@ export async function createDiscountAction(
     return demoDisabledState();
   }
 
-  await assertStoreAccess(user.id, storeId);
+  await assertStorePermission(user.id, storeId, "manage_discounts");
 
   const db = getSupabaseAdmin();
-  const { error } = await db.from("discount_codes").insert({
-    store_id: storeId,
-    code,
-    type: parsed.data.type,
-    value,
-    min_subtotal_cents: minSubtotalCents,
-    usage_limit: usageLimit,
-    status: parsed.data.status,
-    starts_at: startsAt,
-    ends_at: endsAt,
-  });
+  const { data: discount, error } = await db
+    .from("discount_codes")
+    .insert({
+      store_id: storeId,
+      code,
+      type: parsed.data.type,
+      value,
+      min_subtotal_cents: minSubtotalCents,
+      usage_limit: usageLimit,
+      status: parsed.data.status,
+      starts_at: startsAt,
+      ends_at: endsAt,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     return formError(error.message);
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "discount_created",
+    resourceType: "discount_code",
+    resourceId: discount.id,
+    summary: `${user.email} created discount ${code}.`,
+    metadata: {
+      code,
+      type: parsed.data.type,
+      value,
+      status: parsed.data.status,
+    },
+  });
 
   revalidatePath(`/dashboard/stores/${storeId}`);
 
@@ -2046,7 +2169,11 @@ export async function createCollectionAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
   const allowedProductIds = new Set(workspace.products.map((product) => product.id));
   const productIds = [...new Set(parsed.data.productIds)].filter((productId) =>
     allowedProductIds.has(productId),
@@ -2092,6 +2219,20 @@ export async function createCollectionAction(
     return formError(productsError.message);
   }
 
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "collection_created",
+    resourceType: "collection",
+    resourceId: collection.id,
+    summary: `${user.email} created collection ${parsed.data.title}.`,
+    metadata: {
+      status: parsed.data.status,
+      productCount: productIds.length,
+    },
+  });
+
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
   revalidatePath(`/stores/${workspace.store.slug}/collections/${slug}`);
@@ -2120,7 +2261,11 @@ export async function updateCollectionStatusAction(
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
   const collection = workspace.collections.find((item) => item.id === collectionId);
 
   if (!collection) {
@@ -2137,6 +2282,20 @@ export async function updateCollectionStatusAction(
   if (error) {
     throw error;
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "collection_status_updated",
+    resourceType: "collection",
+    resourceId: collectionId,
+    summary: `${user.email} changed collection ${collection.title} to ${parsed.data.status}.`,
+    metadata: {
+      previousStatus: collection.status,
+      status: parsed.data.status,
+    },
+  });
 
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
@@ -2195,20 +2354,44 @@ export async function createShippingZoneAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_shipping",
+  );
   const db = getSupabaseAdmin();
-  const { error } = await db.from("shipping_zones").insert({
-    store_id: storeId,
-    name: parsed.data.name,
-    countries,
-    rate_cents: rateCents,
-    free_shipping_threshold_cents: freeShippingThresholdCents,
-    status: parsed.data.status,
-  });
+  const { data: shippingZone, error } = await db
+    .from("shipping_zones")
+    .insert({
+      store_id: storeId,
+      name: parsed.data.name,
+      countries,
+      rate_cents: rateCents,
+      free_shipping_threshold_cents: freeShippingThresholdCents,
+      status: parsed.data.status,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     return formError(error.message);
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "shipping_zone_created",
+    resourceType: "shipping_zone",
+    resourceId: shippingZone.id,
+    summary: `${user.email} created shipping zone ${parsed.data.name}.`,
+    metadata: {
+      countryCount: countries.length,
+      rateCents,
+      freeShippingThresholdCents,
+      status: parsed.data.status,
+    },
+  });
 
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
@@ -2238,7 +2421,11 @@ export async function updateShippingZoneStatusAction(
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_shipping",
+  );
   const shippingZone = workspace.shippingZones.find(
     (zone) => zone.id === shippingZoneId,
   );
@@ -2257,6 +2444,20 @@ export async function updateShippingZoneStatusAction(
   if (error) {
     throw error;
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "shipping_zone_status_updated",
+    resourceType: "shipping_zone",
+    resourceId: shippingZoneId,
+    summary: `${user.email} changed shipping zone ${shippingZone.name} to ${parsed.data.status}.`,
+    metadata: {
+      previousStatus: shippingZone.status,
+      status: parsed.data.status,
+    },
+  });
 
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
@@ -2314,7 +2515,11 @@ export async function createManualOrderAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
   const lineResult = getManualOrderItems({
     formData,
     lineIds: parsed.data.lineIds,
@@ -2421,6 +2626,40 @@ export async function createManualOrderAction(
 
     return formError(itemError.message);
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "manual_order_created",
+    resourceType: "order",
+    resourceId: order.id,
+    summary: `${user.email} created manual order ${order.id.slice(0, 8)}.`,
+    metadata: {
+      customerEmail: parsed.data.customerEmail,
+      itemCount: orderItems.length,
+      totalCents,
+      paymentStatus: parsed.data.paymentStatus,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "manual_order_invoice",
+    recipientEmail: parsed.data.customerEmail,
+    recipientName: parsed.data.customerName,
+    subject: `${workspace.store.name} order ${order.id.slice(0, 8)}`,
+    preview: `Your manual order is ${parsed.data.paymentStatus}. Total ${(totalCents / 100).toFixed(2)} ${workspace.store.currency}.`,
+    resourceType: "order",
+    resourceId: order.id,
+    metadata: {
+      orderId: order.id,
+      paymentStatus: parsed.data.paymentStatus,
+      totalCents,
+      currency: workspace.store.currency,
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
@@ -2757,6 +2996,41 @@ export async function createCheckoutOrderAction(
     return formError(itemError.message);
   }
 
+  await recordAuditEvent({
+    db,
+    storeId: storefront.store.id,
+    clerkUserId: null,
+    action: "checkout_order_created",
+    resourceType: "order",
+    resourceId: order.id,
+    summary: `Storefront checkout created order ${order.id.slice(0, 8)}.`,
+    metadata: {
+      customerEmail: parsed.data.customerEmail,
+      itemCount: orderItems.length,
+      totalCents,
+      paymentMethod: parsed.data.paymentMethod,
+      discountCode: discount.code,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId: storefront.store.id,
+    type: "order_confirmation",
+    recipientEmail: parsed.data.customerEmail,
+    recipientName: parsed.data.customerName,
+    subject: `${storefront.store.name} order ${order.id.slice(0, 8)} received`,
+    preview: `Thanks for your order. Total ${(totalCents / 100).toFixed(2)} ${storefront.store.currency}.`,
+    resourceType: "order",
+    resourceId: order.id,
+    metadata: {
+      orderId: order.id,
+      paymentMethod: parsed.data.paymentMethod,
+      totalCents,
+      currency: storefront.store.currency,
+    },
+  });
+
   revalidatePath(`/stores/${storefront.store.slug}`);
   revalidatePath(`/stores/${storefront.store.slug}/checkout`);
   revalidatePath(`/dashboard/stores/${storefront.store.id}`);
@@ -2774,7 +3048,11 @@ export async function publishStoreAction(storeId: string) {
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
   const db = getSupabaseAdmin();
   const { error } = await db
     .from("stores")
@@ -2784,6 +3062,20 @@ export async function publishStoreAction(storeId: string) {
   if (error) {
     throw error;
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_published",
+    resourceType: "store",
+    resourceId: storeId,
+    summary: `${user.email} published ${workspace.store.name}.`,
+    metadata: {
+      previousStatus: workspace.store.status,
+      status: "active",
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
@@ -2797,7 +3089,11 @@ export async function pauseStoreAction(storeId: string) {
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_store_settings",
+  );
   const db = getSupabaseAdmin();
   const { error } = await db
     .from("stores")
@@ -2807,6 +3103,20 @@ export async function pauseStoreAction(storeId: string) {
   if (error) {
     throw error;
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "store_paused",
+    resourceType: "store",
+    resourceId: storeId,
+    summary: `${user.email} paused ${workspace.store.name}.`,
+    metadata: {
+      previousStatus: workspace.store.status,
+      status: "paused",
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
@@ -2831,7 +3141,11 @@ export async function updateOrderStatusAction(
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
   const db = getSupabaseAdmin();
   const { data: orderData, error: orderError } = await db
     .from("orders")
@@ -2926,6 +3240,22 @@ export async function updateOrderStatusAction(
     throw new Error("Order changed while status was being updated.");
   }
 
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "order_status_updated",
+    resourceType: "order",
+    resourceId: orderId,
+    summary: `${user.email} changed order ${orderId.slice(0, 8)} to ${parsed.data.status}.`,
+    metadata: {
+      previousStatus: order.status,
+      status: parsed.data.status,
+      paymentStatus: updatePayload.payment_status || order.payment_status,
+      restockedInventory: restockedItems.length > 0,
+    },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
@@ -2953,11 +3283,15 @@ export async function confirmOrderPaymentAction(
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
   const db = getSupabaseAdmin();
   const { data: orderData, error: orderError } = await db
     .from("orders")
-    .select("status, payment_status, paid_at, cancelled_at")
+    .select("customer_email, customer_name, status, payment_status, paid_at, cancelled_at")
     .eq("id", orderId)
     .eq("store_id", storeId)
     .maybeSingle();
@@ -2972,7 +3306,12 @@ export async function confirmOrderPaymentAction(
 
   const order = orderData as Pick<
     OrderLifecycleRow,
-    "status" | "payment_status" | "paid_at" | "cancelled_at"
+    | "customer_email"
+    | "customer_name"
+    | "status"
+    | "payment_status"
+    | "paid_at"
+    | "cancelled_at"
   >;
 
   if (order.status === "cancelled" || order.cancelled_at) {
@@ -3007,6 +3346,42 @@ export async function confirmOrderPaymentAction(
     throw new Error("Order changed while payment was being confirmed.");
   }
 
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "payment_confirmed",
+    resourceType: "order",
+    resourceId: orderId,
+    summary: `${user.email} confirmed payment for order ${orderId.slice(0, 8)}.`,
+    metadata: {
+      paymentMethod: parsed.data.paymentMethod,
+      paymentProvider:
+        optionalText(parsed.data.paymentProvider) ||
+        getManualPaymentProvider(parsed.data.paymentMethod),
+      nextStatus,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "payment_receipt",
+    recipientEmail: order.customer_email,
+    recipientName: order.customer_name,
+    subject: `${workspace.store.name} payment received`,
+    preview: `Payment was confirmed for order ${orderId.slice(0, 8)}.`,
+    resourceType: "order",
+    resourceId: orderId,
+    metadata: {
+      orderId,
+      paymentMethod: parsed.data.paymentMethod,
+      paymentProvider:
+        optionalText(parsed.data.paymentProvider) ||
+        getManualPaymentProvider(parsed.data.paymentMethod),
+    },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/orders`);
@@ -3036,12 +3411,16 @@ export async function updateOrderFulfillmentAction(
     return;
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_orders",
+  );
   const db = getSupabaseAdmin();
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "status, payment_status, payment_method, payment_provider, paid_at, fulfilled_at, cancelled_at",
+      "customer_email, customer_name, status, payment_status, payment_method, payment_provider, paid_at, fulfilled_at, cancelled_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -3057,6 +3436,8 @@ export async function updateOrderFulfillmentAction(
 
   const order = orderData as Pick<
     OrderLifecycleRow,
+    | "customer_email"
+    | "customer_name"
     | "status"
     | "payment_status"
     | "payment_method"
@@ -3125,6 +3506,42 @@ export async function updateOrderFulfillmentAction(
     throw new Error("Order changed while fulfillment was being updated.");
   }
 
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "fulfillment_updated",
+    resourceType: "order",
+    resourceId: orderId,
+    summary: `${user.email} updated fulfillment for order ${orderId.slice(0, 8)}.`,
+    metadata: {
+      previousStatus: order.status,
+      status: updatePayload.status || order.status,
+      markFulfilled: parsed.data.markFulfilled,
+      hasTrackingNumber: Boolean(optionalText(parsed.data.trackingNumber)),
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "fulfillment_update",
+    recipientEmail: order.customer_email,
+    recipientName: order.customer_name,
+    subject: `${workspace.store.name} fulfillment update`,
+    preview: parsed.data.markFulfilled
+      ? `Order ${orderId.slice(0, 8)} has been marked fulfilled.`
+      : `Tracking details were updated for order ${orderId.slice(0, 8)}.`,
+    resourceType: "order",
+    resourceId: orderId,
+    metadata: {
+      orderId,
+      markFulfilled: parsed.data.markFulfilled,
+      trackingCarrier: optionalText(parsed.data.trackingCarrier),
+      hasTrackingNumber: Boolean(optionalText(parsed.data.trackingNumber)),
+    },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
@@ -3161,7 +3578,11 @@ export async function createRefundAction(
     return demoDisabledState();
   }
 
-  const workspace = await assertStoreAccess(user.id, storeId);
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_refunds",
+  );
   const order = workspace.orders.find((item) => item.id === orderId);
 
   if (!order) {
@@ -3224,15 +3645,19 @@ export async function createRefundAction(
     inventoryMarkedRestocked = true;
   }
 
-  const { error } = await db.from("order_refunds").insert({
-    store_id: storeId,
-    order_id: orderId,
-    clerk_user_id: user.id,
-    amount_cents: amountCents,
-    reason: parsed.data.reason,
-    note: optionalText(parsed.data.note),
-    restocked_inventory: parsed.data.restockInventory,
-  });
+  const { data: refund, error } = await db
+    .from("order_refunds")
+    .insert({
+      store_id: storeId,
+      order_id: orderId,
+      clerk_user_id: user.id,
+      amount_cents: amountCents,
+      reason: parsed.data.reason,
+      note: optionalText(parsed.data.note),
+      restocked_inventory: parsed.data.restockInventory,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     if (parsed.data.restockInventory) {
@@ -3263,6 +3688,41 @@ export async function createRefundAction(
   if (paymentStatusError) {
     return formError(paymentStatusError.message);
   }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "refund_created",
+    resourceType: "order_refund",
+    resourceId: refund.id,
+    summary: `${user.email} recorded a refund for order ${orderId.slice(0, 8)}.`,
+    metadata: {
+      orderId,
+      amountCents,
+      reason: parsed.data.reason,
+      restockInventory: parsed.data.restockInventory,
+      paymentStatus: nextPaymentStatus,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "refund_confirmation",
+    recipientEmail: order.customerEmail,
+    recipientName: order.customerName,
+    subject: `${workspace.store.name} refund recorded`,
+    preview: `A refund of ${(amountCents / 100).toFixed(2)} ${order.currency} was recorded for order ${orderId.slice(0, 8)}.`,
+    resourceType: "order_refund",
+    resourceId: refund.id,
+    metadata: {
+      orderId,
+      amountCents,
+      reason: parsed.data.reason,
+      paymentStatus: nextPaymentStatus,
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/stores/${storeId}`);
@@ -3295,8 +3755,23 @@ export async function updateDiscountStatusAction(
     return;
   }
 
-  await assertStoreAccess(user.id, storeId);
+  await assertStorePermission(user.id, storeId, "manage_discounts");
   const db = getSupabaseAdmin();
+  const { data: discount, error: discountError } = await db
+    .from("discount_codes")
+    .select("code, status")
+    .eq("id", discountId)
+    .eq("store_id", storeId)
+    .maybeSingle();
+
+  if (discountError) {
+    throw discountError;
+  }
+
+  if (!discount) {
+    throw new Error("Discount not found.");
+  }
+
   const { error } = await db
     .from("discount_codes")
     .update({ status: parsed.data.status })
@@ -3307,5 +3782,453 @@ export async function updateDiscountStatusAction(
     throw error;
   }
 
+  const discountRow = discount as { code: string; status: string };
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "discount_status_updated",
+    resourceType: "discount_code",
+    resourceId: discountId,
+    summary: `${user.email} changed discount ${discountRow.code} to ${parsed.data.status}.`,
+    metadata: {
+      code: discountRow.code,
+      previousStatus: discountRow.status,
+      status: parsed.data.status,
+    },
+  });
+
   revalidatePath(`/dashboard/stores/${storeId}`);
+}
+
+export async function createStoreInvitationAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = teamInvitationSchema.safeParse({
+    email: formData.get("email"),
+    role: formData.get("role"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the team invitation.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(user.id, storeId, "manage_team");
+  const email = parsed.data.email.toLowerCase();
+
+  if (email === user.email.toLowerCase()) {
+    return formError("You are already the store owner.", {
+      email: ["Invite another team member."],
+    });
+  }
+
+  await upsertProfileForUser(user);
+
+  const db = getSupabaseAdmin();
+  const { data: profile, error: profileError } = await db
+    .from("profiles")
+    .select("clerk_user_id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (profileError) {
+    return formError(profileError.message);
+  }
+
+  if (profile) {
+    const { data: membership, error: membershipError } = await db
+      .from("store_memberships")
+      .select("clerk_user_id")
+      .eq("store_id", storeId)
+      .eq("clerk_user_id", (profile as { clerk_user_id: string }).clerk_user_id)
+      .maybeSingle();
+
+    if (membershipError) {
+      return formError(membershipError.message);
+    }
+
+    if (membership) {
+      return formError("This user is already on the store team.", {
+        email: ["Choose a different email."],
+      });
+    }
+  }
+
+  const { data: invitation, error: inviteLookupError } = await db
+    .from("store_invitations")
+    .select("id")
+    .eq("store_id", storeId)
+    .eq("email", email)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (inviteLookupError) {
+    return formError(inviteLookupError.message);
+  }
+
+  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  let invitationId: string;
+
+  if (invitation) {
+    invitationId = (invitation as { id: string }).id;
+    const { error } = await db
+      .from("store_invitations")
+      .update({
+        role: parsed.data.role,
+        invited_by_user_id: user.id,
+        expires_at: expiresAt,
+      })
+      .eq("id", invitationId)
+      .eq("store_id", storeId);
+
+    if (error) {
+      return formError(error.message);
+    }
+  } else {
+    const { data: createdInvitation, error } = await db
+      .from("store_invitations")
+      .insert({
+        store_id: storeId,
+        email,
+        role: parsed.data.role,
+        invited_by_user_id: user.id,
+        expires_at: expiresAt,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      return formError(error.message);
+    }
+
+    invitationId = createdInvitation.id;
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "team_invited",
+    resourceType: "store_invitation",
+    resourceId: invitationId,
+    summary: `${user.email} invited ${email} as ${parsed.data.role}.`,
+    metadata: {
+      email,
+      role: parsed.data.role,
+      expiresAt,
+    },
+  });
+
+  await queueNotification({
+    db,
+    storeId,
+    type: "team_invitation",
+    recipientEmail: email,
+    subject: `Invitation to join ${workspace.store.name}`,
+    preview: `${user.email} invited you to join ${workspace.store.name} as ${parsed.data.role}.`,
+    resourceType: "store_invitation",
+    resourceId: invitationId,
+    metadata: {
+      invitationId,
+      role: parsed.data.role,
+      invitedBy: user.email,
+      expiresAt,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+
+  return {
+    status: "success",
+    message: `Invitation ready for ${email}.`,
+  };
+}
+
+export async function revokeStoreInvitationAction(
+  storeId: string,
+  invitationId: string,
+) {
+  const user = await requireAppUser();
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  await assertStorePermission(user.id, storeId, "manage_team");
+
+  const db = getSupabaseAdmin();
+  const { data: invitation, error: invitationError } = await db
+    .from("store_invitations")
+    .select("email, role")
+    .eq("id", invitationId)
+    .eq("store_id", storeId)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (invitationError) {
+    throw invitationError;
+  }
+
+  if (!invitation) {
+    throw new Error("Invitation not found.");
+  }
+
+  const { error } = await db
+    .from("store_invitations")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("id", invitationId)
+    .eq("store_id", storeId)
+    .is("accepted_at", null)
+    .is("revoked_at", null);
+
+  if (error) {
+    throw error;
+  }
+
+  const invitationRow = invitation as { email: string; role: string };
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "team_invite_revoked",
+    resourceType: "store_invitation",
+    resourceId: invitationId,
+    summary: `${user.email} revoked the invitation for ${invitationRow.email}.`,
+    metadata: {
+      email: invitationRow.email,
+      role: invitationRow.role,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+}
+
+export async function updateStoreMemberRoleAction(
+  storeId: string,
+  memberUserId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = teamMemberRoleSchema.safeParse({
+    role: formData.get("role"),
+  });
+
+  if (!parsed.success) {
+    throw new Error("Choose a valid team role.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStorePermission(user.id, storeId, "manage_team");
+
+  if (memberUserId === workspace.store.ownerId) {
+    throw new Error("The store owner role cannot be changed.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: member, error: memberError } = await db
+    .from("store_memberships")
+    .select("clerk_user_id, role")
+    .eq("store_id", storeId)
+    .eq("clerk_user_id", memberUserId)
+    .maybeSingle();
+
+  if (memberError) {
+    throw memberError;
+  }
+
+  if (!member) {
+    throw new Error("Team member not found.");
+  }
+
+  if ((member as StoreMemberActionRow).role === "owner") {
+    throw new Error("The store owner role cannot be changed.");
+  }
+
+  const { error } = await db
+    .from("store_memberships")
+    .update({ role: parsed.data.role })
+    .eq("store_id", storeId)
+    .eq("clerk_user_id", memberUserId);
+
+  if (error) {
+    throw error;
+  }
+
+  const previousRole = (member as StoreMemberActionRow).role;
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "team_member_role_updated",
+    resourceType: "store_membership",
+    resourceId: memberUserId,
+    summary: `${user.email} changed a team member role to ${parsed.data.role}.`,
+    metadata: {
+      memberUserId,
+      previousRole,
+      role: parsed.data.role,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+}
+
+export async function removeStoreMemberAction(
+  storeId: string,
+  memberUserId: string,
+) {
+  const user = await requireAppUser();
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStorePermission(user.id, storeId, "manage_team");
+
+  if (memberUserId === workspace.store.ownerId || memberUserId === user.id) {
+    throw new Error("The store owner cannot be removed.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: member, error: memberError } = await db
+    .from("store_memberships")
+    .select("clerk_user_id, role")
+    .eq("store_id", storeId)
+    .eq("clerk_user_id", memberUserId)
+    .maybeSingle();
+
+  if (memberError) {
+    throw memberError;
+  }
+
+  if (!member) {
+    throw new Error("Team member not found.");
+  }
+
+  if ((member as StoreMemberActionRow).role === "owner") {
+    throw new Error("The store owner cannot be removed.");
+  }
+
+  const { error } = await db
+    .from("store_memberships")
+    .delete()
+    .eq("store_id", storeId)
+    .eq("clerk_user_id", memberUserId);
+
+  if (error) {
+    throw error;
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "team_member_removed",
+    resourceType: "store_membership",
+    resourceId: memberUserId,
+    summary: `${user.email} removed a team member from the store.`,
+    metadata: {
+      memberUserId,
+      role: (member as StoreMemberActionRow).role,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+}
+
+export async function acceptStoreInvitationAction(invitationId: string) {
+  const user = await requireAppUser();
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  await upsertProfileForUser(user);
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("store_invitations")
+    .select("id, store_id, email, role, accepted_at, revoked_at, expires_at")
+    .eq("id", invitationId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    throw new Error("Invitation not found.");
+  }
+
+  const invitation = data as StoreInvitationActionRow;
+
+  if (invitation.accepted_at || invitation.revoked_at) {
+    throw new Error("This invitation is no longer active.");
+  }
+
+  if (new Date(invitation.expires_at).getTime() < Date.now()) {
+    throw new Error("This invitation has expired.");
+  }
+
+  if (invitation.email.toLowerCase() !== user.email.toLowerCase()) {
+    throw new Error("This invitation belongs to another email address.");
+  }
+
+  const { error: membershipError } = await db.from("store_memberships").upsert(
+    {
+      store_id: invitation.store_id,
+      clerk_user_id: user.id,
+      role: invitation.role,
+    },
+    { onConflict: "store_id,clerk_user_id" },
+  );
+
+  if (membershipError) {
+    throw membershipError;
+  }
+
+  const { error: inviteUpdateError } = await db
+    .from("store_invitations")
+    .update({ accepted_at: new Date().toISOString() })
+    .eq("id", invitation.id)
+    .is("accepted_at", null)
+    .is("revoked_at", null);
+
+  if (inviteUpdateError) {
+    throw inviteUpdateError;
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId: invitation.store_id,
+    clerkUserId: user.id,
+    action: "team_invite_accepted",
+    resourceType: "store_membership",
+    resourceId: user.id,
+    summary: `${user.email} accepted a team invitation.`,
+    metadata: {
+      invitationId: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+    },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/stores/${invitation.store_id}`);
+  redirect(`/dashboard/stores/${invitation.store_id}`);
 }

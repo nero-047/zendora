@@ -16,6 +16,9 @@
     "smoke:deploy": "node scripts/smoke.mjs --require-readiness",
     "start": "next start",
     "start:eb": "next start -p ${PORT:-8080}",
+    "check:security": "node scripts/check-commerce-security.mjs",
+    "check:business": "node scripts/check-business-rules.mjs",
+    "test": "npm run check:security && npm run check:business",
     "lint": "eslint"
   },
   "engines": {

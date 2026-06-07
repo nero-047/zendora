@@ -39,6 +39,53 @@ create table if not exists public.store_memberships (
   unique (store_id, clerk_user_id)
 );
 
+create table if not exists public.store_invitations (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  email text not null,
+  role text not null default 'staff' check (role in ('admin', 'staff')),
+  invited_by_user_id text not null references public.profiles(clerk_user_id) on delete restrict,
+  accepted_at timestamptz,
+  revoked_at timestamptz,
+  expires_at timestamptz not null default (now() + interval '14 days'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists store_invitations_open_email_unique_idx
+on public.store_invitations(store_id, lower(email))
+where accepted_at is null and revoked_at is null;
+
+create table if not exists public.store_audit_events (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  clerk_user_id text references public.profiles(clerk_user_id) on delete set null,
+  action text not null,
+  resource_type text not null,
+  resource_id text,
+  summary text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.store_notifications (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.stores(id) on delete cascade,
+  type text not null,
+  status text not null default 'pending' check (status in ('pending', 'sent', 'failed', 'suppressed')),
+  recipient_email text not null,
+  recipient_name text,
+  subject text not null,
+  preview text not null,
+  resource_type text not null,
+  resource_id text,
+  metadata jsonb not null default '{}'::jsonb,
+  sent_at timestamptz,
+  failed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.shipping_zones (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on delete cascade,
@@ -291,6 +338,16 @@ create trigger stores_set_updated_at
 before update on public.stores
 for each row execute function public.set_updated_at();
 
+drop trigger if exists store_invitations_set_updated_at on public.store_invitations;
+create trigger store_invitations_set_updated_at
+before update on public.store_invitations
+for each row execute function public.set_updated_at();
+
+drop trigger if exists store_notifications_set_updated_at on public.store_notifications;
+create trigger store_notifications_set_updated_at
+before update on public.store_notifications
+for each row execute function public.set_updated_at();
+
 drop trigger if exists shipping_zones_set_updated_at on public.shipping_zones;
 create trigger shipping_zones_set_updated_at
 before update on public.shipping_zones
@@ -323,6 +380,21 @@ for each row execute function public.set_updated_at();
 
 create index if not exists stores_owner_id_idx on public.stores(owner_id);
 create index if not exists store_memberships_clerk_user_id_idx on public.store_memberships(clerk_user_id);
+create index if not exists store_invitations_store_id_created_at_idx
+on public.store_invitations(store_id, created_at desc);
+create index if not exists store_invitations_email_open_idx
+on public.store_invitations(lower(email))
+where accepted_at is null and revoked_at is null;
+create index if not exists store_audit_events_store_id_created_at_idx
+on public.store_audit_events(store_id, created_at desc);
+create index if not exists store_audit_events_clerk_user_id_idx
+on public.store_audit_events(clerk_user_id);
+create index if not exists store_notifications_store_id_created_at_idx
+on public.store_notifications(store_id, created_at desc);
+create index if not exists store_notifications_status_created_at_idx
+on public.store_notifications(status, created_at asc);
+create index if not exists store_notifications_recipient_email_idx
+on public.store_notifications(lower(recipient_email));
 create index if not exists shipping_zones_store_id_status_idx on public.shipping_zones(store_id, status);
 create index if not exists products_store_id_status_idx on public.products(store_id, status);
 create index if not exists products_store_id_category_idx on public.products(store_id, category);
@@ -360,6 +432,9 @@ on public.inventory_adjustments(product_variant_id, created_at desc);
 alter table public.profiles enable row level security;
 alter table public.stores enable row level security;
 alter table public.store_memberships enable row level security;
+alter table public.store_invitations enable row level security;
+alter table public.store_audit_events enable row level security;
+alter table public.store_notifications enable row level security;
 alter table public.shipping_zones enable row level security;
 alter table public.products enable row level security;
 alter table public.collections enable row level security;

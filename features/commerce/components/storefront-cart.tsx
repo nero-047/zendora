@@ -2,7 +2,15 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Minus, Plus, Search, ShoppingBag, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  Minus,
+  Plus,
+  Search,
+  ShoppingBag,
+  SlidersHorizontal,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useStoreCart } from "@/features/commerce/components/cart-store";
@@ -17,6 +25,8 @@ type StorefrontCartProps = {
 export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
+  const [availability, setAvailability] = useState("all");
+  const [sort, setSort] = useState("featured");
   const { cart, cartItems, updateQuantity } = useStoreCart(storeSlug, products);
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalCents = cartItems.reduce(
@@ -32,28 +42,82 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
           .map((product) => product.category)
           .filter((item): item is string => Boolean(item)),
       ),
-    ],
+    ].sort((a, b) => a.localeCompare(b)),
     [products],
   );
   const filteredProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return products.filter((product) => {
-      const matchesCategory =
-        category === "all" || product.category === category;
+    const filtered = products.filter((product) => {
+      const activeVariants = product.variants.filter(
+        (variant) => variant.status === "active",
+      );
+      const availableInventory =
+        activeVariants.length > 0
+          ? activeVariants.reduce(
+              (sum, variant) => sum + variant.inventoryCount,
+              0,
+            )
+          : product.inventoryCount;
+      const matchesCategory = category === "all" || product.category === category;
+      const matchesAvailability =
+        availability === "all" ||
+        (availability === "available" && availableInventory > 0) ||
+        (availability === "sold-out" && availableInventory === 0);
       const searchableText = [
         product.name,
         product.description,
         product.category,
         product.sku,
+        ...product.variants.map((variant) => variant.sku),
+        ...product.variants.map((variant) => variant.optionValue),
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
 
-      return matchesCategory && searchableText.includes(normalizedQuery);
+      return (
+        matchesCategory &&
+        matchesAvailability &&
+        searchableText.includes(normalizedQuery)
+      );
     });
-  }, [category, products, query]);
+
+    return [...filtered].sort((a, b) => {
+      if (sort === "price-asc") {
+        return a.priceCents - b.priceCents || a.name.localeCompare(b.name);
+      }
+
+      if (sort === "price-desc") {
+        return b.priceCents - a.priceCents || a.name.localeCompare(b.name);
+      }
+
+      if (sort === "name-asc") {
+        return a.name.localeCompare(b.name);
+      }
+
+      if (sort === "newest") {
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+          a.name.localeCompare(b.name)
+        );
+      }
+
+      return 0;
+    });
+  }, [availability, category, products, query, sort]);
+  const hasActiveFilters =
+    Boolean(query.trim()) ||
+    category !== "all" ||
+    availability !== "all" ||
+    sort !== "featured";
+
+  function clearFilters() {
+    setQuery("");
+    setCategory("all");
+    setAvailability("all");
+    setSort("featured");
+  }
 
   function addProduct(product: Product) {
     const activeVariants = product.variants.filter(
@@ -74,41 +138,86 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
   return (
     <section className="mx-auto grid max-w-7xl gap-6 px-4 pb-20 sm:px-6 lg:grid-cols-[1fr_360px] lg:px-8">
       <div className="grid gap-4">
-        <div className="soft-panel grid gap-3 p-4 md:grid-cols-[1fr_220px]">
-          <label className="relative">
-            <span className="sr-only">Search products</span>
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              size={18}
-            />
-            <input
-              className="field pl-10"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search products"
-              value={query}
-            />
-          </label>
+        <div className="soft-panel grid gap-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="status-pill">
+              <SlidersHorizontal aria-hidden="true" size={14} />
+              {filteredProducts.length} products
+            </span>
+            {hasActiveFilters ? (
+              <button
+                className="secondary-button min-h-10 px-3 text-sm"
+                onClick={clearFilters}
+                type="button"
+              >
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]">
+            <label className="relative">
+              <span className="sr-only">Search products</span>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                size={18}
+              />
+              <input
+                className="field pl-10"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search products"
+                value={query}
+              />
+            </label>
 
-          <label>
-            <span className="sr-only">Category</span>
-            <select
-              className="field"
-              onChange={(event) => setCategory(event.target.value)}
-              value={category}
-            >
-              <option value="all">All categories</option>
-              {categories.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label>
+              <span className="sr-only">Category</span>
+              <select
+                className="field"
+                onChange={(event) => setCategory(event.target.value)}
+                value={category}
+              >
+                <option value="all">All categories</option>
+                {categories.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span className="sr-only">Availability</span>
+              <select
+                className="field"
+                onChange={(event) => setAvailability(event.target.value)}
+                value={availability}
+              >
+                <option value="all">All stock</option>
+                <option value="available">In stock</option>
+                <option value="sold-out">Sold out</option>
+              </select>
+            </label>
+
+            <label>
+              <span className="sr-only">Sort products</span>
+              <select
+                className="field"
+                onChange={(event) => setSort(event.target.value)}
+                value={sort}
+              >
+                <option value="featured">Featured</option>
+                <option value="newest">Newest</option>
+                <option value="price-asc">Price low</option>
+                <option value="price-desc">Price high</option>
+                <option value="name-asc">Name A-Z</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filteredProducts.map((product) => {
+          {filteredProducts.map((product) => {
           const activeVariants = product.variants.filter(
             (variant) => variant.status === "active",
           );

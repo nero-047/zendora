@@ -16,6 +16,7 @@ import {
 import { isRevenueOrderStatus } from "@/features/commerce/order-status";
 import type {
   DashboardOverview,
+  AuditEventAction,
   ProductCollection,
   CollectionStatus,
   Discount,
@@ -26,6 +27,8 @@ import type {
   OrderRefund,
   OrderSource,
   OrderStatus,
+  NotificationStatus,
+  NotificationType,
   PaymentMethod,
   PaymentStatus,
   Product,
@@ -35,6 +38,11 @@ import type {
   RefundReason,
   ShippingZone,
   ShippingZoneStatus,
+  StoreAuditEvent,
+  StoreInvitation,
+  StoreMember,
+  StoreMembershipRole,
+  StoreNotification,
   InventoryAdjustment,
   InventoryAdjustmentReason,
   Store,
@@ -73,6 +81,60 @@ type ShippingZoneRow = {
   rate_cents: number | null;
   free_shipping_threshold_cents: number | null;
   status: ShippingZoneStatus;
+  created_at: string;
+};
+
+type StoreMembershipRow = {
+  store_id: string;
+  clerk_user_id: string;
+  role: StoreMembershipRole;
+  created_at: string;
+};
+
+type ProfileRow = {
+  clerk_user_id: string;
+  email: string;
+  name: string;
+};
+
+type StoreInvitationRow = {
+  id: string;
+  store_id: string;
+  email: string;
+  role: Exclude<StoreMembershipRole, "owner">;
+  invited_by_user_id: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  expires_at: string;
+  created_at: string;
+};
+
+type StoreAuditEventRow = {
+  id: string;
+  store_id: string;
+  clerk_user_id: string | null;
+  action: AuditEventAction;
+  resource_type: string;
+  resource_id: string | null;
+  summary: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type StoreNotificationRow = {
+  id: string;
+  store_id: string;
+  type: NotificationType;
+  status: NotificationStatus;
+  recipient_email: string;
+  recipient_name: string | null;
+  subject: string;
+  preview: string;
+  resource_type: string;
+  resource_id: string | null;
+  metadata: Record<string, unknown> | null;
+  sent_at: string | null;
+  failed_at: string | null;
   created_at: string;
 };
 
@@ -461,6 +523,53 @@ function mapShippingZone(row: ShippingZoneRow): ShippingZone {
   };
 }
 
+function mapStoreInvitation(row: StoreInvitationRow): StoreInvitation {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    email: row.email,
+    role: row.role,
+    invitedByUserId: row.invited_by_user_id,
+    acceptedAt: row.accepted_at || undefined,
+    revokedAt: row.revoked_at || undefined,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+  };
+}
+
+function mapStoreAuditEvent(row: StoreAuditEventRow): StoreAuditEvent {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    clerkUserId: row.clerk_user_id || undefined,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id || undefined,
+    summary: row.summary,
+    metadata: row.metadata || {},
+    createdAt: row.created_at,
+  };
+}
+
+function mapStoreNotification(row: StoreNotificationRow): StoreNotification {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    type: row.type,
+    status: row.status,
+    recipientEmail: row.recipient_email,
+    recipientName: row.recipient_name || undefined,
+    subject: row.subject,
+    preview: row.preview,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id || undefined,
+    metadata: row.metadata || {},
+    sentAt: row.sent_at || undefined,
+    failedAt: row.failed_at || undefined,
+    createdAt: row.created_at,
+  };
+}
+
 function byStoreId<T extends { storeId: string }>(items: T[]) {
   const grouped = new Map<string, T[]>();
 
@@ -826,6 +935,126 @@ async function loadInventoryAdjustments(storeIds: string[]) {
   );
 }
 
+async function loadStoreMembers(storeIds: string[]): Promise<StoreMember[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: membershipRows, error: membershipError } = await db
+    .from("store_memberships")
+    .select("store_id, clerk_user_id, role, created_at")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: true });
+
+  if (membershipError) {
+    throw membershipError;
+  }
+
+  const memberships = (membershipRows || []) as StoreMembershipRow[];
+  const userIds = [...new Set(memberships.map((row) => row.clerk_user_id))];
+
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const { data: profileRows, error: profileError } = await db
+    .from("profiles")
+    .select("clerk_user_id, email, name")
+    .in("clerk_user_id", userIds);
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  const profilesById = new Map(
+    ((profileRows || []) as ProfileRow[]).map((profile) => [
+      profile.clerk_user_id,
+      profile,
+    ]),
+  );
+
+  return memberships.map((membership) => {
+    const profile = profilesById.get(membership.clerk_user_id);
+
+    return {
+      storeId: membership.store_id,
+      userId: membership.clerk_user_id,
+      email: profile?.email || "Unknown email",
+      name: profile?.name || "Team member",
+      role: membership.role,
+      createdAt: membership.created_at,
+    };
+  });
+}
+
+async function loadStoreInvitations(
+  storeIds: string[],
+): Promise<StoreInvitation[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("store_invitations")
+    .select("*")
+    .in("store_id", storeIds)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as StoreInvitationRow[]).map(mapStoreInvitation);
+}
+
+async function loadStoreAuditEvents(
+  storeIds: string[],
+): Promise<StoreAuditEvent[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("store_audit_events")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false })
+    .limit(80);
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as StoreAuditEventRow[]).map(mapStoreAuditEvent);
+}
+
+async function loadStoreNotifications(
+  storeIds: string[],
+): Promise<StoreNotification[]> {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("store_notifications")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false })
+    .limit(80);
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as StoreNotificationRow[]).map(mapStoreNotification);
+}
+
 function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   const store = mockStores.find((item) => item.slug === slug);
 
@@ -835,6 +1064,10 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
 
   return {
     store,
+    members: [],
+    invitations: [],
+    auditEvents: [],
+    notifications: [],
     shippingZones: mockShippingZones.filter(
       (zone) => zone.storeId === store.id && zone.status === "active",
     ),
@@ -928,6 +1161,10 @@ async function loadPublicStorefrontFromClient(
 
   return {
     store: mapStore(row, products, []),
+    members: [],
+    invitations: [],
+    auditEvents: [],
+    notifications: [],
     shippingZones,
     products,
     collections,
@@ -1121,7 +1358,21 @@ export async function getStoreWorkspace(
     }
 
     return {
+      membershipRole: "owner",
       store: mapDemoStoreForUser(store, userId),
+      members: [
+        {
+          storeId: store.id,
+          userId,
+          email: "founder@zendora.dev",
+          name: "Store owner",
+          role: "owner",
+          createdAt: store.createdAt,
+        },
+      ],
+      invitations: [],
+      auditEvents: [],
+      notifications: [],
       shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
       products: mockProducts.filter((product) => product.storeId === store.id),
       collections: mockCollections.filter(
@@ -1170,6 +1421,9 @@ export async function getStoreWorkspace(
     return null;
   }
 
+  const membershipRole =
+    row.owner_id === userId ? "owner" : (membership as StoreMembershipRow).role;
+
   const [
     products,
     shippingZones,
@@ -1177,6 +1431,10 @@ export async function getStoreWorkspace(
     orders,
     discounts,
     inventoryAdjustments,
+    members,
+    invitations,
+    auditEvents,
+    notifications,
   ] =
     await Promise.all([
       loadProducts([storeId]),
@@ -1185,10 +1443,19 @@ export async function getStoreWorkspace(
       loadOrders([storeId]),
       loadDiscounts([storeId]),
       loadInventoryAdjustments([storeId]),
+      loadStoreMembers([storeId]),
+      loadStoreInvitations([storeId]),
+      loadStoreAuditEvents([storeId]),
+      loadStoreNotifications([storeId]),
     ]);
 
   return {
+    membershipRole,
     store: mapStore(row, products, orders),
+    members,
+    invitations,
+    auditEvents,
+    notifications,
     shippingZones,
     products,
     collections,

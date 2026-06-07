@@ -7,7 +7,7 @@ export default function NotFound() {
         <p className="text-sm font-semibold text-sky-700">404</p>
         <h1 className="mt-2 text-2xl font-semibold text-slate-950">Page not found</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          This route is not part of the current Zendora MVP surface.
+          This route is not available in the current Zendora workspace.
         </p>
         <Link className="primary-button mt-5 px-4" href="/">
           Go home

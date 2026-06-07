@@ -2,18 +2,23 @@ import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import {
+  Activity,
   ArrowUpRight,
+  BarChart3,
   CheckCircle,
   Edit3,
   ExternalLink,
   Layers3,
+  Mail,
   PackagePlus,
   PauseCircle,
   Percent,
   PlayCircle,
   ReceiptText,
+  ShieldCheck,
   ShoppingBag,
   Truck,
+  UserMinus,
   Users,
 } from "lucide-react";
 
@@ -22,6 +27,7 @@ import { CollectionForm } from "@/features/commerce/components/collection-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
 import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
 import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
+import { TeamInviteForm } from "@/features/commerce/components/team-invite-form";
 import {
   getCustomerStats,
   getCustomerSummaries,
@@ -34,11 +40,15 @@ import {
 import {
   pauseStoreAction,
   publishStoreAction,
+  removeStoreMemberAction,
+  revokeStoreInvitationAction,
   updateCollectionStatusAction,
   updateDiscountStatusAction,
   updateOrderStatusAction,
   updateShippingZoneStatusAction,
+  updateStoreMemberRoleAction,
 } from "@/features/commerce/actions";
+import { canStoreRole } from "@/features/commerce/permissions";
 import { formatCurrency } from "@/lib/utils";
 
 export default async function StorePage({
@@ -54,7 +64,20 @@ export default async function StorePage({
     notFound();
   }
 
-  const { store, products, collections, shippingZones, orders, discounts } = workspace;
+  const {
+    store,
+    products,
+    collections,
+    shippingZones,
+    orders,
+    discounts,
+    members,
+    invitations,
+    auditEvents,
+    notifications,
+    membershipRole,
+  } = workspace;
+  const canManageTeam = canStoreRole(membershipRole, "manage_team");
   const customers = getCustomerSummaries(orders, store.currency);
   const customerStats = getCustomerStats(customers);
 
@@ -80,6 +103,10 @@ export default async function StorePage({
             <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/customers`}>
               <Users aria-hidden="true" size={17} />
               Customers
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/analytics`}>
+              <BarChart3 aria-hidden="true" size={17} />
+              Analytics
             </Link>
             <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/orders`}>
               <ReceiptText aria-hidden="true" size={17} />
@@ -129,6 +156,133 @@ export default async function StorePage({
       </section>
 
       <StoreSettingsForm store={store} />
+
+      <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        {canManageTeam ? (
+          <TeamInviteForm storeId={store.id} />
+        ) : (
+          <div className="soft-panel p-5">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <ShieldCheck aria-hidden="true" size={18} />
+              Team access
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              The store owner controls team invitations and role changes.
+            </p>
+          </div>
+        )}
+
+        <div className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 p-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Users aria-hidden="true" size={18} />
+              Team
+            </h2>
+          </div>
+
+          {members.length > 0 ? (
+            members.map((member) => {
+              const isOwner = member.role === "owner";
+
+              return (
+                <div
+                  className="border-b border-slate-100 p-4 last:border-0"
+                  key={member.userId}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-violet-500/10 text-violet-700">
+                      <ShieldCheck aria-hidden="true" size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-slate-950">{member.name}</p>
+                        <span className="status-pill">{member.role}</span>
+                      </div>
+                      <p className="mt-1 truncate text-sm text-slate-500">
+                        {member.email}
+                      </p>
+                    </div>
+                  </div>
+
+                  {canManageTeam && !isOwner ? (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                      <form
+                        action={updateStoreMemberRoleAction.bind(
+                          null,
+                          store.id,
+                          member.userId,
+                        )}
+                        className="grid gap-2 sm:grid-cols-[1fr_auto]"
+                      >
+                        <select
+                          aria-label={`Role for ${member.name}`}
+                          className="field min-h-10 py-2 text-sm"
+                          defaultValue={member.role}
+                          name="role"
+                        >
+                          <option value="staff">Staff</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                          <CheckCircle aria-hidden="true" size={16} />
+                          Update
+                        </button>
+                      </form>
+                      <form action={removeStoreMemberAction.bind(null, store.id, member.userId)}>
+                        <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                          <UserMinus aria-hidden="true" size={16} />
+                          Remove
+                        </button>
+                      </form>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <p className="p-4 text-sm text-slate-500">No team members yet.</p>
+          )}
+
+          {invitations.length > 0 ? (
+            <div className="border-t border-slate-100">
+              <div className="px-4 pt-4 text-xs font-bold uppercase text-slate-400">
+                Pending invitations
+              </div>
+              {invitations.map((invitation) => (
+                <div
+                  className="border-b border-slate-100 p-4 last:border-0"
+                  key={invitation.id}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-950">
+                        {invitation.email}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {invitation.role} / expires{" "}
+                        {new Date(invitation.expiresAt).toLocaleDateString("en-US")}
+                      </p>
+                    </div>
+                    {canManageTeam ? (
+                      <form
+                        action={revokeStoreInvitationAction.bind(
+                          null,
+                          store.id,
+                          invitation.id,
+                        )}
+                      >
+                        <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                          Revoke
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <ShippingZoneForm storeId={store.id} />
@@ -474,6 +628,90 @@ export default async function StorePage({
             )}
           </div>
         </div>
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <Mail aria-hidden="true" size={18} />
+            Notification outbox
+          </h2>
+        </div>
+        {notifications.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {notifications.slice(0, 10).map((notification) => (
+              <div
+                className="grid gap-3 p-4 md:grid-cols-[1fr_auto]"
+                key={notification.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-slate-950">
+                      {notification.subject}
+                    </p>
+                    <span className="status-pill">{notification.status}</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                    {notification.recipientEmail} /{" "}
+                    {notification.type.replaceAll("_", " ")}
+                  </p>
+                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+                    {notification.preview}
+                  </p>
+                </div>
+                <time
+                  className="text-xs font-semibold text-slate-500 md:text-right"
+                  dateTime={notification.createdAt}
+                >
+                  {new Date(notification.createdAt).toLocaleString("en-US", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                </time>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">No notifications queued yet.</p>
+        )}
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+            <Activity aria-hidden="true" size={18} />
+            Activity log
+          </h2>
+        </div>
+        {auditEvents.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {auditEvents.slice(0, 10).map((event) => (
+              <div className="grid gap-2 p-4 sm:grid-cols-[1fr_auto]" key={event.id}>
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {event.summary}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    {event.action.replaceAll("_", " ")} / {event.resourceType}
+                  </p>
+                </div>
+                <time
+                  className="text-xs font-semibold text-slate-500 sm:text-right"
+                  dateTime={event.createdAt}
+                >
+                  {new Date(event.createdAt).toLocaleString("en-US", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                </time>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            Store activity will appear here as your team makes changes.
+          </p>
+        )}
       </section>
 
       <Link className="secondary-button w-fit px-4 text-sm" href="/dashboard">

@@ -22,8 +22,8 @@ const productImages = [
 const architectureCards = [
   {
     icon: Layers3,
-    title: "Merchant-first scope",
-    copy: "The first loop mirrors early Shopify: store, products, checkout surface, orders.",
+    title: "Merchant workspace",
+    copy: "Manage stores, products, collections, checkout, customers, orders, and fulfillment from one place.",
   },
   {
     icon: LockKeyhole,
@@ -37,15 +37,15 @@ const architectureCards = [
   },
   {
     icon: Workflow,
-    title: "Modular architecture",
-    copy: "Commerce, dashboard, auth, and infrastructure live behind clear module boundaries.",
+    title: "Operations-ready flow",
+    copy: "Inventory, discounts, shipping zones, refunds, manual orders, and payment status stay connected.",
   },
 ];
 
 const proofCards = [
   { icon: Boxes, label: "Multi-store per account" },
   { icon: ImageIcon, label: "Product image storage" },
-  { icon: CheckCircle2, label: "75% production-ready foundation" },
+  { icon: CheckCircle2, label: "Role-gated commerce ops" },
 ];
 
 export default function Home() {
@@ -74,18 +74,18 @@ export default function Home() {
         <div className="max-w-2xl">
           <span className="status-pill mb-5">
             <WandSparkles aria-hidden="true" size={14} />
-            Multi-store commerce MVP
+            Multi-store commerce platform
           </span>
           <h1 className="text-5xl font-semibold leading-[1.04] text-slate-950 sm:text-6xl lg:text-7xl">
             Zendora
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
             A Shopify-style founder dashboard with Clerk auth, Supabase database and storage,
-            multi-store management, product publishing, and a recruiter-friendly system arc.
+            multi-store management, product publishing, checkout, orders, and inventory control.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link className="primary-button px-5" href="/dashboard">
-              Open MVP
+              Open dashboard
               <ArrowRight aria-hidden="true" size={18} />
             </Link>
             <Link className="secondary-button px-5" href="/dashboard/stores/new">

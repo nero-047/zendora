@@ -103,6 +103,10 @@ export async function GET() {
       const [
         { error: storeColumnError },
         { error: shippingZoneColumnError },
+        { error: storeMembershipColumnError },
+        { error: storeInvitationColumnError },
+        { error: storeAuditEventColumnError },
+        { error: storeNotificationColumnError },
         { error: productColumnError },
         { error: collectionColumnError },
         { error: collectionProductColumnError },
@@ -123,6 +127,30 @@ export async function GET() {
           .from("shipping_zones")
           .select(
             "id, store_id, name, countries, rate_cents, free_shipping_threshold_cents, status",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("store_memberships")
+          .select("id, store_id, clerk_user_id, role, created_at", {
+            count: "exact",
+            head: true,
+          }),
+        supabase
+          .from("store_invitations")
+          .select(
+            "id, store_id, email, role, invited_by_user_id, accepted_at, revoked_at, expires_at, created_at",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("store_audit_events")
+          .select(
+            "id, store_id, clerk_user_id, action, resource_type, resource_id, summary, metadata, created_at",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("store_notifications")
+          .select(
+            "id, store_id, type, status, recipient_email, recipient_name, subject, preview, resource_type, resource_id, metadata, sent_at, failed_at, created_at",
             { count: "exact", head: true },
           ),
         supabase
@@ -177,6 +205,10 @@ export async function GET() {
       const error =
         storeColumnError ||
         shippingZoneColumnError ||
+        storeMembershipColumnError ||
+        storeInvitationColumnError ||
+        storeAuditEventColumnError ||
+        storeNotificationColumnError ||
         productColumnError ||
         collectionColumnError ||
         collectionProductColumnError ||
@@ -191,8 +223,8 @@ export async function GET() {
         name: "supabase_schema_columns",
         ok: !error,
         detail: error
-          ? `Supabase schema is missing MVP columns: ${error.message}`
-          : "Supabase store, catalog, collections, variants, refunds, inventory audit, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
+          ? `Supabase schema is missing commerce columns: ${error.message}`
+          : "Supabase store, team, audit, notification, catalog, collections, variants, refunds, inventory audit, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
       });
     } catch (error) {
       checks.push({
