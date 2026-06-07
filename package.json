@@ -19,6 +19,8 @@
     "check:security": "node scripts/check-commerce-security.mjs",
     "check:business": "node scripts/check-business-rules.mjs",
     "test": "npm run check:security && npm run check:business",
+    "typecheck": "tsc --noEmit",
+    "verify:local": "node scripts/verify-local.mjs",
     "lint": "eslint"
   },
   "engines": {

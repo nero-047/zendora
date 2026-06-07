@@ -55,9 +55,27 @@ are in [docs/deployment/aws-elastic-beanstalk.md](docs/deployment/aws-elastic-be
 
 ## Verification
 
+Run the full local production verification before treating a code-only change as
+stable:
+
 ```bash
+npm run verify:local
+```
+
+This checks diff hygiene, type checking, linting, security and business-rule
+tests, and a production build, then starts `next start` with demo/no-provider
+overrides and runs the smoke suite against it. It does not edit or require live
+credentials.
+
+The GitHub Actions CI workflow runs the same `npm run verify:local` command on
+pushes and pull requests.
+
+For smaller checks:
+
+```bash
+npm run typecheck
 npm run lint
+npm test
 npm run build
-npm audit --audit-level=moderate
 npm run smoke
 ```

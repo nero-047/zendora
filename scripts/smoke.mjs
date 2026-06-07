@@ -109,6 +109,26 @@ async function run() {
     checks.push(check.label);
   }
 
+  async function checkNotFoundRoute(check) {
+    const result = await request(check.path);
+    const visibleBody =
+      typeof result.body === "string" ? getAssertableHtml(result.body) : "";
+
+    assert(
+      result.response.status === 404,
+      `${check.path} should return 404. Status: ${result.response.status}`,
+    );
+
+    for (const excludedText of check.excludes || []) {
+      assert(
+        !visibleBody.includes(excludedText),
+        `${check.path} rendered private text despite 404: ${excludedText}`,
+      );
+    }
+
+    checks.push(check.label);
+  }
+
   async function checkProtectedDashboardRoute(check) {
     const result = await request(check.path);
 
@@ -330,6 +350,12 @@ async function run() {
   for (const check of storefrontChecks) {
     await checkHtmlRoute(check);
   }
+
+  await checkNotFoundRoute({
+    label: "invalid order token",
+    path: "/stores/northline-supply/orders/demo-order-1001?token=invalid-token",
+    excludes: ["Order received", "Payment summary", "Request return"],
+  });
 
   await checkAbandonedCheckoutApi();
 
