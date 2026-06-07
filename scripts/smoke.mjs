@@ -433,6 +433,7 @@ async function run() {
         "Activity center",
         "Activity workspace",
         "Operations queue",
+        "Export CSV",
         "Recovery workspace",
         "Save collection",
         "Save zone",
@@ -518,6 +519,7 @@ async function run() {
         "Hydra Bottle",
         "Catalog health",
         "Inventory history",
+        "Export CSV",
         "Save product",
       ],
     },
@@ -552,6 +554,7 @@ async function run() {
         "Timeline",
         "Invoice",
         "Packing slip",
+        "Export CSV",
       ],
     },
     {
@@ -612,6 +615,7 @@ async function run() {
         "Order history",
         "Customer profile",
         "Save profile",
+        "Export CSV",
         "Merchant note",
         "Prefers low-waste packaging",
         "Shipping",
@@ -625,6 +629,16 @@ async function run() {
   }
 
   const dashboardCsvChecks = [
+    {
+      label: "admin store operations csv export",
+      path: "/dashboard/stores/demo-store-outdoor/export",
+      includes: [
+        "section,metric,label,value,status,detail,href",
+        "summary,launch_readiness,Launch readiness",
+        "launch_readiness,identity,Store identity",
+        "operations_queue",
+      ],
+    },
     {
       label: "admin analytics csv export",
       path: "/dashboard/stores/demo-store-outdoor/analytics/export",
@@ -665,12 +679,32 @@ async function run() {
       ],
     },
     {
+      label: "admin order detail csv export",
+      path: "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001/export",
+      includes: [
+        "section,metric,label,value,status,detail,href",
+        "summary,order_id,Order ID,demo-order-1001",
+        "line_item,demo-order-item-1001-1,Trail Watch",
+        "product_review,demo-review-1001-watch",
+      ],
+    },
+    {
       label: "admin products csv export",
       path: "/dashboard/stores/demo-store-outdoor/products/export?q=bottle&sort=inventory_asc",
       includes: [
         "product_id,name,slug",
         "demo-product-hydra-bottle",
         "Hydra Bottle",
+      ],
+    },
+    {
+      label: "admin product detail csv export",
+      path: "/dashboard/stores/demo-store-outdoor/products/demo-product-hydra-bottle/export",
+      includes: [
+        "section,metric,label,value,status,detail,href",
+        "summary,product_id,Product ID,demo-product-hydra-bottle",
+        "summary,name,Name,Hydra Bottle",
+        "variant,demo-variant-hydra-bottle-steel",
       ],
     },
     {
@@ -687,6 +721,16 @@ async function run() {
       label: "admin customers csv export",
       path: "/dashboard/stores/demo-store-outdoor/customers/export?segment=vip&sort=risk_priority",
       includes: ["email,name,phone", "mira@example.com", "Mira Chen"],
+    },
+    {
+      label: "admin customer detail csv export",
+      path: "/dashboard/stores/demo-store-outdoor/customers/mira%40example.com/export",
+      includes: [
+        "section,metric,label,value,detail,href",
+        "profile,email,Email,mira@example.com",
+        "segment,primary_segment,Primary segment",
+        "order_history,demo-order-1001",
+      ],
     },
   ];
 

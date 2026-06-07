@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   CircleDollarSign,
+  Download,
   Mail,
   Megaphone,
   MapPin,
@@ -56,6 +57,9 @@ export default async function CustomerDetailPage({
 
   const segmentation = getCustomerSegmentation(customer);
   const shipping = customer.latestShippingAddress;
+  const customerExportHref = `/dashboard/stores/${store.id}/customers/${encodeURIComponent(
+    customer.email,
+  )}/export`;
   const firstSeenAt =
     customer.firstOrderAt || customer.profileCreatedAt || customer.lastOrderAt;
   const metricCards = [
@@ -102,6 +106,10 @@ export default async function CustomerDetailPage({
         <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}`}>
           <ShoppingBag aria-hidden="true" size={16} />
           {store.name}
+        </Link>
+        <Link className="secondary-button px-4 text-sm" href={customerExportHref}>
+          <Download aria-hidden="true" size={16} />
+          Export CSV
         </Link>
       </div>
 

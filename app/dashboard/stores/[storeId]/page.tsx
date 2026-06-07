@@ -7,6 +7,7 @@ import {
   BarChart3,
   Boxes,
   CheckCircle,
+  Download,
   Edit3,
   ExternalLink,
   Gift,
@@ -141,6 +142,7 @@ export default async function StorePage({
   ).length;
   const launchReadiness = getStoreLaunchReadiness(workspace);
   const operationalInsights = getStoreOperationalInsights(workspace);
+  const operationsExportHref = `/dashboard/stores/${store.id}/export`;
 
   return (
     <div className="grid gap-5">
@@ -157,6 +159,10 @@ export default async function StorePage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link className="secondary-button px-4 text-sm" href={operationsExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Export CSV
+            </Link>
             <Link className="secondary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ExternalLink aria-hidden="true" size={17} />
               View

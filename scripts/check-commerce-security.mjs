@@ -456,9 +456,13 @@ const expectedSmokeRoutes = [
   "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
   "/stores/northline-supply/pages/about",
   "/stores/northline-supply/policies/refund",
+  "/dashboard/stores/demo-store-outdoor/export",
   "/dashboard/stores/demo-store-outdoor/analytics/export",
   "/dashboard/stores/demo-store-outdoor/activity/export?priority=critical&q=tracking",
   "/dashboard/stores/demo-store-outdoor/checkouts/export?q=bottle&status=open",
+  "/dashboard/stores/demo-store-outdoor/products/demo-product-hydra-bottle/export",
+  "/dashboard/stores/demo-store-outdoor/orders/demo-order-1001/export",
+  "/dashboard/stores/demo-store-outdoor/customers/mira%40example.com/export",
   "/dashboard/stores/missing-store",
 ];
 

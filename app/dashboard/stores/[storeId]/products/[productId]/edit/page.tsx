@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Boxes, Package, ShieldCheck, TriangleAlert } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  Download,
+  Package,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { EditProductForm } from "@/features/commerce/components/edit-product-form";
@@ -49,13 +56,22 @@ export default async function EditProductPage({
 
   return (
     <div className="grid gap-5">
-      <Link
-        className="secondary-button w-fit px-4 text-sm"
-        href={`/dashboard/stores/${workspace.store.id}/products`}
-      >
-        <ArrowLeft aria-hidden="true" size={16} />
-        Products
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          className="secondary-button w-fit px-4 text-sm"
+          href={`/dashboard/stores/${workspace.store.id}/products`}
+        >
+          <ArrowLeft aria-hidden="true" size={16} />
+          Products
+        </Link>
+        <Link
+          className="secondary-button px-4 text-sm"
+          href={`/dashboard/stores/${workspace.store.id}/products/${product.id}/export`}
+        >
+          <Download aria-hidden="true" size={16} />
+          Export CSV
+        </Link>
+      </div>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <EditProductForm product={product} storeId={workspace.store.id} />

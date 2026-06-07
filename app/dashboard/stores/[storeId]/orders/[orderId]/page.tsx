@@ -6,6 +6,7 @@ import {
   BanknoteArrowDown,
   CheckCircle,
   CreditCard,
+  Download,
   ExternalLink,
   FileText,
   Mail,
@@ -160,6 +161,13 @@ export default async function OrderDetailPage({
           >
             <PackageCheck aria-hidden="true" size={16} />
             Packing slip
+          </Link>
+          <Link
+            className="secondary-button px-4 text-sm"
+            href={`/dashboard/stores/${workspace.store.id}/orders/${order.id}/export`}
+          >
+            <Download aria-hidden="true" size={16} />
+            Export CSV
           </Link>
         </div>
 
