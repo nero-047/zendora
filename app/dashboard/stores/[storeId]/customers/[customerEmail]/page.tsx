@@ -4,11 +4,14 @@ import {
   ArrowLeft,
   CircleDollarSign,
   Mail,
+  Megaphone,
   MapPin,
   Phone,
   ReceiptText,
+  Repeat,
   Tags,
   ShoppingBag,
+  TriangleAlert,
   UserRound,
 } from "lucide-react";
 
@@ -16,7 +19,7 @@ import { requireAppUser } from "@/features/auth/app-user";
 import { CustomerProfileForm } from "@/features/commerce/components/customer-profile-form";
 import {
   getCustomerByEmail,
-  getCustomerStats,
+  getCustomerSegmentation,
   getCustomerSummaries,
 } from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
@@ -51,7 +54,7 @@ export default async function CustomerDetailPage({
     notFound();
   }
 
-  const stats = getCustomerStats([customer]);
+  const segmentation = getCustomerSegmentation(customer);
   const shipping = customer.latestShippingAddress;
   const firstSeenAt =
     customer.firstOrderAt || customer.profileCreatedAt || customer.lastOrderAt;
@@ -67,9 +70,17 @@ export default async function CustomerDetailPage({
       value: formatCurrency(customer.totalSpentCents, customer.currency),
     },
     {
+      icon: Repeat,
+      label: "Segment",
+      value: segmentation.label,
+    },
+    {
       icon: ShoppingBag,
-      label: "Paid orders",
-      value: String(stats.paidOrders),
+      label: "Avg order",
+      value: formatCurrency(
+        segmentation.averageOrderValueCents,
+        customer.currency,
+      ),
     },
     {
       icon: UserRound,
@@ -217,6 +228,68 @@ export default async function CustomerDetailPage({
         </div>
 
         <div className="grid gap-5">
+          <section className="soft-panel p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-slate-950">
+                Customer segment
+              </h2>
+              {segmentation.primarySegment === "at_risk" ||
+              segmentation.primarySegment === "refund_watch" ? (
+                <TriangleAlert aria-hidden="true" className="text-amber-700" size={18} />
+              ) : (
+                <Megaphone aria-hidden="true" className="text-sky-700" size={18} />
+              )}
+            </div>
+            <p className="mt-4 text-2xl font-semibold text-slate-950">
+              {segmentation.label}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {segmentation.nextAction}
+            </p>
+            <div className="mt-4 grid gap-2 text-sm text-slate-600">
+              <div className="flex items-center justify-between gap-3">
+                <span>Average order value</span>
+                <span className="font-semibold text-slate-950">
+                  {formatCurrency(
+                    segmentation.averageOrderValueCents,
+                    customer.currency,
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Refund rate</span>
+                <span className="font-semibold text-slate-950">
+                  {segmentation.refundRate}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Last order age</span>
+                <span className="font-semibold text-slate-950">
+                  {typeof segmentation.daysSinceLastOrder === "number"
+                    ? `${segmentation.daysSinceLastOrder} days`
+                    : "No orders"}
+                </span>
+              </div>
+            </div>
+            {segmentation.signals.length > 0 ? (
+              <div className="mt-4 grid gap-2">
+                {segmentation.signals.map((signal) => (
+                  <div
+                    className="rounded-[8px] border border-slate-100 bg-white/70 p-3"
+                    key={signal.id}
+                  >
+                    <p className="text-sm font-semibold text-slate-950">
+                      {signal.label}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {signal.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
           <section className="soft-panel p-4">
             <CustomerProfileForm customer={customer} storeId={store.id} />
           </section>

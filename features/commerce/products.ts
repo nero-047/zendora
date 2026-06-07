@@ -1,3 +1,9 @@
+import {
+  defaultProductLowStockThreshold,
+  getProductHealth,
+  getProductSellableInventoryCount,
+  productHealthStatusLabels,
+} from "@/features/commerce/product-health";
 import type { Product, ProductStatus } from "@/features/commerce/types";
 
 export const productStatusFilters = [
@@ -9,7 +15,7 @@ export const productStatusFilters = [
 
 export type ProductStatusFilter = (typeof productStatusFilters)[number];
 
-export const lowStockThreshold = 12;
+export const lowStockThreshold = defaultProductLowStockThreshold;
 
 export const productStatusLabels: Record<ProductStatus, string> = {
   draft: "Draft",
@@ -50,8 +56,15 @@ export function getProductCategories(products: Product[]) {
 
 export function getProductStats(products: Product[]) {
   const activeProducts = products.filter((product) => product.status === "active");
-  const lowStockProducts = products.filter(
-    (product) => product.inventoryCount <= lowStockThreshold,
+  const healthByProduct = products.map((product) => ({
+    product,
+    health: getProductHealth(product),
+  }));
+  const lowStockProducts = healthByProduct.filter(({ health }) =>
+    health.issues.some((issue) => issue.id === "low_stock"),
+  );
+  const outOfStockProducts = healthByProduct.filter(({ health }) =>
+    health.issues.some((issue) => issue.id === "out_of_stock"),
   );
   const inventoryValueCents = products.reduce((sum, product) => {
     const activeVariants = product.variants.filter(
@@ -75,13 +88,24 @@ export function getProductStats(products: Product[]) {
   return {
     totalProducts: products.length,
     activeProducts: activeProducts.length,
+    readyProducts: healthByProduct.filter(
+      ({ health }) => health.status === "ready",
+    ).length,
+    needsAttentionProducts: healthByProduct.filter(
+      ({ health }) => health.status === "needs_attention",
+    ).length,
     draftProducts: products.filter((product) => product.status === "draft")
       .length,
     archivedProducts: products.filter((product) => product.status === "archived")
       .length,
     lowStockProducts: lowStockProducts.length,
+    outOfStockProducts: outOfStockProducts.length,
     totalInventory: products.reduce(
       (sum, product) => sum + product.inventoryCount,
+      0,
+    ),
+    sellableInventory: products.reduce(
+      (sum, product) => sum + getProductSellableInventoryCount(product),
       0,
     ),
     inventoryValueCents,
@@ -89,6 +113,8 @@ export function getProductStats(products: Product[]) {
 }
 
 function getProductSearchText(product: Product) {
+  const health = getProductHealth(product);
+
   return [
     product.name,
     product.slug,
@@ -96,6 +122,9 @@ function getProductSearchText(product: Product) {
     product.category,
     product.description,
     product.status,
+    health.label,
+    productHealthStatusLabels[health.status],
+    ...health.issues.flatMap((issue) => [issue.label, issue.detail]),
     ...product.variants.flatMap((variant) => [
       variant.optionName,
       variant.optionValue,

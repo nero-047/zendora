@@ -88,6 +88,8 @@ const storePages = loadTsModule("features/commerce/store-pages.ts");
 const seo = loadTsModule("features/commerce/seo.ts");
 const payments = loadTsModule("features/commerce/payments.ts");
 const orderInsights = loadTsModule("features/commerce/order-insights.ts");
+const productHealth = loadTsModule("features/commerce/product-health.ts");
+const inventoryPlanning = loadTsModule("features/commerce/inventory-planning.ts");
 const returns = loadTsModule("features/commerce/returns.ts");
 const reviews = loadTsModule("features/commerce/reviews.ts");
 const giftCards = loadTsModule("features/commerce/gift-cards.ts");
@@ -97,6 +99,7 @@ const navigation = loadTsModule("features/commerce/navigation.ts");
 const cartPermalinks = loadTsModule("features/commerce/cart-permalinks.ts");
 const catalogFilters = loadTsModule("features/commerce/catalog-filters.ts");
 const launchReadiness = loadTsModule("features/commerce/launch-readiness.ts");
+const storeInsights = loadTsModule("features/commerce/store-insights.ts");
 const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
@@ -106,6 +109,271 @@ const runtimeEnv = loadTsModule("lib/env.ts");
 const mockData = loadTsModule("features/commerce/mock-data.ts");
 
 const tests = [
+  [
+    "product health identifies sellable catalog items and merchant fixes",
+    () => {
+      const makeProduct = (overrides = {}) => ({
+        id: "product_ready",
+        storeId: "store_1",
+        name: "Apex Jacket",
+        slug: "apex-jacket",
+        sku: "APX-JKT-001",
+        category: "Outerwear",
+        description: "Weatherproof shell jacket with taped seams and daily carry pockets.",
+        priceCents: 12900,
+        currency: "USD",
+        inventoryCount: 24,
+        imageUrl: "https://example.com/jacket.jpg",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+        variants: [],
+        ...overrides,
+      });
+
+      const readyHealth = productHealth.getProductHealth(makeProduct());
+
+      assertEqual(
+        readyHealth.status,
+        "ready",
+        "complete active products should be ready to sell",
+      );
+      assertEqual(
+        readyHealth.sellableInventoryCount,
+        24,
+        "base product stock should count as sellable inventory",
+      );
+
+      const variantHealth = productHealth.getProductHealth(
+        makeProduct({
+          id: "product_variant",
+          inventoryCount: 0,
+          variants: [
+            {
+              id: "variant_low",
+              storeId: "store_1",
+              productId: "product_variant",
+              optionName: "Size",
+              optionValue: "M",
+              sku: "APX-JKT-M",
+              priceCents: 13900,
+              currency: "USD",
+              inventoryCount: 3,
+              status: "active",
+              sortOrder: 1,
+              createdAt: "2026-06-01T10:00:00.000Z",
+            },
+            {
+              id: "variant_paused",
+              storeId: "store_1",
+              productId: "product_variant",
+              optionName: "Size",
+              optionValue: "L",
+              sku: "APX-JKT-L",
+              priceCents: 13900,
+              currency: "USD",
+              inventoryCount: 10,
+              status: "paused",
+              sortOrder: 2,
+              createdAt: "2026-06-01T10:00:00.000Z",
+            },
+          ],
+        }),
+        { lowStockThreshold: 5 },
+      );
+
+      assertEqual(
+        variantHealth.status,
+        "needs_attention",
+        "low-stock variant products should be flagged for merchant review",
+      );
+      assertEqual(
+        variantHealth.sellableInventoryCount,
+        3,
+        "only active priced variant stock should count as sellable",
+      );
+      assertDeepEqual(
+        variantHealth.issues.map((issue) => issue.id),
+        ["paused_variants", "low_stock"],
+        "variant health should explain paused variants and low stock",
+      );
+
+      const brokenHealth = productHealth.getProductHealth(
+        makeProduct({
+          id: "product_broken",
+          slug: "",
+          sku: "",
+          category: "",
+          description: "Tiny",
+          priceCents: 0,
+          inventoryCount: 0,
+          imageUrl: "",
+        }),
+      );
+
+      assertEqual(
+        brokenHealth.status,
+        "needs_attention",
+        "active products with blockers should need attention",
+      );
+      assertDeepEqual(
+        brokenHealth.issues.map((issue) => issue.id),
+        [
+          "missing_slug",
+          "missing_image",
+          "short_description",
+          "missing_category",
+          "missing_sku",
+          "missing_price",
+          "out_of_stock",
+        ],
+        "broken product health should list the merchant fixes in order",
+      );
+
+      assertEqual(
+        productHealth.getProductHealth(makeProduct({ status: "draft" })).status,
+        "not_listed",
+        "draft products should be classified as not listed",
+      );
+    },
+  ],
+  [
+    "inventory planning estimates reorder urgency from recent paid sales",
+    () => {
+      const products = [
+        {
+          id: "product_fast",
+          storeId: "store_1",
+          name: "Fast Seller",
+          slug: "fast-seller",
+          sku: "FAST-1",
+          category: "Gear",
+          description: "A fast selling product with very steady replenishment needs.",
+          priceCents: 5000,
+          currency: "USD",
+          inventoryCount: 5,
+          imageUrl: "https://example.com/fast.jpg",
+          status: "active",
+          createdAt: "2026-05-01T10:00:00.000Z",
+          variants: [],
+        },
+        {
+          id: "product_slow",
+          storeId: "store_1",
+          name: "Slow Seller",
+          slug: "slow-seller",
+          sku: "SLOW-1",
+          category: "Gear",
+          description: "A slower moving product with enough stock for now.",
+          priceCents: 3000,
+          currency: "USD",
+          inventoryCount: 80,
+          imageUrl: "https://example.com/slow.jpg",
+          status: "active",
+          createdAt: "2026-05-01T10:00:00.000Z",
+          variants: [],
+        },
+        {
+          id: "product_zero",
+          storeId: "store_1",
+          name: "Zero Stock",
+          slug: "zero-stock",
+          sku: "ZERO-1",
+          category: "Gear",
+          description: "A product that has no inventory available to sell.",
+          priceCents: 3000,
+          currency: "USD",
+          inventoryCount: 0,
+          imageUrl: "https://example.com/zero.jpg",
+          status: "active",
+          createdAt: "2026-05-01T10:00:00.000Z",
+          variants: [],
+        },
+      ];
+      const orders = [
+        {
+          id: "order_fast_1",
+          customerEmail: "a@example.com",
+          status: "paid",
+          paidAt: "2026-06-05T10:00:00.000Z",
+          createdAt: "2026-06-05T10:00:00.000Z",
+          items: [
+            {
+              productId: "product_fast",
+              productName: "Fast Seller",
+              unitPriceCents: 5000,
+              quantity: 20,
+            },
+          ],
+        },
+        {
+          id: "order_fast_2",
+          customerEmail: "b@example.com",
+          status: "fulfilled",
+          paidAt: "2026-06-06T10:00:00.000Z",
+          createdAt: "2026-06-06T10:00:00.000Z",
+          items: [
+            {
+              productId: "product_fast",
+              productName: "Fast Seller",
+              unitPriceCents: 5000,
+              quantity: 10,
+            },
+            {
+              productId: "product_slow",
+              productName: "Slow Seller",
+              unitPriceCents: 3000,
+              quantity: 3,
+            },
+          ],
+        },
+        {
+          id: "order_cancelled",
+          customerEmail: "c@example.com",
+          status: "cancelled",
+          paidAt: "2026-06-06T10:00:00.000Z",
+          createdAt: "2026-06-06T10:00:00.000Z",
+          items: [
+            {
+              productId: "product_fast",
+              productName: "Fast Seller",
+              unitPriceCents: 5000,
+              quantity: 99,
+            },
+          ],
+        },
+      ];
+      const signals = inventoryPlanning.getInventoryPlanningSignals({
+        products,
+        orders,
+        now: new Date("2026-06-07T10:00:00.000Z"),
+        salesWindowDays: 30,
+        reorderPointDays: 14,
+        watchPointDays: 30,
+        coverDays: 45,
+        limit: 10,
+      });
+      const fast = signals.find((signal) => signal.productId === "product_fast");
+      const slow = signals.find((signal) => signal.productId === "product_slow");
+      const zero = signals.find((signal) => signal.productId === "product_zero");
+
+      assertEqual(
+        signals[0].productId,
+        "product_zero",
+        "out-of-stock items should sort ahead of reorder warnings",
+      );
+      assertEqual(zero.urgency, "out_of_stock", "zero inventory should be a stockout");
+      assertEqual(fast.soldQuantity, 30, "planner should count recent revenue sales");
+      assertEqual(fast.salesVelocityPerDay, 1, "velocity should be rounded to one decimal");
+      assertEqual(
+        fast.estimatedDaysUntilStockout,
+        5,
+        "planner should estimate days until stockout from sellable inventory",
+      );
+      assertEqual(fast.urgency, "reorder_now", "fast-moving low runway items should reorder now");
+      assertEqual(fast.reorderQuantity, 40, "reorder quantity should target cover days");
+      assertEqual(slow.urgency, "healthy", "slow products with stock should stay healthy");
+    },
+  ],
   [
     "gift cards normalize codes and cap redemptions by balance and order total",
     () => {
@@ -1391,6 +1659,319 @@ const tests = [
       assertEqual(stats.totalCustomers, 3, "stats should include profile-only customers");
       assertEqual(stats.repeatCustomers, 1, "repeat stats should still use order counts");
       assertEqual(stats.marketingOptIns, 2, "stats should count marketing consent");
+      assertEqual(stats.leads, 1, "profile-only customers should count as leads");
+      assertEqual(stats.vipCustomers, 1, "VIP tags should count VIP customers");
+      assertEqual(
+        customers.parseCustomerSegmentFilter("not-real"),
+        "all",
+        "invalid customer segment filters should fall back to all",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "low-waste",
+            segment: "all",
+          })
+          .map((customer) => customer.email),
+        ["mira@example.com"],
+        "customer search should include profile notes",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "vip",
+          })
+          .map((customer) => customer.email),
+        ["mira@example.com"],
+        "customer segment filters should include VIP tags",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "",
+            segment: "lead",
+          })
+          .map((customer) => customer.email),
+        ["lead@example.com"],
+        "customer segment filters should include profile-only leads",
+      );
+      assertDeepEqual(
+        customers
+          .filterCustomers({
+            customers: summaries,
+            query: "ari",
+            segment: "all",
+          })
+          .map((customer) => customer.email),
+        ["ari@example.com"],
+        "customer search should include order-derived names and emails",
+      );
+    },
+  ],
+  [
+    "customer segmentation identifies VIP, at-risk, leads, and refund-watch customers",
+    () => {
+      const baseCustomer = {
+        profileId: "profile_1",
+        email: "buyer@example.com",
+        name: "Buyer",
+        tags: [],
+        acceptsMarketing: true,
+        taxExempt: false,
+        orderCount: 2,
+        paidOrderCount: 2,
+        totalSpentCents: 60000,
+        currency: "USD",
+        firstOrderAt: "2026-01-01T10:00:00.000Z",
+        lastOrderAt: "2026-01-15T10:00:00.000Z",
+        lastOrderStatus: "fulfilled",
+        orders: [
+          {
+            id: "order_1",
+            customerEmail: "buyer@example.com",
+            status: "fulfilled",
+            totalCents: 40000,
+            refundedCents: 0,
+            currency: "USD",
+            createdAt: "2026-01-01T10:00:00.000Z",
+          },
+          {
+            id: "order_2",
+            customerEmail: "buyer@example.com",
+            status: "fulfilled",
+            totalCents: 20000,
+            refundedCents: 0,
+            currency: "USD",
+            createdAt: "2026-01-15T10:00:00.000Z",
+          },
+        ],
+      };
+      const vip = customers.getCustomerSegmentation(baseCustomer, {
+        now: new Date("2026-02-01T10:00:00.000Z"),
+      });
+
+      assertEqual(vip.primarySegment, "vip", "high spend repeat buyers should be VIP");
+      assertTrue(vip.segments.includes("repeat"), "VIP customers can also be repeat buyers");
+      assertEqual(vip.averageOrderValueCents, 30000, "AOV should use paid order count");
+
+      const atRisk = customers.getCustomerSegmentation(
+        {
+          ...baseCustomer,
+          totalSpentCents: 25000,
+          lastOrderAt: "2026-01-01T10:00:00.000Z",
+        },
+        {
+          now: new Date("2026-06-07T10:00:00.000Z"),
+        },
+      );
+
+      assertEqual(atRisk.primarySegment, "at_risk", "inactive paid customers should be at risk");
+      assertEqual(atRisk.daysSinceLastOrder, 157, "inactive days should be rounded down");
+
+      const refundWatch = customers.getCustomerSegmentation(
+        {
+          ...baseCustomer,
+          totalSpentCents: 30000,
+          orders: [
+            {
+              id: "order_refund",
+              customerEmail: "buyer@example.com",
+              status: "paid",
+              totalCents: 60000,
+              refundedCents: 30000,
+              currency: "USD",
+              createdAt: "2026-05-01T10:00:00.000Z",
+            },
+          ],
+          paidOrderCount: 1,
+          orderCount: 1,
+          lastOrderAt: "2026-05-01T10:00:00.000Z",
+        },
+        {
+          now: new Date("2026-06-07T10:00:00.000Z"),
+        },
+      );
+
+      assertEqual(
+        refundWatch.primarySegment,
+        "refund_watch",
+        "high refund rates should outrank other customer segments",
+      );
+      assertEqual(refundWatch.refundRate, 50, "refund rate should use gross paid value");
+
+      const lead = customers.getCustomerSegmentation({
+        email: "lead@example.com",
+        name: "Lead",
+        tags: ["prospect"],
+        acceptsMarketing: false,
+        taxExempt: false,
+        orderCount: 0,
+        paidOrderCount: 0,
+        totalSpentCents: 0,
+        currency: "USD",
+        orders: [],
+      });
+
+      assertEqual(lead.primarySegment, "lead", "profile-only contacts should be leads");
+      assertEqual(
+        lead.nextAction,
+        "Add consent or context before sending marketing campaigns.",
+        "lead next action should respect missing marketing consent",
+      );
+    },
+  ],
+  [
+    "store operations insights prioritize launch, order, catalog, and conversion work",
+    () => {
+      const store = {
+        ...mockData.mockStores[0],
+        description: "Short",
+        shippingRateCents: -100,
+      };
+      const brokenProduct = {
+        ...mockData.mockProducts[0],
+        id: "product_broken_ops",
+        storeId: store.id,
+        name: "Ops Broken Product",
+        slug: "",
+        sku: "",
+        category: "",
+        description: "Tiny",
+        priceCents: 0,
+        inventoryCount: 0,
+        imageUrl: "",
+        status: "active",
+        variants: [],
+      };
+      const riskyOrder = {
+        id: "order_risky_ops",
+        storeId: store.id,
+        customerName: "Risk Buyer",
+        customerEmail: "risk@example.com",
+        status: "pending",
+        source: "storefront",
+        paymentStatus: "pending",
+        paymentMethod: "cash_on_delivery",
+        paymentProvider: "Manual",
+        subtotalCents: 125000,
+        discountCents: 0,
+        giftCardCents: 0,
+        shippingCents: 0,
+        taxCents: 0,
+        taxRateBps: 0,
+        totalCents: 125000,
+        amountDueCents: 125000,
+        refundedCents: 0,
+        refundableCents: 125000,
+        currency: "USD",
+        createdAt: "2026-05-01T10:00:00.000Z",
+        fulfillments: [],
+        refunds: [],
+        returnRequests: [],
+        paymentTransactions: [],
+      };
+      const workspace = {
+        membershipRole: "owner",
+        store,
+        members: [],
+        invitations: [],
+        auditEvents: [],
+        notifications: [],
+        policies: [],
+        customPages: [],
+        navigationMenus: [],
+        customerProfiles: [],
+        shippingZones: [],
+        products: [brokenProduct],
+        collections: [],
+        orders: [riskyOrder],
+        abandonedCheckouts: [
+          {
+            id: "checkout_ops",
+            storeId: store.id,
+            customerEmail: "cart@example.com",
+            recoveryToken: "recover-ops-token",
+            status: "open",
+            lines: [
+              {
+                productId: "product_broken_ops",
+                productName: "Ops Broken Product",
+                unitPriceCents: 2500,
+                quantity: 2,
+              },
+            ],
+            subtotalCents: 5000,
+            currency: "USD",
+            lastSeenAt: "2026-06-07T09:00:00.000Z",
+            recoveryEmailCount: 0,
+            createdAt: "2026-06-07T09:00:00.000Z",
+            updatedAt: "2026-06-07T09:00:00.000Z",
+          },
+        ],
+        productReviews: [
+          {
+            id: "review_ops",
+            storeId: store.id,
+            productId: "product_broken_ops",
+            orderId: "order_risky_ops",
+            customerEmail: "risk@example.com",
+            customerName: "Risk Buyer",
+            rating: 4,
+            body: "Pending review body.",
+            status: "pending",
+            reviewedAt: "2026-06-07T09:00:00.000Z",
+            createdAt: "2026-06-07T09:00:00.000Z",
+            updatedAt: "2026-06-07T09:00:00.000Z",
+          },
+        ],
+        giftCards: [],
+        discounts: [],
+        inventoryAdjustments: [],
+      };
+      const insights = storeInsights.getStoreOperationalInsights(workspace, {
+        now: new Date("2026-06-07T10:00:00.000Z"),
+        limit: 20,
+      });
+      const insightIds = insights.map((insight) => insight.id);
+      const categories = new Set(insights.map((insight) => insight.category));
+
+      assertTrue(
+        insightIds.includes("launch:identity"),
+        "operations queue should include launch identity blockers",
+      );
+      assertTrue(
+        insightIds.includes("order-risk:order_risky_ops"),
+        "operations queue should include risky orders",
+      );
+      assertTrue(
+        insightIds.includes("product-health:product_broken_ops"),
+        "operations queue should include product health work",
+      );
+      assertTrue(
+        insightIds.includes("inventory:product_broken_ops"),
+        "operations queue should include inventory planning work",
+      );
+      assertTrue(
+        insightIds.includes("abandoned-checkout:checkout_ops"),
+        "operations queue should include recoverable abandoned carts",
+      );
+      assertTrue(
+        insightIds.includes("pending-reviews"),
+        "operations queue should include pending review moderation",
+      );
+      assertTrue(categories.has("launch"), "launch insights should be categorized");
+      assertTrue(categories.has("orders"), "order insights should be categorized");
+      assertTrue(categories.has("catalog"), "catalog insights should be categorized");
+      assertTrue(categories.has("inventory"), "inventory insights should be categorized");
+      assertEqual(
+        insights[0].severity,
+        "critical",
+        "critical work should sort to the top",
+      );
     },
   ],
   [

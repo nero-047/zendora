@@ -52,6 +52,7 @@ import {
   getCustomerSummaries,
 } from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
+import { getStoreOperationalInsights } from "@/features/commerce/store-insights";
 import {
   getOrderStatusOptions,
   orderStatusLabels,
@@ -124,6 +125,7 @@ export default async function StorePage({
     (page) => page.status === "published",
   ).length;
   const launchReadiness = getStoreLaunchReadiness(workspace);
+  const operationalInsights = getStoreOperationalInsights(workspace);
 
   return (
     <div className="grid gap-5">
@@ -193,6 +195,68 @@ export default async function StorePage({
             <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
           </div>
         ))}
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Activity aria-hidden="true" size={18} />
+              Operations queue
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Prioritized launch, catalog, order, customer, and conversion work.
+            </p>
+          </div>
+          <Link
+            className="secondary-button min-h-10 px-3 text-sm"
+            href={`/dashboard/stores/${store.id}/analytics`}
+          >
+            <BarChart3 aria-hidden="true" size={16} />
+            Analytics
+          </Link>
+        </div>
+
+        {operationalInsights.length > 0 ? (
+          <div className="divide-y divide-slate-100">
+            {operationalInsights.map((insight) => (
+              <div
+                className="grid gap-3 p-4 md:grid-cols-[auto_1fr_auto]"
+                key={insight.id}
+              >
+                <span className="status-pill w-fit capitalize">
+                  {insight.severity}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-slate-950">
+                      {insight.title}
+                    </p>
+                    <span className="status-pill capitalize">
+                      {insight.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {insight.detail}
+                  </p>
+                </div>
+                {insight.href ? (
+                  <Link
+                    className="secondary-button min-h-10 px-3 text-sm"
+                    href={insight.href}
+                  >
+                    <ArrowUpRight aria-hidden="true" size={16} />
+                    {insight.actionLabel}
+                  </Link>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-4 text-sm text-slate-500">
+            No urgent operations work is queued from the current store data.
+          </p>
+        )}
       </section>
 
       <StoreSettingsForm store={store} />

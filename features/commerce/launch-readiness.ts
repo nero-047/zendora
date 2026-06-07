@@ -4,6 +4,7 @@ import {
   storePolicyLabels,
   storePolicyTypes,
 } from "@/features/commerce/policies";
+import { getProductHealth } from "@/features/commerce/product-health";
 import type {
   Product,
   StoreLaunchReadinessCheck,
@@ -22,38 +23,14 @@ export type StoreLaunchReadiness = {
 };
 
 function hasProductStock(product: Product) {
-  const activeVariants = product.variants.filter(
-    (variant) => variant.status === "active",
-  );
-
-  if (activeVariants.length > 0) {
-    return activeVariants.some(
-      (variant) => variant.priceCents > 0 && variant.inventoryCount > 0,
-    );
-  }
-
-  return product.priceCents > 0 && product.inventoryCount > 0;
+  return getProductHealth(product).hasPurchasableStock;
 }
 
 function getActiveProductIssues(products: Product[]) {
   return products.flatMap((product) => {
-    const issues: string[] = [];
-
-    if (!product.slug.trim()) {
-      issues.push("missing slug");
-    }
-
-    if (!product.imageUrl.trim()) {
-      issues.push("missing image");
-    }
-
-    if (product.description.trim().length < 20) {
-      issues.push("short description");
-    }
-
-    if (!hasProductStock(product)) {
-      issues.push("no purchasable stock");
-    }
+    const issues = getProductHealth(product).issues
+      .filter((issue) => issue.severity === "blocking")
+      .map((issue) => issue.label.toLowerCase());
 
     return issues.length > 0
       ? [{ name: product.name, issues }]

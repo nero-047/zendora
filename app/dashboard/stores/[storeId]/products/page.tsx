@@ -10,12 +10,15 @@ import {
   Package,
   PackagePlus,
   Search,
+  ShieldCheck,
   Store,
   TriangleAlert,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { getStoreWorkspace } from "@/features/commerce/data";
+import { getInventoryPlanningSignals } from "@/features/commerce/inventory-planning";
+import { getProductHealth } from "@/features/commerce/product-health";
 import {
   filterProducts,
   getProductCategories,
@@ -48,7 +51,7 @@ export default async function ProductsPage({
     notFound();
   }
 
-  const { store, products } = workspace;
+  const { store, products, orders } = workspace;
   const searchQuery = readProductSearchParam(query.q);
   const selectedStatus = parseProductStatusFilter(query.status);
   const selectedCategory = readProductSearchParam(query.category);
@@ -60,6 +63,18 @@ export default async function ProductsPage({
     category: selectedCategory,
   });
   const stats = getProductStats(products);
+  const inventorySignals = getInventoryPlanningSignals({
+    products,
+    orders,
+    limit: products.length || 1,
+  });
+  const inventorySignalsByProduct = new Map(
+    inventorySignals.map((signal) => [signal.productId, signal]),
+  );
+  const reorderNowCount = inventorySignals.filter(
+    (signal) =>
+      signal.urgency === "out_of_stock" || signal.urgency === "reorder_now",
+  ).length;
   const metricCards = [
     {
       icon: Package,
@@ -68,18 +83,28 @@ export default async function ProductsPage({
     },
     {
       icon: Store,
-      label: "Active",
-      value: String(stats.activeProducts),
+      label: "Ready to sell",
+      value: String(stats.readyProducts),
+    },
+    {
+      icon: ShieldCheck,
+      label: "Sellable units",
+      value: String(stats.sellableInventory),
     },
     {
       icon: TriangleAlert,
-      label: "Low stock",
-      value: String(stats.lowStockProducts),
+      label: "Needs attention",
+      value: String(stats.needsAttentionProducts),
     },
     {
       icon: Boxes,
-      label: "Inventory",
-      value: String(stats.totalInventory),
+      label: "Reorder now",
+      value: String(reorderNowCount),
+    },
+    {
+      icon: Boxes,
+      label: "Low stock",
+      value: String(stats.lowStockProducts),
     },
     {
       icon: CircleDollarSign,
@@ -184,65 +209,91 @@ export default async function ProductsPage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.4fr_auto_auto_auto_auto]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.4fr_auto_auto_auto_auto_auto_auto]">
           <span>Product</span>
           <span className="hidden xl:inline">Status</span>
+          <span className="hidden xl:inline">Health</span>
+          <span className="hidden xl:inline">Plan</span>
           <span className="hidden xl:inline">Stock</span>
           <span className="hidden xl:inline">Price</span>
           <span>Edit</span>
         </div>
-        {filteredProducts.map((product) => (
-          <div
-            className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.4fr_auto_auto_auto_auto]"
-            key={product.id}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <Image
-                alt={product.name}
-                className="h-16 w-16 rounded-[8px] object-cover"
-                height={128}
-                src={product.imageUrl}
-                width={128}
-              />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-950">
-                  {product.name}
-                </p>
-                <p className="mt-1 truncate text-xs text-slate-500">
-                  {[
-                    product.category,
-                    product.variants.length > 0
-                      ? `${product.variants.length} variants`
-                      : product.sku,
-                  ].filter(Boolean).join(" / ") ||
-                    product.slug}
-                </p>
-                <p className="mt-2 text-xs font-semibold text-slate-700 xl:hidden">
-                  {product.inventoryCount} in stock /{" "}
-                  {product.variants.length > 0 ? "From " : ""}
-                  {formatCurrency(product.priceCents, product.currency)}
-                </p>
-              </div>
-            </div>
-            <span className="status-pill hidden w-fit xl:inline-flex">
-              {productStatusLabels[product.status]}
-            </span>
-            <span className="hidden text-sm font-semibold text-slate-700 xl:inline">
-              {product.inventoryCount}
-            </span>
-            <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
-              {product.variants.length > 0 ? "From " : ""}
-              {formatCurrency(product.priceCents, product.currency)}
-            </span>
-            <Link
-              aria-label={`Edit ${product.name}`}
-              className="icon-button h-10 min-h-10 w-10"
-              href={getProductEditHref(store.id, product.id)}
+        {filteredProducts.map((product) => {
+          const health = getProductHealth(product);
+          const inventorySignal = inventorySignalsByProduct.get(product.id);
+
+          return (
+            <div
+              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.4fr_auto_auto_auto_auto_auto_auto]"
+              key={product.id}
             >
-              <Edit3 aria-hidden="true" size={16} />
-            </Link>
-          </div>
-        ))}
+              <div className="flex min-w-0 items-center gap-3">
+                <Image
+                  alt={product.name}
+                  className="h-16 w-16 rounded-[8px] object-cover"
+                  height={128}
+                  src={product.imageUrl}
+                  width={128}
+                />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-slate-950">
+                      {product.name}
+                    </p>
+                    <span className="status-pill xl:hidden">{health.label}</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-slate-500">
+                    {[
+                      product.category,
+                      product.variants.length > 0
+                        ? `${product.variants.length} variants`
+                        : product.sku,
+                    ].filter(Boolean).join(" / ") ||
+                      product.slug}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-slate-700 xl:hidden">
+                    {health.sellableInventoryCount} sellable /{" "}
+                    {product.variants.length > 0 ? "From " : ""}
+                    {formatCurrency(product.priceCents, product.currency)}
+                  </p>
+                  {health.status !== "ready" ? (
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-500">
+                      {health.nextAction}
+                    </p>
+                  ) : null}
+                  {inventorySignal ? (
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-500 xl:hidden">
+                      {inventorySignal.detail}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {productStatusLabels[product.status]}
+              </span>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {health.label}
+              </span>
+              <span className="hidden max-w-44 text-sm text-slate-600 xl:inline">
+                {inventorySignal ? inventorySignal.label : "No plan"}
+              </span>
+              <span className="hidden text-sm font-semibold text-slate-700 xl:inline">
+                {health.sellableInventoryCount}
+              </span>
+              <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
+                {product.variants.length > 0 ? "From " : ""}
+                {formatCurrency(product.priceCents, product.currency)}
+              </span>
+              <Link
+                aria-label={`Edit ${product.name}`}
+                className="icon-button h-10 min-h-10 w-10"
+                href={getProductEditHref(store.id, product.id)}
+              >
+                <Edit3 aria-hidden="true" size={16} />
+              </Link>
+            </div>
+          );
+        })}
         {filteredProducts.length === 0 ? (
           <p className="p-5 text-sm text-slate-500">
             No products match the current filters.

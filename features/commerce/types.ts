@@ -596,6 +596,9 @@ export type CustomerStats = {
   totalCustomers: number;
   repeatCustomers: number;
   marketingOptIns: number;
+  leads: number;
+  vipCustomers: number;
+  atRiskCustomers: number;
   paidOrders: number;
   totalSpentCents: number;
   averageOrderValueCents: number;

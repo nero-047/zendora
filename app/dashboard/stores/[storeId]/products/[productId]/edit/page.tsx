@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Boxes, Package } from "lucide-react";
+import { ArrowLeft, Boxes, Package, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { EditProductForm } from "@/features/commerce/components/edit-product-form";
 import { InventoryAdjustmentForm } from "@/features/commerce/components/inventory-adjustment-form";
 import { getStoreWorkspace } from "@/features/commerce/data";
+import { getInventoryPlanningSignals } from "@/features/commerce/inventory-planning";
+import { getProductHealth } from "@/features/commerce/product-health";
 import type { InventoryAdjustmentReason } from "@/features/commerce/types";
 
 const adjustmentReasonLabels: Record<InventoryAdjustmentReason, string> = {
@@ -38,6 +40,12 @@ export default async function EditProductPage({
   const inventoryAdjustments = workspace.inventoryAdjustments.filter(
     (adjustment) => adjustment.productId === product.id,
   );
+  const health = getProductHealth(product);
+  const inventoryPlan = getInventoryPlanningSignals({
+    products: [product],
+    orders: workspace.orders,
+    limit: 1,
+  })[0];
 
   return (
     <div className="grid gap-5">
@@ -55,6 +63,47 @@ export default async function EditProductPage({
         <div className="grid gap-5">
           <section className="soft-panel p-4">
             <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-sky-500/10 text-sky-700">
+                {health.status === "ready" ? (
+                  <ShieldCheck aria-hidden="true" size={18} />
+                ) : (
+                  <TriangleAlert aria-hidden="true" size={18} />
+                )}
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Catalog health
+                </h2>
+                <p className="text-sm text-slate-500">{health.label}</p>
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              {health.nextAction}
+            </p>
+            {health.issues.length > 0 ? (
+              <div className="mt-4 grid gap-2">
+                {health.issues.slice(0, 5).map((issue) => (
+                  <div
+                    className="rounded-[8px] border border-slate-100 bg-white/70 p-3"
+                    key={issue.id}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {issue.label}
+                      </p>
+                      <span className="status-pill">{issue.severity}</span>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      {issue.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="soft-panel p-4">
+            <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-emerald-500/10 text-emerald-700">
                 <Package aria-hidden="true" size={18} />
               </span>
@@ -67,6 +116,21 @@ export default async function EditProductPage({
                 </p>
               </div>
             </div>
+            {inventoryPlan ? (
+              <div className="mt-4 rounded-[8px] border border-slate-100 bg-white/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {inventoryPlan.label}
+                  </p>
+                  <span className="status-pill">
+                    {inventoryPlan.salesVelocityPerDay}/day
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {inventoryPlan.detail}
+                </p>
+              </div>
+            ) : null}
           </section>
 
           {product.variants.length > 0 ? (
