@@ -14,6 +14,7 @@ import type {
   ProductVariant,
   ShippingZone,
   Store,
+  StoreNavigationMenu,
   StorePage,
   StorePolicy,
 } from "@/features/commerce/types";
@@ -193,6 +194,67 @@ export const mockStorePages: StorePage[] = [
     status: "draft",
     createdAt: "2026-04-16T12:00:00.000Z",
     updatedAt: "2026-04-16T12:00:00.000Z",
+  },
+];
+
+export const mockStoreNavigationMenus: StoreNavigationMenu[] = [
+  {
+    id: "demo-navigation-header",
+    storeId: "demo-store-outdoor",
+    location: "header",
+    links: [
+      {
+        label: "Shop",
+        href: "/stores/northline-supply",
+      },
+      {
+        label: "Everyday Carry",
+        href: "/stores/northline-supply/collections/everyday-carry",
+      },
+      {
+        label: "Trail Ready",
+        href: "/stores/northline-supply/collections/trail-ready",
+      },
+      {
+        label: "About",
+        href: "/stores/northline-supply/pages/about",
+      },
+    ],
+    createdAt: "2026-04-17T12:00:00.000Z",
+    updatedAt: "2026-04-17T12:00:00.000Z",
+  },
+  {
+    id: "demo-navigation-footer",
+    storeId: "demo-store-outdoor",
+    location: "footer",
+    links: [
+      {
+        label: "About Northline",
+        href: "/stores/northline-supply/pages/about",
+      },
+      {
+        label: "Fit and sizing",
+        href: "/stores/northline-supply/pages/fit-and-sizing",
+      },
+      {
+        label: "Refund policy",
+        href: "/stores/northline-supply/policies/refund",
+      },
+      {
+        label: "Shipping policy",
+        href: "/stores/northline-supply/policies/shipping",
+      },
+      {
+        label: "Privacy policy",
+        href: "/stores/northline-supply/policies/privacy",
+      },
+      {
+        label: "Terms of service",
+        href: "/stores/northline-supply/policies/terms",
+      },
+    ],
+    createdAt: "2026-04-17T12:05:00.000Z",
+    updatedAt: "2026-04-17T12:05:00.000Z",
   },
 ];
 
