@@ -12,7 +12,6 @@ import {
   Layers3,
   Mail,
   PackagePlus,
-  Percent,
   ReceiptText,
   RotateCcw,
   ShieldCheck,
@@ -26,8 +25,12 @@ import {
 
 import { requireAppUser } from "@/features/auth/app-user";
 import { CollectionForm } from "@/features/commerce/components/collection-form";
+import { CollectionManagementForm } from "@/features/commerce/components/collection-management-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
+import { DiscountManagementForm } from "@/features/commerce/components/discount-management-form";
 import { GiftCardForm } from "@/features/commerce/components/gift-card-form";
+import { GiftCardManagementForm } from "@/features/commerce/components/gift-card-management-form";
+import { ShippingZoneManagementForm } from "@/features/commerce/components/shipping-zone-management-form";
 import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
 import { StoreLaunchReadinessPanel } from "@/features/commerce/components/store-launch-readiness";
 import { StoreNavigationForm } from "@/features/commerce/components/store-navigation-form";
@@ -48,10 +51,6 @@ import {
   getActivityCenter,
   getNotificationStats,
 } from "@/features/commerce/activity-center";
-import {
-  giftCardStatusLabels,
-  maskGiftCardCode,
-} from "@/features/commerce/gift-cards";
 import { productReviewStatusLabels } from "@/features/commerce/reviews";
 import {
   getReturnRequestQueue,
@@ -75,11 +74,7 @@ import {
   queueAbandonedCheckoutRecoveryAction,
   removeStoreMemberAction,
   revokeStoreInvitationAction,
-  updateCollectionStatusAction,
-  updateDiscountStatusAction,
-  updateGiftCardStatusAction,
   updateOrderStatusAction,
-  updateShippingZoneStatusAction,
   updateStoreMemberRoleAction,
 } from "@/features/commerce/actions";
 import { canStoreRole } from "@/features/commerce/permissions";
@@ -438,47 +433,12 @@ export default async function StorePage({
           </div>
           {shippingZones.length > 0 ? (
             shippingZones.map((zone) => (
-              <div className="border-b border-slate-100 p-4 last:border-0" key={zone.id}>
-                <div className="flex items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-indigo-500/10 text-indigo-700">
-                    <Truck aria-hidden="true" size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-950">{zone.name}</p>
-                      <span className="status-pill">{zone.status}</span>
-                    </div>
-                    <p className="mt-1 text-sm font-medium text-slate-700">
-                      {formatCurrency(zone.rateCents, store.currency)}
-                      {zone.freeShippingThresholdCents > 0
-                        ? ` / free at ${formatCurrency(zone.freeShippingThresholdCents, store.currency)}`
-                        : ""}
-                    </p>
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">
-                      {zone.countries.join(", ")}
-                    </p>
-                  </div>
-                </div>
-
-                <form
-                  action={updateShippingZoneStatusAction.bind(null, store.id, zone.id)}
-                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
-                >
-                  <select
-                    aria-label={`Status for ${zone.name}`}
-                    className="field min-h-10 py-2 text-sm"
-                    defaultValue={zone.status}
-                    name="status"
-                  >
-                    <option value="active">Active</option>
-                    <option value="paused">Paused</option>
-                  </select>
-                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
-                    <CheckCircle aria-hidden="true" size={16} />
-                    Update
-                  </button>
-                </form>
-              </div>
+              <ShippingZoneManagementForm
+                currency={store.currency}
+                key={zone.id}
+                shippingZone={zone}
+                storeId={store.id}
+              />
             ))
           ) : (
             <p className="p-4 text-sm text-slate-500">No shipping zones yet.</p>
@@ -498,64 +458,13 @@ export default async function StorePage({
           </div>
           {collections.length > 0 ? (
             collections.map((collection) => (
-              <div
-                className="border-b border-slate-100 p-4 last:border-0"
+              <CollectionManagementForm
+                collection={collection}
                 key={collection.id}
-              >
-                <div className="flex items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-sky-500/10 text-sky-700">
-                    <Layers3 aria-hidden="true" size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-950">
-                        {collection.title}
-                      </p>
-                      <span className="status-pill">{collection.status}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {collection.productCount} products / {collection.slug}
-                    </p>
-                    {collection.description ? (
-                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
-                        {collection.description}
-                      </p>
-                    ) : null}
-                    {collection.status === "active" ? (
-                      <Link
-                        className="mt-2 inline-flex text-sm font-semibold text-sky-700"
-                        href={`/stores/${store.slug}/collections/${collection.slug}`}
-                      >
-                        View collection
-                      </Link>
-                    ) : null}
-                  </div>
-                </div>
-
-                <form
-                  action={updateCollectionStatusAction.bind(
-                    null,
-                    store.id,
-                    collection.id,
-                  )}
-                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
-                >
-                  <select
-                    aria-label={`Status for ${collection.title}`}
-                    className="field min-h-10 py-2 text-sm"
-                    defaultValue={collection.status}
-                    name="status"
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="active">Active</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
-                    <CheckCircle aria-hidden="true" size={16} />
-                    Update
-                  </button>
-                </form>
-              </div>
+                products={products}
+                storeId={store.id}
+                storeSlug={store.slug}
+              />
             ))
           ) : (
             <p className="p-4 text-sm text-slate-500">No collections yet.</p>
@@ -572,50 +481,12 @@ export default async function StorePage({
           </div>
           {discounts.length > 0 ? (
             discounts.map((discount) => (
-              <div className="border-b border-slate-100 p-4 last:border-0" key={discount.id}>
-                <div className="flex items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-emerald-500/10 text-emerald-700">
-                    <Percent aria-hidden="true" size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-950">{discount.code}</p>
-                      <span className="status-pill">{discount.status}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {discount.type === "percent"
-                        ? `${discount.value}% off`
-                        : `${formatCurrency(discount.value, store.currency)} off`}
-                      {discount.minSubtotalCents > 0
-                        ? ` / min ${formatCurrency(discount.minSubtotalCents, store.currency)}`
-                        : ""}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {discount.redemptionCount}
-                      {discount.usageLimit ? `/${discount.usageLimit}` : ""} redemptions
-                    </p>
-                  </div>
-                </div>
-
-                <form
-                  action={updateDiscountStatusAction.bind(null, store.id, discount.id)}
-                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
-                >
-                  <select
-                    aria-label={`Status for ${discount.code}`}
-                    className="field min-h-10 py-2 text-sm"
-                    defaultValue={discount.status}
-                    name="status"
-                  >
-                    <option value="active">Active</option>
-                    <option value="paused">Paused</option>
-                  </select>
-                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
-                    <CheckCircle aria-hidden="true" size={16} />
-                    Update
-                  </button>
-                </form>
-              </div>
+              <DiscountManagementForm
+                currency={store.currency}
+                discount={discount}
+                key={discount.id}
+                storeId={store.id}
+              />
             ))
           ) : (
             <p className="p-4 text-sm text-slate-500">No discount codes yet.</p>
@@ -635,66 +506,11 @@ export default async function StorePage({
           </div>
           {giftCards.length > 0 ? (
             giftCards.map((giftCard) => (
-              <div className="border-b border-slate-100 p-4 last:border-0" key={giftCard.id}>
-                <div className="flex items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-pink-500/10 text-pink-700">
-                    <Gift aria-hidden="true" size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-950">
-                        {maskGiftCardCode(giftCard.code)}
-                      </p>
-                      <span className="status-pill">
-                        {giftCardStatusLabels[giftCard.status]}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm font-semibold text-slate-700">
-                      {formatCurrency(giftCard.balanceCents, giftCard.currency)} /{" "}
-                      {formatCurrency(
-                        giftCard.initialBalanceCents,
-                        giftCard.currency,
-                      )}{" "}
-                      remaining
-                    </p>
-                    <p className="mt-1 truncate text-xs text-slate-500">
-                      {[giftCard.recipientEmail, giftCard.expiresAt
-                        ? `expires ${new Date(giftCard.expiresAt).toLocaleDateString("en-US")}`
-                        : null]
-                        .filter(Boolean)
-                        .join(" / ") || "No recipient"}
-                    </p>
-                    {giftCard.redemptions.length > 0 ? (
-                      <p className="mt-2 text-xs font-medium text-slate-500">
-                        {giftCard.redemptions.length} redemptions / last{" "}
-                        {new Date(
-                          giftCard.redemptions[0].createdAt,
-                        ).toLocaleDateString("en-US")}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <form
-                  action={updateGiftCardStatusAction.bind(null, store.id, giftCard.id)}
-                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
-                >
-                  <select
-                    aria-label={`Status for ${maskGiftCardCode(giftCard.code)}`}
-                    className="field min-h-10 py-2 text-sm"
-                    defaultValue={giftCard.status}
-                    name="status"
-                  >
-                    <option value="active">Active</option>
-                    <option value="disabled">Disabled</option>
-                    <option value="expired">Expired</option>
-                  </select>
-                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
-                    <CheckCircle aria-hidden="true" size={16} />
-                    Update
-                  </button>
-                </form>
-              </div>
+              <GiftCardManagementForm
+                giftCard={giftCard}
+                key={giftCard.id}
+                storeId={store.id}
+              />
             ))
           ) : (
             <p className="p-4 text-sm text-slate-500">No gift cards issued yet.</p>

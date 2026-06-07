@@ -373,6 +373,10 @@ async function run() {
         "Launch readiness",
         "Activity center",
         "Operations queue",
+        "Save collection",
+        "Save zone",
+        "Save discount",
+        "Save gift card",
       ],
     },
     {
@@ -388,6 +392,22 @@ async function run() {
         "Hydra Bottle",
         "Needs attention",
         "Search products",
+      ],
+    },
+    {
+      label: "admin product create content",
+      path: "/dashboard/stores/demo-store-outdoor/products/new",
+      includes: ["Add product", "Images upload", "Product name", "Save product"],
+    },
+    {
+      label: "admin product edit content",
+      path: "/dashboard/stores/demo-store-outdoor/products/demo-product-hydra-bottle/edit",
+      includes: [
+        "Edit product",
+        "Hydra Bottle",
+        "Catalog health",
+        "Inventory history",
+        "Save product",
       ],
     },
     {

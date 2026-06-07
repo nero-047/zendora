@@ -374,6 +374,10 @@ const collectionSchema = z.object({
   productIds: z.array(z.string().trim().min(1)).max(80),
 });
 
+const collectionUpdateSchema = collectionSchema.extend({
+  status: z.enum(["draft", "active", "archived"]),
+});
+
 const collectionStatusSchema = z.object({
   status: z.enum(["draft", "active", "archived"]),
 });
@@ -592,6 +596,18 @@ const discountStatusSchema = z.object({
 });
 
 const giftCardStatusSchema = z.object({
+  status: z.enum(giftCardStatuses),
+});
+
+const giftCardUpdateSchema = z.object({
+  recipientEmail: z
+    .string()
+    .trim()
+    .email("Add a valid recipient email.")
+    .optional()
+    .or(z.literal("")),
+  note: z.string().trim().max(300, "Keep notes under 300 characters.").optional(),
+  expiresAt: z.string().trim().optional(),
   status: z.enum(giftCardStatuses),
 });
 
@@ -3215,6 +3231,147 @@ export async function createDiscountAction(
   };
 }
 
+export async function updateDiscountAction(
+  storeId: string,
+  discountId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = discountSchema.safeParse({
+    code: formData.get("code"),
+    type: formData.get("type"),
+    value: formData.get("value"),
+    minSubtotal: formData.get("minSubtotal") || undefined,
+    usageLimit: formData.get("usageLimit") || undefined,
+    status: formData.get("status"),
+    startsAt: formData.get("startsAt") || undefined,
+    endsAt: formData.get("endsAt") || undefined,
+  });
+
+  if (!parsed.success) {
+    return formError("Check the discount details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const code = normalizeDiscountCode(parsed.data.code);
+  const value =
+    parsed.data.type === "fixed"
+      ? toPriceCents(parsed.data.value)
+      : Number(parsed.data.value);
+  const minSubtotalCents = parseOptionalPriceCents(parsed.data.minSubtotal);
+  const usageLimit = parseOptionalPositiveInteger(parsed.data.usageLimit);
+  const startsAt = parseDateTime(parsed.data.startsAt);
+  const endsAt = parseDateTime(parsed.data.endsAt);
+
+  if (!code) {
+    return formError("Add a discount code.", {
+      code: ["Add a discount code."],
+    });
+  }
+
+  if (
+    value === null ||
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    (parsed.data.type === "percent" && value > 100)
+  ) {
+    return formError("Add a valid discount value.", {
+      value: [
+        parsed.data.type === "percent"
+          ? "Percent discounts must be 1 to 100."
+          : "Fixed discounts must be a positive amount.",
+      ],
+    });
+  }
+
+  if (minSubtotalCents === null || minSubtotalCents < 0) {
+    return formError("Add a valid minimum subtotal.", {
+      minSubtotal: ["Minimum subtotal must be a positive amount."],
+    });
+  }
+
+  if (Number.isNaN(usageLimit)) {
+    return formError("Add a valid usage limit.", {
+      usageLimit: ["Usage limit must be a whole number."],
+    });
+  }
+
+  if (startsAt === "invalid" || endsAt === "invalid") {
+    return formError("Add valid schedule dates.");
+  }
+
+  if (startsAt && endsAt && new Date(startsAt) >= new Date(endsAt)) {
+    return formError("Discount end date must be after the start date.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_discounts",
+  );
+  const discount = workspace.discounts.find((item) => item.id === discountId);
+
+  if (!discount) {
+    return formError("Discount not found.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("discount_codes")
+    .update({
+      code,
+      type: parsed.data.type,
+      value,
+      min_subtotal_cents: minSubtotalCents,
+      usage_limit: usageLimit,
+      status: parsed.data.status,
+      starts_at: startsAt,
+      ends_at: endsAt,
+    })
+    .eq("id", discountId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "discount_updated",
+    resourceType: "discount_code",
+    resourceId: discountId,
+    summary: `${user.email} updated discount ${code}.`,
+    metadata: {
+      previousCode: discount.code,
+      code,
+      previousStatus: discount.status,
+      status: parsed.data.status,
+      previousType: discount.type,
+      type: parsed.data.type,
+      previousValue: discount.value,
+      value,
+      minSubtotalCents,
+      usageLimit,
+      startsAt,
+      endsAt,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+
+  return {
+    status: "success",
+    message: "Discount updated.",
+  };
+}
+
 export async function createGiftCardAction(
   storeId: string,
   _state: ActionState,
@@ -3331,6 +3488,109 @@ export async function createGiftCardAction(
   };
 }
 
+export async function updateGiftCardAction(
+  storeId: string,
+  giftCardId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = giftCardUpdateSchema.safeParse({
+    recipientEmail: formData.get("recipientEmail") || undefined,
+    note: formData.get("note") || undefined,
+    expiresAt: formData.get("expiresAt") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the gift card details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const expiresAt = parseDateTime(parsed.data.expiresAt);
+
+  if (expiresAt === "invalid") {
+    return formError("Add a valid expiration date.", {
+      expiresAt: ["Add a valid expiration date."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_discounts",
+  );
+  const giftCard = workspace.giftCards.find((item) => item.id === giftCardId);
+
+  if (!giftCard) {
+    return formError("Gift card not found.");
+  }
+
+  const recipientEmail = optionalText(parsed.data.recipientEmail);
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("gift_cards")
+    .update({
+      status: parsed.data.status,
+      recipient_email: recipientEmail,
+      note: optionalText(parsed.data.note),
+      expires_at: expiresAt,
+    })
+    .eq("id", giftCardId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "gift_card_updated",
+    resourceType: "gift_card",
+    resourceId: giftCardId,
+    summary: `${user.email} updated gift card ${maskGiftCardCode(giftCard.code)}.`,
+    metadata: {
+      code: maskGiftCardCode(giftCard.code),
+      previousStatus: giftCard.status,
+      status: parsed.data.status,
+      previousHasRecipient: Boolean(giftCard.recipientEmail),
+      hasRecipient: Boolean(recipientEmail),
+      previousExpiresAt: giftCard.expiresAt || null,
+      expiresAt,
+    },
+  });
+
+  if (recipientEmail && giftCard.status !== parsed.data.status) {
+    await queueNotification({
+      db,
+      storeId,
+      type: "gift_card_status_updated",
+      recipientEmail,
+      subject: "Gift card status updated",
+      preview: `Your gift card is ${parsed.data.status}.`,
+      resourceType: "gift_card",
+      resourceId: giftCardId,
+      metadata: {
+        code: maskGiftCardCode(giftCard.code),
+        status: parsed.data.status,
+      },
+    });
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+
+  return {
+    status: "success",
+    message: "Gift card updated.",
+  };
+}
+
 export async function createCollectionAction(
   storeId: string,
   _state: ActionState,
@@ -3424,6 +3684,123 @@ export async function createCollectionAction(
   return {
     status: "success",
     message: "Collection saved.",
+  };
+}
+
+export async function updateCollectionAction(
+  storeId: string,
+  collectionId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = collectionUpdateSchema.safeParse({
+    title: formData.get("title"),
+    description: formData.get("description") || undefined,
+    imageUrl: formData.get("imageUrl") || undefined,
+    status: formData.get("status"),
+    productIds: formData.getAll("productIds"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the collection details.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
+  const collection = workspace.collections.find((item) => item.id === collectionId);
+
+  if (!collection) {
+    return formError("Collection not found.");
+  }
+
+  const allowedProductIds = new Set(workspace.products.map((product) => product.id));
+  const productIds = [...new Set(parsed.data.productIds)].filter((productId) =>
+    allowedProductIds.has(productId),
+  );
+
+  if (productIds.length === 0) {
+    return formError("Choose at least one product.", {
+      productIds: ["Choose at least one product."],
+    });
+  }
+
+  const db = getSupabaseAdmin();
+  const { error: collectionError } = await db
+    .from("collections")
+    .update({
+      title: parsed.data.title,
+      description: optionalText(parsed.data.description),
+      image_url: optionalText(parsed.data.imageUrl),
+      status: parsed.data.status,
+    })
+    .eq("id", collectionId)
+    .eq("store_id", storeId);
+
+  if (collectionError) {
+    return formError(collectionError.message);
+  }
+
+  const { error: productsError } = await db.from("collection_products").upsert(
+    productIds.map((productId, index) => ({
+      collection_id: collectionId,
+      product_id: productId,
+      sort_order: index + 1,
+    })),
+    { onConflict: "collection_id,product_id" },
+  );
+
+  if (productsError) {
+    return formError(productsError.message);
+  }
+
+  const selectedProductIds = new Set(productIds);
+  const removedProductIds = collection.productIds.filter(
+    (productId) => !selectedProductIds.has(productId),
+  );
+
+  if (removedProductIds.length > 0) {
+    const { error: removeError } = await db
+      .from("collection_products")
+      .delete()
+      .eq("collection_id", collectionId)
+      .in("product_id", removedProductIds);
+
+    if (removeError) {
+      return formError(removeError.message);
+    }
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "collection_updated",
+    resourceType: "collection",
+    resourceId: collectionId,
+    summary: `${user.email} updated collection ${parsed.data.title}.`,
+    metadata: {
+      previousStatus: collection.status,
+      status: parsed.data.status,
+      previousProductCount: collection.productCount,
+      productCount: productIds.length,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/collections/${collection.slug}`);
+
+  return {
+    status: "success",
+    message: "Collection updated.",
   };
 }
 
@@ -3584,6 +3961,120 @@ export async function createShippingZoneAction(
   return {
     status: "success",
     message: "Shipping zone saved.",
+  };
+}
+
+export async function updateShippingZoneAction(
+  storeId: string,
+  shippingZoneId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = shippingZoneSchema.safeParse({
+    name: formData.get("name"),
+    countries: formData.get("countries"),
+    rate: formData.get("rate"),
+    freeShippingThreshold: formData.get("freeShippingThreshold") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the shipping zone details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const countries = parseShippingCountries(parsed.data.countries);
+  const rateCents = toPriceCents(parsed.data.rate);
+  const freeShippingThresholdCents = parseOptionalPriceCents(
+    parsed.data.freeShippingThreshold,
+  );
+
+  if (countries.length === 0) {
+    return formError("Add at least one country.", {
+      countries: ["Add at least one country."],
+    });
+  }
+
+  if (countries.length > 50) {
+    return formError("Keep each zone to 50 country aliases or fewer.", {
+      countries: ["Keep each zone to 50 country aliases or fewer."],
+    });
+  }
+
+  if (rateCents === null || rateCents < 0) {
+    return formError("Add a valid shipping rate.", {
+      rate: ["Shipping rate must be zero or a positive amount."],
+    });
+  }
+
+  if (freeShippingThresholdCents === null || freeShippingThresholdCents < 0) {
+    return formError("Add a valid free shipping threshold.", {
+      freeShippingThreshold: ["Threshold must be zero or a positive amount."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_shipping",
+  );
+  const shippingZone = workspace.shippingZones.find(
+    (zone) => zone.id === shippingZoneId,
+  );
+
+  if (!shippingZone) {
+    return formError("Shipping zone not found.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("shipping_zones")
+    .update({
+      name: parsed.data.name,
+      countries,
+      rate_cents: rateCents,
+      free_shipping_threshold_cents: freeShippingThresholdCents,
+      status: parsed.data.status,
+    })
+    .eq("id", shippingZoneId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "shipping_zone_updated",
+    resourceType: "shipping_zone",
+    resourceId: shippingZoneId,
+    summary: `${user.email} updated shipping zone ${parsed.data.name}.`,
+    metadata: {
+      previousStatus: shippingZone.status,
+      status: parsed.data.status,
+      previousCountryCount: shippingZone.countries.length,
+      countryCount: countries.length,
+      previousRateCents: shippingZone.rateCents,
+      rateCents,
+      previousFreeShippingThresholdCents:
+        shippingZone.freeShippingThresholdCents,
+      freeShippingThresholdCents,
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+
+  return {
+    status: "success",
+    message: "Shipping zone updated.",
   };
 }
 
