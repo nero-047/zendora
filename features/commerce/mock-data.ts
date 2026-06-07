@@ -2,8 +2,11 @@ import type {
   Discount,
   InventoryAdjustment,
   Order,
+  OrderRefund,
   Product,
+  ProductCollection,
   ProductVariant,
+  ShippingZone,
   Store,
 } from "@/features/commerce/types";
 
@@ -21,7 +24,7 @@ export const mockStores: Store[] = [
     createdAt: "2026-04-12T10:00:00.000Z",
     productCount: 4,
     orderCount: 3,
-    revenueCents: 57697,
+    revenueCents: 53497,
     inventoryCount: 142,
     shippingRateCents: 799,
     freeShippingThresholdCents: 15000,
@@ -45,6 +48,39 @@ export const mockStores: Store[] = [
     shippingRateCents: 599,
     freeShippingThresholdCents: 10000,
     taxRateBps: 0,
+  },
+];
+
+export const mockShippingZones: ShippingZone[] = [
+  {
+    id: "demo-shipping-zone-us",
+    storeId: "demo-store-outdoor",
+    name: "United States",
+    countries: ["United States", "US", "USA"],
+    rateCents: 799,
+    freeShippingThresholdCents: 15000,
+    status: "active",
+    createdAt: "2026-04-13T10:00:00.000Z",
+  },
+  {
+    id: "demo-shipping-zone-ca-eu",
+    storeId: "demo-store-outdoor",
+    name: "Canada and Europe",
+    countries: ["Canada", "CA", "United Kingdom", "UK", "Germany", "France"],
+    rateCents: 2499,
+    freeShippingThresholdCents: 30000,
+    status: "active",
+    createdAt: "2026-04-13T10:05:00.000Z",
+  },
+  {
+    id: "demo-shipping-zone-studio-us",
+    storeId: "demo-store-studio",
+    name: "US draft rate",
+    countries: ["United States", "US"],
+    rateCents: 599,
+    freeShippingThresholdCents: 10000,
+    status: "active",
+    createdAt: "2026-05-08T10:00:00.000Z",
   },
 ];
 
@@ -264,6 +300,59 @@ export const mockProducts: Product[] = [
   },
 ];
 
+export const mockCollections: ProductCollection[] = [
+  {
+    id: "demo-collection-everyday-carry",
+    storeId: "demo-store-outdoor",
+    title: "Everyday Carry",
+    slug: "everyday-carry",
+    description:
+      "Bags, bottles, and accessories built for commutes, travel days, and daily work.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    sortOrder: 1,
+    productIds: [
+      "demo-product-carry-pack",
+      "demo-product-hydra-bottle",
+      "demo-product-trail-watch",
+    ],
+    productCount: 3,
+    createdAt: "2026-04-24T10:00:00.000Z",
+  },
+  {
+    id: "demo-collection-trail-ready",
+    storeId: "demo-store-outdoor",
+    title: "Trail Ready",
+    slug: "trail-ready",
+    description:
+      "Lightweight pieces for weekend hikes, training runs, and fast weather shifts.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80",
+    status: "active",
+    sortOrder: 2,
+    productIds: [
+      "demo-product-sprint-shoe",
+      "demo-product-trail-watch",
+      "demo-product-hydra-bottle",
+    ],
+    productCount: 3,
+    createdAt: "2026-04-25T10:00:00.000Z",
+  },
+  {
+    id: "demo-collection-studio-desk",
+    storeId: "demo-store-studio",
+    title: "Studio Desk",
+    slug: "studio-desk",
+    description: "Draft desk goods for the studio storefront.",
+    status: "draft",
+    sortOrder: 1,
+    productIds: ["demo-product-calm-lamp", "demo-product-ceramic-cup"],
+    productCount: 2,
+    createdAt: "2026-05-12T10:00:00.000Z",
+  },
+];
+
 export const mockOrders: Order[] = [
   {
     id: "demo-order-1001",
@@ -281,12 +370,19 @@ export const mockOrders: Order[] = [
     },
     customerNote: "Leave at the front desk.",
     status: "paid",
+    source: "storefront",
+    paymentStatus: "paid",
+    paymentMethod: "card",
+    paymentProvider: "Manual card",
+    paymentReference: "CARD-1001",
     subtotalCents: 34800,
     discountCents: 0,
     shippingCents: 0,
     taxCents: 2871,
     taxRateBps: 825,
     totalCents: 37671,
+    refundedCents: 0,
+    refundableCents: 37671,
     currency: "USD",
     createdAt: "2026-05-25T13:20:00.000Z",
     paidAt: "2026-05-25T13:22:00.000Z",
@@ -313,6 +409,7 @@ export const mockOrders: Order[] = [
         createdAt: "2026-05-25T13:20:00.000Z",
       },
     ],
+    refunds: [],
   },
   {
     id: "demo-order-1002",
@@ -328,12 +425,19 @@ export const mockOrders: Order[] = [
       country: "United States",
     },
     status: "fulfilled",
+    source: "storefront",
+    paymentStatus: "partially_refunded",
+    paymentMethod: "bank_transfer",
+    paymentProvider: "Bank transfer",
+    paymentReference: "ACH-1002",
     subtotalCents: 18500,
     discountCents: 0,
     shippingCents: 0,
     taxCents: 1526,
     taxRateBps: 825,
     totalCents: 20026,
+    refundedCents: 4200,
+    refundableCents: 15826,
     currency: "USD",
     createdAt: "2026-05-29T09:40:00.000Z",
     paidAt: "2026-05-29T09:42:00.000Z",
@@ -368,6 +472,19 @@ export const mockOrders: Order[] = [
         createdAt: "2026-05-29T09:40:00.000Z",
       },
     ],
+    refunds: [
+      {
+        id: "demo-refund-1002-1",
+        storeId: "demo-store-outdoor",
+        orderId: "demo-order-1002",
+        clerkUserId: "demo_user_zendora",
+        amountCents: 4200,
+        reason: "customer_request",
+        note: "Bottle returned unopened after duplicate purchase.",
+        restockedInventory: false,
+        createdAt: "2026-06-01T11:20:00.000Z",
+      },
+    ],
   },
   {
     id: "demo-order-1003",
@@ -382,6 +499,12 @@ export const mockOrders: Order[] = [
       country: "United States",
     },
     status: "pending",
+    source: "manual",
+    internalNote: "Manual phone order; send invoice follow-up before packing.",
+    paymentStatus: "pending",
+    paymentMethod: "manual_invoice",
+    paymentProvider: "manual",
+    paymentReference: "INV-1003",
     subtotalCents: 12900,
     discountCode: "WELCOME10",
     discountCents: 1290,
@@ -389,6 +512,8 @@ export const mockOrders: Order[] = [
     taxCents: 958,
     taxRateBps: 825,
     totalCents: 13367,
+    refundedCents: 0,
+    refundableCents: 13367,
     currency: "USD",
     createdAt: "2026-06-02T16:12:00.000Z",
     items: [
@@ -405,8 +530,13 @@ export const mockOrders: Order[] = [
         createdAt: "2026-06-02T16:12:00.000Z",
       },
     ],
+    refunds: [],
   },
 ];
+
+export const mockOrderRefunds: OrderRefund[] = mockOrders.flatMap(
+  (order) => order.refunds,
+);
 
 export const mockInventoryAdjustments: InventoryAdjustment[] = [
   {

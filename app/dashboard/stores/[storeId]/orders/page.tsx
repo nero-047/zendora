@@ -12,9 +12,14 @@ import {
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { ManualOrderForm } from "@/features/commerce/components/manual-order-form";
 import { getCustomerHref } from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
-import { orderStatusLabels } from "@/features/commerce/order-status";
+import {
+  orderSourceLabels,
+  orderStatusLabels,
+  paymentStatusLabels,
+} from "@/features/commerce/order-status";
 import {
   filterOrders,
   getOrderHref,
@@ -44,7 +49,7 @@ export default async function OrdersPage({
     notFound();
   }
 
-  const { store, orders } = workspace;
+  const { store, products, orders } = workspace;
   const searchQuery = readSearchParam(query.q);
   const selectedStatus = parseOrderStatusFilter(query.status);
   const filteredOrders = filterOrders({
@@ -117,6 +122,12 @@ export default async function OrdersPage({
         ))}
       </section>
 
+      <ManualOrderForm
+        currency={store.currency}
+        products={products}
+        storeId={store.id}
+      />
+
       <section className="soft-panel p-4">
         <form className="grid gap-3 lg:grid-cols-[1fr_auto_auto]" method="get">
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
@@ -153,16 +164,18 @@ export default async function OrdersPage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto]">
           <span>Order</span>
+          <span className="hidden xl:inline">Source</span>
           <span className="hidden xl:inline">Status</span>
+          <span className="hidden xl:inline">Payment</span>
           <span className="hidden xl:inline">Fulfillment</span>
           <span className="hidden xl:inline">Total</span>
           <span>View</span>
         </div>
         {filteredOrders.map((order) => (
           <div
-            className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto]"
+            className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto]"
             key={order.id}
           >
             <div className="min-w-0">
@@ -172,6 +185,12 @@ export default async function OrdersPage({
                 </p>
                 <span className="status-pill xl:hidden">
                   {orderStatusLabels[order.status]}
+                </span>
+                <span className="status-pill xl:hidden">
+                  {paymentStatusLabels[order.paymentStatus]}
+                </span>
+                <span className="status-pill xl:hidden">
+                  {orderSourceLabels[order.source]}
                 </span>
               </div>
               <Link
@@ -198,7 +217,13 @@ export default async function OrdersPage({
               ) : null}
             </div>
             <span className="status-pill hidden w-fit xl:inline-flex">
+              {orderSourceLabels[order.source]}
+            </span>
+            <span className="status-pill hidden w-fit xl:inline-flex">
               {orderStatusLabels[order.status]}
+            </span>
+            <span className="status-pill hidden w-fit xl:inline-flex">
+              {paymentStatusLabels[order.paymentStatus]}
             </span>
             <span className="hidden text-sm text-slate-600 xl:inline">
               {order.trackingNumber ? (
@@ -215,7 +240,9 @@ export default async function OrdersPage({
               )}
             </span>
             <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
-              {formatCurrency(order.totalCents, order.currency)}
+              {order.refundedCents > 0
+                ? formatCurrency(order.refundableCents, order.currency)
+                : formatCurrency(order.totalCents, order.currency)}
             </span>
             <Link
               className="secondary-button min-h-10 px-3 text-sm"

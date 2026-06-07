@@ -57,7 +57,8 @@ export function getCustomerSummaries(
         orderCount: sortedOrders.length,
         paidOrderCount: paidOrders.length,
         totalSpentCents: paidOrders.reduce(
-          (sum, order) => sum + order.totalCents,
+          (sum, order) =>
+            sum + Math.max(0, order.totalCents - order.refundedCents),
           0,
         ),
         currency: latestOrder.currency || defaultCurrency,

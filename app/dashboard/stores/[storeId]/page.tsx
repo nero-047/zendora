@@ -6,17 +6,21 @@ import {
   CheckCircle,
   Edit3,
   ExternalLink,
+  Layers3,
   PackagePlus,
   PauseCircle,
   Percent,
   PlayCircle,
   ReceiptText,
   ShoppingBag,
+  Truck,
   Users,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { CollectionForm } from "@/features/commerce/components/collection-form";
 import { DiscountForm } from "@/features/commerce/components/discount-form";
+import { ShippingZoneForm } from "@/features/commerce/components/shipping-zone-form";
 import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
 import {
   getCustomerStats,
@@ -30,8 +34,10 @@ import {
 import {
   pauseStoreAction,
   publishStoreAction,
+  updateCollectionStatusAction,
   updateDiscountStatusAction,
   updateOrderStatusAction,
+  updateShippingZoneStatusAction,
 } from "@/features/commerce/actions";
 import { formatCurrency } from "@/lib/utils";
 
@@ -48,7 +54,7 @@ export default async function StorePage({
     notFound();
   }
 
-  const { store, products, orders, discounts } = workspace;
+  const { store, products, collections, shippingZones, orders, discounts } = workspace;
   const customers = getCustomerSummaries(orders, store.currency);
   const customerStats = getCustomerStats(customers);
 
@@ -123,6 +129,143 @@ export default async function StorePage({
       </section>
 
       <StoreSettingsForm store={store} />
+
+      <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <ShippingZoneForm storeId={store.id} />
+
+        <div className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 p-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Truck aria-hidden="true" size={18} />
+              Shipping rates
+            </h2>
+          </div>
+          {shippingZones.length > 0 ? (
+            shippingZones.map((zone) => (
+              <div className="border-b border-slate-100 p-4 last:border-0" key={zone.id}>
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-indigo-500/10 text-indigo-700">
+                    <Truck aria-hidden="true" size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-950">{zone.name}</p>
+                      <span className="status-pill">{zone.status}</span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium text-slate-700">
+                      {formatCurrency(zone.rateCents, store.currency)}
+                      {zone.freeShippingThresholdCents > 0
+                        ? ` / free at ${formatCurrency(zone.freeShippingThresholdCents, store.currency)}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                      {zone.countries.join(", ")}
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  action={updateShippingZoneStatusAction.bind(null, store.id, zone.id)}
+                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
+                >
+                  <select
+                    aria-label={`Status for ${zone.name}`}
+                    className="field min-h-10 py-2 text-sm"
+                    defaultValue={zone.status}
+                    name="status"
+                  >
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                  </select>
+                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                    <CheckCircle aria-hidden="true" size={16} />
+                    Update
+                  </button>
+                </form>
+              </div>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-slate-500">No shipping zones yet.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <CollectionForm products={products} storeId={store.id} />
+
+        <div className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 p-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <Layers3 aria-hidden="true" size={18} />
+              Collections
+            </h2>
+          </div>
+          {collections.length > 0 ? (
+            collections.map((collection) => (
+              <div
+                className="border-b border-slate-100 p-4 last:border-0"
+                key={collection.id}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-sky-500/10 text-sky-700">
+                    <Layers3 aria-hidden="true" size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-950">
+                        {collection.title}
+                      </p>
+                      <span className="status-pill">{collection.status}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {collection.productCount} products / {collection.slug}
+                    </p>
+                    {collection.description ? (
+                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+                        {collection.description}
+                      </p>
+                    ) : null}
+                    {collection.status === "active" ? (
+                      <Link
+                        className="mt-2 inline-flex text-sm font-semibold text-sky-700"
+                        href={`/stores/${store.slug}/collections/${collection.slug}`}
+                      >
+                        View collection
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+
+                <form
+                  action={updateCollectionStatusAction.bind(
+                    null,
+                    store.id,
+                    collection.id,
+                  )}
+                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
+                >
+                  <select
+                    aria-label={`Status for ${collection.title}`}
+                    className="field min-h-10 py-2 text-sm"
+                    defaultValue={collection.status}
+                    name="status"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                    <CheckCircle aria-hidden="true" size={16} />
+                    Update
+                  </button>
+                </form>
+              </div>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-slate-500">No collections yet.</p>
+          )}
+        </div>
+      </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <DiscountForm storeId={store.id} />
@@ -269,8 +412,17 @@ export default async function StorePage({
                         {orderStatusLabels[order.status]}
                       </span>
                     </div>
-                    <span className="text-sm font-semibold text-slate-950">{formatCurrency(order.totalCents, order.currency)}</span>
+                    <span className="text-sm font-semibold text-slate-950">
+                      {order.refundedCents > 0
+                        ? formatCurrency(order.refundableCents, order.currency)
+                        : formatCurrency(order.totalCents, order.currency)}
+                    </span>
                   </div>
+                  {order.refundedCents > 0 ? (
+                    <p className="mt-2 pl-[52px] text-xs font-medium text-red-600">
+                      {formatCurrency(order.refundedCents, order.currency)} refunded
+                    </p>
+                  ) : null}
 
                   {order.items?.length ? (
                     <div className="mt-3 grid gap-1 pl-[52px] text-xs text-slate-500">

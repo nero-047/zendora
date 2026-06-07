@@ -1,7 +1,28 @@
 export type StoreStatus = "draft" | "active" | "paused";
+export type ShippingZoneStatus = "active" | "paused";
 export type ProductStatus = "draft" | "active" | "archived";
 export type ProductVariantStatus = "active" | "paused";
+export type CollectionStatus = "draft" | "active" | "archived";
 export type OrderStatus = "pending" | "paid" | "fulfilled" | "cancelled";
+export type OrderSource = "storefront" | "manual";
+export type PaymentStatus =
+  | "pending"
+  | "authorized"
+  | "paid"
+  | "partially_refunded"
+  | "refunded"
+  | "voided";
+export type PaymentMethod =
+  | "manual_invoice"
+  | "bank_transfer"
+  | "cash_on_delivery"
+  | "card"
+  | "other";
+export type RefundReason =
+  | "customer_request"
+  | "damaged"
+  | "fraud"
+  | "other";
 export type DiscountStatus = "active" | "paused";
 export type DiscountType = "percent" | "fixed";
 
@@ -22,6 +43,17 @@ export type Store = {
   shippingRateCents: number;
   freeShippingThresholdCents: number;
   taxRateBps: number;
+};
+
+export type ShippingZone = {
+  id: string;
+  storeId: string;
+  name: string;
+  countries: string[];
+  rateCents: number;
+  freeShippingThresholdCents: number;
+  status: ShippingZoneStatus;
+  createdAt: string;
 };
 
 export type Product = {
@@ -57,6 +89,20 @@ export type ProductVariant = {
   createdAt: string;
 };
 
+export type ProductCollection = {
+  id: string;
+  storeId: string;
+  title: string;
+  slug: string;
+  description: string;
+  imageUrl?: string;
+  status: CollectionStatus;
+  sortOrder: number;
+  productIds: string[];
+  productCount: number;
+  createdAt: string;
+};
+
 export type InventoryAdjustmentReason =
   | "restock"
   | "correction"
@@ -88,6 +134,12 @@ export type Order = {
   shippingAddress?: ShippingAddress;
   customerNote?: string;
   status: OrderStatus;
+  source: OrderSource;
+  internalNote?: string;
+  paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
+  paymentProvider: string;
+  paymentReference?: string;
   subtotalCents: number;
   discountCode?: string;
   discountCents: number;
@@ -95,6 +147,8 @@ export type Order = {
   taxCents: number;
   taxRateBps: number;
   totalCents: number;
+  refundedCents: number;
+  refundableCents: number;
   currency: string;
   createdAt: string;
   paidAt?: string;
@@ -106,6 +160,7 @@ export type Order = {
   trackingUrl?: string;
   fulfillmentNote?: string;
   items?: OrderItem[];
+  refunds: OrderRefund[];
 };
 
 export type ShippingAddress = {
@@ -130,6 +185,18 @@ export type OrderItem = {
   createdAt: string;
 };
 
+export type OrderRefund = {
+  id: string;
+  storeId: string;
+  orderId: string;
+  clerkUserId: string;
+  amountCents: number;
+  reason: RefundReason;
+  note?: string;
+  restockedInventory: boolean;
+  createdAt: string;
+};
+
 export type Discount = {
   id: string;
   storeId: string;
@@ -147,7 +214,9 @@ export type Discount = {
 
 export type StoreWorkspace = {
   store: Store;
+  shippingZones: ShippingZone[];
   products: Product[];
+  collections: ProductCollection[];
   orders: Order[];
   discounts: Discount[];
   inventoryAdjustments: InventoryAdjustment[];

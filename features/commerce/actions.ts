@@ -6,15 +6,25 @@ import { z } from "zod";
 
 import { requireAppUser } from "@/features/auth/app-user";
 import type { ActionState } from "@/features/commerce/action-state";
-import type { Product, ProductVariant } from "@/features/commerce/types";
+import type {
+  PaymentMethod,
+  PaymentStatus,
+  Product,
+  ProductVariant,
+  ShippingZone,
+} from "@/features/commerce/types";
 import {
+  getAvailableCollectionSlug,
   getAvailableProductSlug,
   getAvailableStoreSlug,
   getLivePublicStorefront,
   getStoreWorkspace,
   upsertProfileForUser,
 } from "@/features/commerce/data";
-import { canTransitionOrderStatus } from "@/features/commerce/order-status";
+import {
+  canTransitionOrderStatus,
+  isRevenueOrderStatus,
+} from "@/features/commerce/order-status";
 import { isSupabaseConfigured } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { uploadProductImageObject } from "@/lib/supabase/storage";
@@ -126,6 +136,7 @@ const checkoutSchema = z.object({
     .trim()
     .min(2, "Add the country.")
     .max(80, "Keep country under 80 characters."),
+  paymentMethod: z.enum(["manual_invoice", "bank_transfer", "cash_on_delivery"]),
   customerNote: z
     .string()
     .trim()
@@ -151,8 +162,139 @@ const discountSchema = z.object({
   endsAt: z.string().trim().optional(),
 });
 
+const collectionSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(2, "Collection title must be at least 2 characters.")
+    .max(80, "Keep collection titles under 80 characters."),
+  description: z
+    .string()
+    .trim()
+    .max(260, "Keep collection descriptions under 260 characters.")
+    .optional(),
+  imageUrl: z
+    .string()
+    .trim()
+    .url("Add a valid image URL.")
+    .optional()
+    .or(z.literal("")),
+  status: z.enum(["draft", "active"]),
+  productIds: z.array(z.string().trim().min(1)).max(80),
+});
+
+const collectionStatusSchema = z.object({
+  status: z.enum(["draft", "active", "archived"]),
+});
+
+const shippingZoneSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Zone name must be at least 2 characters.")
+    .max(80, "Keep zone names under 80 characters."),
+  countries: z
+    .string()
+    .trim()
+    .min(2, "Add at least one country.")
+    .max(500, "Keep countries under 500 characters."),
+  rate: z.string().trim().min(1, "Add a shipping rate."),
+  freeShippingThreshold: z.string().trim().optional(),
+  status: z.enum(["active", "paused"]),
+});
+
+const shippingZoneStatusSchema = z.object({
+  status: z.enum(["active", "paused"]),
+});
+
 const orderStatusSchema = z.object({
   status: z.enum(["pending", "paid", "fulfilled", "cancelled"]),
+});
+
+const paymentConfirmationSchema = z.object({
+  paymentMethod: z.enum([
+    "manual_invoice",
+    "bank_transfer",
+    "cash_on_delivery",
+    "card",
+    "other",
+  ]),
+  paymentProvider: z
+    .string()
+    .trim()
+    .max(80, "Keep provider names under 80 characters.")
+    .optional(),
+  paymentReference: z
+    .string()
+    .trim()
+    .max(120, "Keep references under 120 characters.")
+    .optional(),
+});
+
+const manualOrderSchema = z.object({
+  customerName: z
+    .string()
+    .trim()
+    .min(2, "Add the customer name.")
+    .max(80, "Keep the name under 80 characters."),
+  customerEmail: z.string().trim().email("Add a valid customer email."),
+  customerPhone: z.string().trim().max(32, "Keep phone under 32 characters.").optional(),
+  shippingAddressLine1: z
+    .string()
+    .trim()
+    .max(140, "Keep address under 140 characters.")
+    .optional(),
+  shippingAddressLine2: z
+    .string()
+    .trim()
+    .max(140, "Keep address under 140 characters.")
+    .optional(),
+  shippingCity: z
+    .string()
+    .trim()
+    .max(80, "Keep city under 80 characters.")
+    .optional(),
+  shippingRegion: z
+    .string()
+    .trim()
+    .max(80, "Keep region under 80 characters.")
+    .optional(),
+  shippingPostalCode: z
+    .string()
+    .trim()
+    .max(24, "Keep postal code under 24 characters.")
+    .optional(),
+  shippingCountry: z
+    .string()
+    .trim()
+    .max(80, "Keep country under 80 characters.")
+    .optional(),
+  lineIds: z.array(z.string().trim().min(1)).min(1, "Choose at least one item."),
+  manualDiscount: z.string().trim().optional(),
+  manualShipping: z.string().trim().optional(),
+  paymentStatus: z.enum(["pending", "paid"]),
+  paymentMethod: z.enum([
+    "manual_invoice",
+    "bank_transfer",
+    "cash_on_delivery",
+    "card",
+    "other",
+  ]),
+  paymentProvider: z
+    .string()
+    .trim()
+    .max(80, "Keep provider names under 80 characters.")
+    .optional(),
+  paymentReference: z
+    .string()
+    .trim()
+    .max(120, "Keep references under 120 characters.")
+    .optional(),
+  internalNote: z
+    .string()
+    .trim()
+    .max(400, "Keep internal notes under 400 characters.")
+    .optional(),
 });
 
 const orderFulfillmentSchema = z.object({
@@ -179,6 +321,13 @@ const orderFulfillmentSchema = z.object({
   markFulfilled: z.boolean(),
 });
 
+const refundSchema = z.object({
+  amount: z.string().trim().min(1, "Add a refund amount."),
+  reason: z.enum(["customer_request", "damaged", "fraud", "other"]),
+  note: z.string().trim().max(400, "Keep refund notes under 400 characters.").optional(),
+  restockInventory: z.boolean(),
+});
+
 const discountStatusSchema = z.object({
   status: z.enum(["active", "paused"]),
 });
@@ -198,6 +347,10 @@ type CheckoutDiscountRow = {
 
 type OrderLifecycleRow = {
   status: z.infer<typeof orderStatusSchema>["status"];
+  payment_status: PaymentStatus | null;
+  payment_method: PaymentMethod | null;
+  payment_provider: string | null;
+  payment_reference: string | null;
   paid_at: string | null;
   fulfilled_at: string | null;
   cancelled_at: string | null;
@@ -236,6 +389,16 @@ type RestockedInventory = {
   productId: string;
   productVariantId?: string;
   quantity: number;
+};
+
+type OrderInputItem = {
+  product: Product;
+  variant?: ProductVariant;
+  variantName?: string;
+  variantSku?: string;
+  unitPriceCents: number;
+  quantity: number;
+  lineTotalCents: number;
 };
 
 type ReservedInventory = {
@@ -434,6 +597,170 @@ function parseProductVariantRows(input: {
   return { variants };
 }
 
+function normalizeShippingCountry(value: string) {
+  return value.trim().toLowerCase().replace(/[.]/g, "").replace(/\s+/g, " ");
+}
+
+function parseShippingCountries(value: string) {
+  const countries = value
+    .split(/[\n,]+/)
+    .map((country) => country.trim())
+    .filter(Boolean);
+
+  return [...new Set(countries)];
+}
+
+function getManualPaymentProvider(method: PaymentMethod) {
+  if (method === "bank_transfer") {
+    return "Bank transfer";
+  }
+
+  if (method === "cash_on_delivery") {
+    return "Cash on delivery";
+  }
+
+  if (method === "card") {
+    return "Card";
+  }
+
+  if (method === "other") {
+    return "Other";
+  }
+
+  return "Manual invoice";
+}
+
+function parseManualOrderLineKey(key: string) {
+  const [productId, variantId = "base"] = key.split("__");
+
+  try {
+    return {
+      productId: decodeURIComponent(productId),
+      variantId:
+        variantId === "base" ? undefined : decodeURIComponent(variantId),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getManualOrderItems(input: {
+  formData: FormData;
+  lineIds: string[];
+  products: Product[];
+}): { items: OrderInputItem[]; errors?: ActionState["errors"]; message?: string } {
+  const productsById = new Map(input.products.map((product) => [product.id, product]));
+  const seenLineKeys = new Set<string>();
+  const items: OrderInputItem[] = [];
+
+  for (const lineKey of input.lineIds) {
+    if (seenLineKeys.has(lineKey)) {
+      continue;
+    }
+
+    seenLineKeys.add(lineKey);
+    const parsedKey = parseManualOrderLineKey(lineKey);
+
+    if (!parsedKey) {
+      return {
+        items: [],
+        message: "One or more order lines are invalid.",
+        errors: { lineIds: ["Choose valid products."] },
+      };
+    }
+
+    const product = productsById.get(parsedKey.productId);
+
+    if (!product || product.status === "archived") {
+      return {
+        items: [],
+        message: "One or more products are no longer available.",
+        errors: { lineIds: ["Choose available products."] },
+      };
+    }
+
+    const activeVariants = product.variants.filter(
+      (variant) => variant.status === "active",
+    );
+    const variant = parsedKey.variantId
+      ? activeVariants.find((item) => item.id === parsedKey.variantId)
+      : undefined;
+
+    if (activeVariants.length > 0 && !variant) {
+      return {
+        items: [],
+        message: `Choose a variant for ${product.name}.`,
+        errors: { lineIds: [`Choose a variant for ${product.name}.`] },
+      };
+    }
+
+    const quantity = Number(input.formData.get(`quantity:${lineKey}`));
+
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      return {
+        items: [],
+        message: "Check manual order quantities.",
+        errors: { lineIds: ["Quantities must be whole numbers from 1 to 99."] },
+      };
+    }
+
+    const inventoryCount = variant?.inventoryCount ?? product.inventoryCount;
+
+    if (inventoryCount < quantity) {
+      const stockLabel = variant
+        ? `${product.name} ${variant.optionValue}`
+        : product.name;
+
+      return {
+        items: [],
+        message: `${stockLabel} only has ${inventoryCount} in stock.`,
+        errors: { lineIds: [`${stockLabel} only has ${inventoryCount} in stock.`] },
+      };
+    }
+
+    const unitPriceCents = variant?.priceCents ?? product.priceCents;
+
+    items.push({
+      product,
+      variant,
+      variantName: variant
+        ? `${variant.optionName}: ${variant.optionValue}`
+        : undefined,
+      variantSku: variant?.sku,
+      unitPriceCents,
+      quantity,
+      lineTotalCents: unitPriceCents * quantity,
+    });
+  }
+
+  if (items.length === 0) {
+    return {
+      items: [],
+      message: "Choose at least one item.",
+      errors: { lineIds: ["Choose at least one item."] },
+    };
+  }
+
+  return { items };
+}
+
+function getMatchingShippingZone(zones: ShippingZone[], country: string) {
+  const normalizedCountry = normalizeShippingCountry(country);
+
+  if (!normalizedCountry) {
+    return undefined;
+  }
+
+  return zones.find(
+    (zone) =>
+      zone.status === "active" &&
+      zone.countries.some(
+        (zoneCountry) =>
+          normalizeShippingCountry(zoneCountry) === normalizedCountry,
+      ),
+  );
+}
+
 function getVariantCatalogTotals(
   fallbackPriceCents: number,
   fallbackInventoryCount: number,
@@ -471,23 +798,39 @@ function calculateDiscountCents(
   return Math.min(subtotalCents, discount.value);
 }
 
-function calculateShippingCents(input: {
+function calculateShippingQuote(input: {
   discountedSubtotalCents: number;
   freeShippingThresholdCents: number;
+  shippingCountry: string;
   shippingRateCents: number;
+  shippingZones: ShippingZone[];
 }) {
+  const zone = getMatchingShippingZone(input.shippingZones, input.shippingCountry);
+  const freeShippingThresholdCents =
+    zone?.freeShippingThresholdCents ?? input.freeShippingThresholdCents;
+  const shippingRateCents = zone?.rateCents ?? input.shippingRateCents;
+
   if (input.discountedSubtotalCents <= 0) {
-    return 0;
+    return {
+      shippingCents: 0,
+      zone,
+    };
   }
 
   if (
-    input.freeShippingThresholdCents > 0 &&
-    input.discountedSubtotalCents >= input.freeShippingThresholdCents
+    freeShippingThresholdCents > 0 &&
+    input.discountedSubtotalCents >= freeShippingThresholdCents
   ) {
-    return 0;
+    return {
+      shippingCents: 0,
+      zone,
+    };
   }
 
-  return input.shippingRateCents;
+  return {
+    shippingCents: shippingRateCents,
+    zone,
+  };
 }
 
 function calculateTaxCents(discountedSubtotalCents: number, taxRateBps: number) {
@@ -876,6 +1219,114 @@ async function rollbackReservedInventory(
       .update({ inventory_count: item.productInventoryCount })
       .eq("id", item.productId);
   }
+}
+
+async function reserveOrderInventory(input: {
+  db: ReturnType<typeof getSupabaseAdmin>;
+  storeId: string;
+  items: OrderInputItem[];
+}) {
+  const reservedInventory: ReservedInventory[] = [];
+  const productInventoryById = new Map(
+    input.items.map((item) => [item.product.id, item.product.inventoryCount]),
+  );
+  const variantInventoryById = new Map<string, number>();
+
+  for (const item of input.items) {
+    if (item.variant) {
+      variantInventoryById.set(item.variant.id, item.variant.inventoryCount);
+    }
+  }
+
+  for (const item of input.items) {
+    const productInventory = productInventoryById.get(item.product.id);
+    let currentVariantInventory: number | undefined;
+
+    if (productInventory === undefined) {
+      await rollbackReservedInventory(input.db, reservedInventory);
+
+      return {
+        reservedInventory,
+        error: "Product inventory could not be reserved.",
+      };
+    }
+
+    if (item.variant) {
+      const variantInventory = variantInventoryById.get(item.variant.id);
+
+      if (variantInventory === undefined) {
+        await rollbackReservedInventory(input.db, reservedInventory);
+
+        return {
+          reservedInventory,
+          error: "Variant inventory could not be reserved.",
+        };
+      }
+
+      currentVariantInventory = variantInventory;
+      const nextVariantInventory = variantInventory - item.quantity;
+      const { data: variantData, error: variantError } = await input.db
+        .from("product_variants")
+        .update({ inventory_count: nextVariantInventory })
+        .eq("id", item.variant.id)
+        .eq("store_id", input.storeId)
+        .eq("product_id", item.product.id)
+        .eq("inventory_count", variantInventory)
+        .select("id")
+        .maybeSingle();
+
+      if (variantError || !variantData) {
+        await rollbackReservedInventory(input.db, reservedInventory);
+
+        return {
+          reservedInventory,
+          error:
+            variantError?.message ||
+            "Variant inventory changed while order inventory was being reserved.",
+        };
+      }
+
+      variantInventoryById.set(item.variant.id, nextVariantInventory);
+    }
+
+    const nextInventory = productInventory - item.quantity;
+    const { data, error } = await input.db
+      .from("products")
+      .update({ inventory_count: nextInventory })
+      .eq("id", item.product.id)
+      .eq("store_id", input.storeId)
+      .eq("inventory_count", productInventory)
+      .select("id")
+      .maybeSingle();
+
+    if (error || !data) {
+      if (item.variant && currentVariantInventory !== undefined) {
+        await input.db
+          .from("product_variants")
+          .update({ inventory_count: currentVariantInventory })
+          .eq("id", item.variant.id);
+      }
+
+      await rollbackReservedInventory(input.db, reservedInventory);
+
+      return {
+        reservedInventory,
+        error:
+          error?.message ||
+          "Inventory changed while order inventory was being reserved.",
+      };
+    }
+
+    reservedInventory.push({
+      productId: item.product.id,
+      productInventoryCount: productInventory,
+      productVariantId: item.variant?.id,
+      variantInventoryCount: item.variant?.inventoryCount,
+    });
+    productInventoryById.set(item.product.id, nextInventory);
+  }
+
+  return { reservedInventory, error: null };
 }
 
 async function insertInventoryAdjustment(input: {
@@ -1573,6 +2024,416 @@ export async function createDiscountAction(
   };
 }
 
+export async function createCollectionAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = collectionSchema.safeParse({
+    title: formData.get("title"),
+    description: formData.get("description") || undefined,
+    imageUrl: formData.get("imageUrl") || undefined,
+    status: formData.get("status"),
+    productIds: formData.getAll("productIds"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the collection details.", parsed.error.flatten().fieldErrors);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const allowedProductIds = new Set(workspace.products.map((product) => product.id));
+  const productIds = [...new Set(parsed.data.productIds)].filter((productId) =>
+    allowedProductIds.has(productId),
+  );
+
+  if (productIds.length === 0) {
+    return formError("Choose at least one product.", {
+      productIds: ["Choose at least one product."],
+    });
+  }
+
+  const db = getSupabaseAdmin();
+  const slug = await getAvailableCollectionSlug(storeId, parsed.data.title);
+  const { data: collection, error } = await db
+    .from("collections")
+    .insert({
+      store_id: storeId,
+      title: parsed.data.title,
+      slug,
+      description: optionalText(parsed.data.description),
+      image_url: optionalText(parsed.data.imageUrl),
+      status: parsed.data.status,
+      sort_order: workspace.collections.length + 1,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  const { error: productsError } = await db.from("collection_products").insert(
+    productIds.map((productId, index) => ({
+      collection_id: collection.id,
+      product_id: productId,
+      sort_order: index + 1,
+    })),
+  );
+
+  if (productsError) {
+    await db.from("collections").delete().eq("id", collection.id).eq("store_id", storeId);
+
+    return formError(productsError.message);
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/collections/${slug}`);
+
+  return {
+    status: "success",
+    message: "Collection saved.",
+  };
+}
+
+export async function updateCollectionStatusAction(
+  storeId: string,
+  collectionId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = collectionStatusSchema.safeParse({
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    throw new Error("Choose a valid collection status.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const collection = workspace.collections.find((item) => item.id === collectionId);
+
+  if (!collection) {
+    throw new Error("Collection not found.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("collections")
+    .update({ status: parsed.data.status })
+    .eq("id", collectionId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    throw error;
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/collections/${collection.slug}`);
+}
+
+export async function createShippingZoneAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = shippingZoneSchema.safeParse({
+    name: formData.get("name"),
+    countries: formData.get("countries"),
+    rate: formData.get("rate"),
+    freeShippingThreshold: formData.get("freeShippingThreshold") || undefined,
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the shipping zone details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const countries = parseShippingCountries(parsed.data.countries);
+  const rateCents = toPriceCents(parsed.data.rate);
+  const freeShippingThresholdCents = parseOptionalPriceCents(
+    parsed.data.freeShippingThreshold,
+  );
+
+  if (countries.length === 0) {
+    return formError("Add at least one country.", {
+      countries: ["Add at least one country."],
+    });
+  }
+
+  if (countries.length > 50) {
+    return formError("Keep each zone to 50 country aliases or fewer.", {
+      countries: ["Keep each zone to 50 country aliases or fewer."],
+    });
+  }
+
+  if (rateCents === null || rateCents < 0) {
+    return formError("Add a valid shipping rate.", {
+      rate: ["Shipping rate must be zero or a positive amount."],
+    });
+  }
+
+  if (freeShippingThresholdCents === null || freeShippingThresholdCents < 0) {
+    return formError("Add a valid free shipping threshold.", {
+      freeShippingThreshold: ["Threshold must be zero or a positive amount."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const db = getSupabaseAdmin();
+  const { error } = await db.from("shipping_zones").insert({
+    store_id: storeId,
+    name: parsed.data.name,
+    countries,
+    rate_cents: rateCents,
+    free_shipping_threshold_cents: freeShippingThresholdCents,
+    status: parsed.data.status,
+  });
+
+  if (error) {
+    return formError(error.message);
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+
+  return {
+    status: "success",
+    message: "Shipping zone saved.",
+  };
+}
+
+export async function updateShippingZoneStatusAction(
+  storeId: string,
+  shippingZoneId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = shippingZoneStatusSchema.safeParse({
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    throw new Error("Choose a valid shipping zone status.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const shippingZone = workspace.shippingZones.find(
+    (zone) => zone.id === shippingZoneId,
+  );
+
+  if (!shippingZone) {
+    throw new Error("Shipping zone not found.");
+  }
+
+  const db = getSupabaseAdmin();
+  const { error } = await db
+    .from("shipping_zones")
+    .update({ status: parsed.data.status })
+    .eq("id", shippingZoneId)
+    .eq("store_id", storeId);
+
+  if (error) {
+    throw error;
+  }
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+  revalidatePath(`/stores/${workspace.store.slug}/checkout`);
+}
+
+export async function createManualOrderAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = manualOrderSchema.safeParse({
+    customerName: formData.get("customerName"),
+    customerEmail: formData.get("customerEmail"),
+    customerPhone: formData.get("customerPhone") || undefined,
+    shippingAddressLine1: formData.get("shippingAddressLine1") || undefined,
+    shippingAddressLine2: formData.get("shippingAddressLine2") || undefined,
+    shippingCity: formData.get("shippingCity") || undefined,
+    shippingRegion: formData.get("shippingRegion") || undefined,
+    shippingPostalCode: formData.get("shippingPostalCode") || undefined,
+    shippingCountry: formData.get("shippingCountry") || undefined,
+    lineIds: formData
+      .getAll("lineIds")
+      .filter((value): value is string => typeof value === "string"),
+    manualDiscount: formData.get("manualDiscount") || undefined,
+    manualShipping: formData.get("manualShipping") || undefined,
+    paymentStatus: formData.get("paymentStatus"),
+    paymentMethod: formData.get("paymentMethod"),
+    paymentProvider: formData.get("paymentProvider") || undefined,
+    paymentReference: formData.get("paymentReference") || undefined,
+    internalNote: formData.get("internalNote") || undefined,
+  });
+
+  if (!parsed.success) {
+    return formError("Check the manual order details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const manualDiscountCents = parseOptionalPriceCents(parsed.data.manualDiscount);
+  const manualShippingCents = parseOptionalPriceCents(parsed.data.manualShipping);
+
+  if (manualDiscountCents === null || manualDiscountCents < 0) {
+    return formError("Add a valid discount amount.", {
+      manualDiscount: ["Discount must be zero or a positive amount."],
+    });
+  }
+
+  if (manualShippingCents === null || manualShippingCents < 0) {
+    return formError("Add a valid shipping amount.", {
+      manualShipping: ["Shipping must be zero or a positive amount."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const lineResult = getManualOrderItems({
+    formData,
+    lineIds: parsed.data.lineIds,
+    products: workspace.products,
+  });
+
+  if (lineResult.errors || lineResult.message) {
+    return formError(
+      lineResult.message || "Check manual order items.",
+      lineResult.errors,
+    );
+  }
+
+  const orderItems = lineResult.items;
+  const subtotalCents = orderItems.reduce(
+    (sum, item) => sum + item.lineTotalCents,
+    0,
+  );
+
+  if (manualDiscountCents > subtotalCents) {
+    return formError("Discount cannot exceed the subtotal.", {
+      manualDiscount: ["Discount cannot exceed the subtotal."],
+    });
+  }
+
+  const discountedSubtotalCents = subtotalCents - manualDiscountCents;
+  const taxCents = calculateTaxCents(
+    discountedSubtotalCents,
+    workspace.store.taxRateBps,
+  );
+  const totalCents =
+    discountedSubtotalCents + manualShippingCents + taxCents;
+  const paidAt =
+    parsed.data.paymentStatus === "paid" ? new Date().toISOString() : null;
+  const db = getSupabaseAdmin();
+  const reservation = await reserveOrderInventory({
+    db,
+    storeId,
+    items: orderItems,
+  });
+
+  if (reservation.error) {
+    return formError(reservation.error);
+  }
+
+  const { data: order, error: orderError } = await db
+    .from("orders")
+    .insert({
+      store_id: storeId,
+      customer_name: parsed.data.customerName,
+      customer_email: parsed.data.customerEmail,
+      customer_phone: parsed.data.customerPhone || null,
+      shipping_address_line1: parsed.data.shippingAddressLine1 || null,
+      shipping_address_line2: parsed.data.shippingAddressLine2 || null,
+      shipping_city: parsed.data.shippingCity || null,
+      shipping_region: parsed.data.shippingRegion || null,
+      shipping_postal_code: parsed.data.shippingPostalCode || null,
+      shipping_country: parsed.data.shippingCountry || null,
+      customer_note: null,
+      status: parsed.data.paymentStatus === "paid" ? "paid" : "pending",
+      order_source: "manual",
+      internal_note: optionalText(parsed.data.internalNote),
+      payment_status: parsed.data.paymentStatus,
+      payment_method: parsed.data.paymentMethod,
+      payment_provider:
+        optionalText(parsed.data.paymentProvider) ||
+        getManualPaymentProvider(parsed.data.paymentMethod),
+      payment_reference: optionalText(parsed.data.paymentReference),
+      subtotal_cents: subtotalCents,
+      discount_code: manualDiscountCents > 0 ? "MANUAL" : null,
+      discount_cents: manualDiscountCents,
+      shipping_cents: manualShippingCents,
+      tax_cents: taxCents,
+      tax_rate_bps: workspace.store.taxRateBps,
+      total_cents: totalCents,
+      currency: workspace.store.currency,
+      paid_at: paidAt,
+    })
+    .select("id")
+    .single();
+
+  if (orderError) {
+    await rollbackReservedInventory(db, reservation.reservedInventory);
+
+    return formError(orderError.message);
+  }
+
+  const { error: itemError } = await db.from("order_items").insert(
+    orderItems.map((item) => ({
+      order_id: order.id,
+      product_id: item.product.id,
+      product_variant_id: item.variant?.id || null,
+      product_name: item.product.name,
+      variant_name: item.variantName || null,
+      variant_sku: item.variantSku || null,
+      unit_price_cents: item.unitPriceCents,
+      quantity: item.quantity,
+    })),
+  );
+
+  if (itemError) {
+    await db.from("orders").delete().eq("id", order.id).eq("store_id", storeId);
+    await rollbackReservedInventory(db, reservation.reservedInventory);
+
+    return formError(itemError.message);
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders`);
+  revalidatePath(`/dashboard/stores/${storeId}/customers`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `Manual order ${order.id.slice(0, 8)} created.`,
+  };
+}
+
 export async function createCheckoutOrderAction(
   storeSlug: string,
   _state: ActionState,
@@ -1588,6 +2449,7 @@ export async function createCheckoutOrderAction(
     shippingRegion: formData.get("shippingRegion"),
     shippingPostalCode: formData.get("shippingPostalCode"),
     shippingCountry: formData.get("shippingCountry"),
+    paymentMethod: formData.get("paymentMethod"),
     customerNote: formData.get("customerNote") || undefined,
     discountCode: formData.get("discountCode") || undefined,
     cart: readCartPayload(formData.get("cart")),
@@ -1702,11 +2564,14 @@ export async function createCheckoutOrderAction(
   }
 
   const discountedSubtotalCents = Math.max(0, subtotalCents - discount.cents);
-  const shippingCents = calculateShippingCents({
+  const shippingQuote = calculateShippingQuote({
     discountedSubtotalCents,
     freeShippingThresholdCents: storefront.store.freeShippingThresholdCents,
+    shippingCountry: parsed.data.shippingCountry,
     shippingRateCents: storefront.store.shippingRateCents,
+    shippingZones: storefront.shippingZones,
   });
+  const shippingCents = shippingQuote.shippingCents;
   const taxCents = calculateTaxCents(
     discountedSubtotalCents,
     storefront.store.taxRateBps,
@@ -1834,6 +2699,12 @@ export async function createCheckoutOrderAction(
       shipping_country: parsed.data.shippingCountry,
       customer_note: parsed.data.customerNote || null,
       status: "pending",
+      order_source: "storefront",
+      internal_note: null,
+      payment_status: "pending",
+      payment_method: parsed.data.paymentMethod,
+      payment_provider: getManualPaymentProvider(parsed.data.paymentMethod),
+      payment_reference: null,
       subtotal_cents: subtotalCents,
       discount_code: discount.code,
       discount_cents: discount.cents,
@@ -1965,7 +2836,7 @@ export async function updateOrderStatusAction(
   const { data: orderData, error: orderError } = await db
     .from("orders")
     .select(
-      "status, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
+      "status, payment_status, payment_method, payment_provider, payment_reference, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at",
     )
     .eq("id", orderId)
     .eq("store_id", storeId)
@@ -1990,6 +2861,8 @@ export async function updateOrderStatusAction(
   const now = new Date().toISOString();
   const updatePayload: {
     status: z.infer<typeof orderStatusSchema>["status"];
+    payment_status?: PaymentStatus;
+    payment_provider?: string;
     paid_at?: string;
     fulfilled_at?: string;
     cancelled_at?: string;
@@ -2001,6 +2874,16 @@ export async function updateOrderStatusAction(
 
   if (parsed.data.status === "paid" && !order.paid_at) {
     updatePayload.paid_at = now;
+  }
+
+  if (
+    (parsed.data.status === "paid" || parsed.data.status === "fulfilled") &&
+    order.payment_status !== "paid"
+  ) {
+    updatePayload.payment_status = "paid";
+    updatePayload.payment_provider =
+      order.payment_provider ||
+      getManualPaymentProvider(order.payment_method || "manual_invoice");
   }
 
   if (parsed.data.status === "fulfilled") {
@@ -2050,6 +2933,87 @@ export async function updateOrderStatusAction(
   revalidatePath(`/stores/${workspace.store.slug}/checkout`);
 }
 
+export async function confirmOrderPaymentAction(
+  storeId: string,
+  orderId: string,
+  formData: FormData,
+) {
+  const user = await requireAppUser();
+  const parsed = paymentConfirmationSchema.safeParse({
+    paymentMethod: formData.get("paymentMethod"),
+    paymentProvider: formData.get("paymentProvider") || undefined,
+    paymentReference: formData.get("paymentReference") || undefined,
+  });
+
+  if (!parsed.success) {
+    throw new Error("Check the payment details.");
+  }
+
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const db = getSupabaseAdmin();
+  const { data: orderData, error: orderError } = await db
+    .from("orders")
+    .select("status, payment_status, paid_at, cancelled_at")
+    .eq("id", orderId)
+    .eq("store_id", storeId)
+    .maybeSingle();
+
+  if (orderError) {
+    throw orderError;
+  }
+
+  if (!orderData) {
+    throw new Error("Order not found.");
+  }
+
+  const order = orderData as Pick<
+    OrderLifecycleRow,
+    "status" | "payment_status" | "paid_at" | "cancelled_at"
+  >;
+
+  if (order.status === "cancelled" || order.cancelled_at) {
+    throw new Error("Cancelled orders cannot be marked paid.");
+  }
+
+  const now = new Date().toISOString();
+  const nextStatus = order.status === "pending" ? "paid" : order.status;
+  const { data: updatedOrder, error } = await db
+    .from("orders")
+    .update({
+      status: nextStatus,
+      payment_status: "paid",
+      payment_method: parsed.data.paymentMethod,
+      payment_provider:
+        optionalText(parsed.data.paymentProvider) ||
+        getManualPaymentProvider(parsed.data.paymentMethod),
+      payment_reference: optionalText(parsed.data.paymentReference),
+      paid_at: order.paid_at || now,
+    })
+    .eq("id", orderId)
+    .eq("store_id", storeId)
+    .eq("status", order.status)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!updatedOrder) {
+    throw new Error("Order changed while payment was being confirmed.");
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+}
+
 export async function updateOrderFulfillmentAction(
   storeId: string,
   orderId: string,
@@ -2076,7 +3040,9 @@ export async function updateOrderFulfillmentAction(
   const db = getSupabaseAdmin();
   const { data: orderData, error: orderError } = await db
     .from("orders")
-    .select("status, paid_at, fulfilled_at, cancelled_at")
+    .select(
+      "status, payment_status, payment_method, payment_provider, paid_at, fulfilled_at, cancelled_at",
+    )
     .eq("id", orderId)
     .eq("store_id", storeId)
     .maybeSingle();
@@ -2091,7 +3057,13 @@ export async function updateOrderFulfillmentAction(
 
   const order = orderData as Pick<
     OrderLifecycleRow,
-    "status" | "paid_at" | "fulfilled_at" | "cancelled_at"
+    | "status"
+    | "payment_status"
+    | "payment_method"
+    | "payment_provider"
+    | "paid_at"
+    | "fulfilled_at"
+    | "cancelled_at"
   >;
 
   if (order.status === "cancelled" || order.cancelled_at) {
@@ -2105,6 +3077,8 @@ export async function updateOrderFulfillmentAction(
     tracking_url: string | null;
     fulfillment_note: string | null;
     status?: z.infer<typeof orderStatusSchema>["status"];
+    payment_status?: PaymentStatus;
+    payment_provider?: string;
     paid_at?: string;
     fulfilled_at?: string;
   } = {
@@ -2120,6 +3094,10 @@ export async function updateOrderFulfillmentAction(
     }
 
     updatePayload.status = "fulfilled";
+    updatePayload.payment_status = "paid";
+    updatePayload.payment_provider =
+      order.payment_provider ||
+      getManualPaymentProvider(order.payment_method || "manual_invoice");
 
     if (!order.paid_at) {
       updatePayload.paid_at = now;
@@ -2151,6 +3129,152 @@ export async function updateOrderFulfillmentAction(
   revalidatePath(`/dashboard/stores/${storeId}`);
   revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
   revalidatePath(`/stores/${workspace.store.slug}`);
+}
+
+export async function createRefundAction(
+  storeId: string,
+  orderId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const parsed = refundSchema.safeParse({
+    amount: formData.get("amount"),
+    reason: formData.get("reason"),
+    note: formData.get("note") || undefined,
+    restockInventory: formData.get("restockInventory") === "on",
+  });
+
+  if (!parsed.success) {
+    return formError("Check the refund details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const amountCents = toPriceCents(parsed.data.amount);
+
+  if (amountCents === null || amountCents <= 0) {
+    return formError("Add a valid refund amount.", {
+      amount: ["Refund amount must be greater than zero."],
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStoreAccess(user.id, storeId);
+  const order = workspace.orders.find((item) => item.id === orderId);
+
+  if (!order) {
+    return formError("Order not found.");
+  }
+
+  if (!isRevenueOrderStatus(order.status)) {
+    return formError("Only paid or fulfilled orders can be refunded.");
+  }
+
+  if (amountCents > order.refundableCents) {
+    return formError("Refund exceeds the remaining refundable amount.", {
+      amount: [
+        `Refundable balance is ${(order.refundableCents / 100).toFixed(2)}.`,
+      ],
+    });
+  }
+
+  if (parsed.data.restockInventory && order.inventoryRestockedAt) {
+    return formError("Inventory was already restocked for this order.");
+  }
+
+  const db = getSupabaseAdmin();
+  let restockedItems: RestockedInventory[] = [];
+
+  if (parsed.data.restockInventory) {
+    try {
+      restockedItems = await restockReservedInventory(db, storeId, orderId);
+    } catch (error) {
+      return formError(
+        error instanceof Error
+          ? error.message
+          : "Could not restock inventory for this refund.",
+      );
+    }
+  }
+
+  const restockedAt = new Date().toISOString();
+  let inventoryMarkedRestocked = false;
+
+  if (parsed.data.restockInventory) {
+    const { data: updatedOrder, error: restockMarkError } = await db
+      .from("orders")
+      .update({ inventory_restocked_at: restockedAt })
+      .eq("id", orderId)
+      .eq("store_id", storeId)
+      .is("inventory_restocked_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (restockMarkError || !updatedOrder) {
+      await rollbackRestockedInventory(db, storeId, restockedItems);
+
+      return formError(
+        restockMarkError?.message ||
+          "Order inventory changed while this refund was being saved.",
+      );
+    }
+
+    inventoryMarkedRestocked = true;
+  }
+
+  const { error } = await db.from("order_refunds").insert({
+    store_id: storeId,
+    order_id: orderId,
+    clerk_user_id: user.id,
+    amount_cents: amountCents,
+    reason: parsed.data.reason,
+    note: optionalText(parsed.data.note),
+    restocked_inventory: parsed.data.restockInventory,
+  });
+
+  if (error) {
+    if (parsed.data.restockInventory) {
+      await rollbackRestockedInventory(db, storeId, restockedItems);
+
+      if (inventoryMarkedRestocked) {
+        await db
+          .from("orders")
+          .update({ inventory_restocked_at: null })
+          .eq("id", orderId)
+          .eq("store_id", storeId)
+          .eq("inventory_restocked_at", restockedAt);
+      }
+    }
+
+    return formError(error.message);
+  }
+
+  const nextRefundedCents = order.refundedCents + amountCents;
+  const nextPaymentStatus: PaymentStatus =
+    nextRefundedCents >= order.totalCents ? "refunded" : "partially_refunded";
+  const { error: paymentStatusError } = await db
+    .from("orders")
+    .update({ payment_status: nextPaymentStatus })
+    .eq("id", orderId)
+    .eq("store_id", storeId);
+
+  if (paymentStatusError) {
+    return formError(paymentStatusError.message);
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders`);
+  revalidatePath(`/dashboard/stores/${storeId}/orders/${orderId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/customers`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `Refund recorded for ${(amountCents / 100).toFixed(2)}.`,
+  };
 }
 
 export async function updateDiscountStatusAction(

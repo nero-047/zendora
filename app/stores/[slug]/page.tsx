@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ShoppingBag, Sparkles } from "lucide-react";
+import { ArrowLeft, Layers3, ShoppingBag, Sparkles } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
 import { getPublicStorefront } from "@/features/commerce/data";
@@ -18,7 +18,7 @@ export default async function PublicStorePage({
     notFound();
   }
 
-  const { store, products } = workspace;
+  const { store, products, collections } = workspace;
   const heroProduct = products[0];
 
   return (
@@ -61,6 +61,36 @@ export default async function PublicStorePage({
           </div>
         ) : null}
       </section>
+
+      {collections.length > 0 ? (
+        <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+          <div className="mb-4 flex items-center gap-2">
+            <Layers3 aria-hidden="true" className="text-sky-700" size={18} />
+            <h2 className="text-lg font-semibold text-slate-950">Collections</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {collections.map((collection) => (
+              <Link
+                className="soft-panel grid gap-2 p-4 hover:border-sky-200"
+                href={`/stores/${store.slug}/collections/${collection.slug}`}
+                key={collection.id}
+              >
+                <span className="status-pill w-fit">
+                  {collection.productCount} products
+                </span>
+                <span className="text-lg font-semibold text-slate-950">
+                  {collection.title}
+                </span>
+                {collection.description ? (
+                  <span className="line-clamp-2 text-sm leading-6 text-slate-600">
+                    {collection.description}
+                  </span>
+                ) : null}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <StorefrontCart products={products} storeSlug={store.slug} />
     </main>

@@ -4,25 +4,37 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { AppUser } from "@/features/auth/app-user";
 import {
+  mockCollections,
   mockDiscounts,
   mockInventoryAdjustments,
+  mockOrderRefunds,
   mockOrders,
   mockProducts,
+  mockShippingZones,
   mockStores,
 } from "@/features/commerce/mock-data";
 import { isRevenueOrderStatus } from "@/features/commerce/order-status";
 import type {
   DashboardOverview,
+  ProductCollection,
+  CollectionStatus,
   Discount,
   DiscountStatus,
   DiscountType,
   Order,
   OrderItem,
+  OrderRefund,
+  OrderSource,
   OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
   Product,
   ProductVariant,
   ProductVariantStatus,
   ProductStatus,
+  RefundReason,
+  ShippingZone,
+  ShippingZoneStatus,
   InventoryAdjustment,
   InventoryAdjustmentReason,
   Store,
@@ -50,6 +62,17 @@ type StoreRow = {
   shipping_rate_cents: number | null;
   free_shipping_threshold_cents: number | null;
   tax_rate_bps: number | null;
+  created_at: string;
+};
+
+type ShippingZoneRow = {
+  id: string;
+  store_id: string;
+  name: string;
+  countries: string[] | null;
+  rate_cents: number | null;
+  free_shipping_threshold_cents: number | null;
+  status: ShippingZoneStatus;
   created_at: string;
 };
 
@@ -85,6 +108,24 @@ type ProductVariantRow = {
   created_at: string;
 };
 
+type CollectionRow = {
+  id: string;
+  store_id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  image_url: string | null;
+  status: CollectionStatus;
+  sort_order: number | null;
+  created_at: string;
+};
+
+type CollectionProductRow = {
+  collection_id: string;
+  product_id: string;
+  sort_order: number | null;
+};
+
 type InventoryAdjustmentRow = {
   id: string;
   store_id: string;
@@ -114,6 +155,12 @@ type OrderRow = {
   shipping_country: string | null;
   customer_note: string | null;
   status: OrderStatus;
+  order_source: OrderSource | null;
+  internal_note: string | null;
+  payment_status: PaymentStatus | null;
+  payment_method: PaymentMethod | null;
+  payment_provider: string | null;
+  payment_reference: string | null;
   subtotal_cents: number | null;
   discount_code: string | null;
   discount_cents: number | null;
@@ -161,6 +208,18 @@ type OrderItemRow = {
   created_at: string;
 };
 
+type OrderRefundRow = {
+  id: string;
+  store_id: string;
+  order_id: string;
+  clerk_user_id: string;
+  amount_cents: number;
+  reason: RefundReason;
+  note: string | null;
+  restocked_inventory: boolean;
+  created_at: string;
+};
+
 function mapProduct(row: ProductRow): Product {
   return {
     id: row.id,
@@ -200,6 +259,25 @@ function mapProductVariant(row: ProductVariantRow): ProductVariant {
   };
 }
 
+function mapCollection(
+  row: CollectionRow,
+  productIds: string[] = [],
+): ProductCollection {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    title: row.title,
+    slug: row.slug,
+    description: row.description || "",
+    imageUrl: row.image_url || undefined,
+    status: row.status,
+    sortOrder: row.sort_order || 0,
+    productIds,
+    productCount: productIds.length,
+    createdAt: row.created_at,
+  };
+}
+
 function mapInventoryAdjustment(
   row: InventoryAdjustmentRow,
 ): InventoryAdjustment {
@@ -234,13 +312,36 @@ function mapOrderItem(row: OrderItemRow): OrderItem {
   };
 }
 
-function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
+function mapOrderRefund(row: OrderRefundRow): OrderRefund {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    orderId: row.order_id,
+    clerkUserId: row.clerk_user_id,
+    amountCents: row.amount_cents,
+    reason: row.reason,
+    note: row.note || undefined,
+    restockedInventory: row.restocked_inventory,
+    createdAt: row.created_at,
+  };
+}
+
+function mapOrder(
+  row: OrderRow,
+  items: OrderItem[] = [],
+  refunds: OrderRefund[] = [],
+): Order {
   const hasShippingAddress = Boolean(
     row.shipping_address_line1 ||
       row.shipping_city ||
       row.shipping_region ||
       row.shipping_postal_code ||
       row.shipping_country,
+  );
+
+  const refundedCents = refunds.reduce(
+    (sum, refund) => sum + refund.amountCents,
+    0,
   );
 
   return {
@@ -261,6 +362,12 @@ function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
       : undefined,
     customerNote: row.customer_note || undefined,
     status: row.status,
+    source: row.order_source || "storefront",
+    internalNote: row.internal_note || undefined,
+    paymentStatus: row.payment_status || "pending",
+    paymentMethod: row.payment_method || "manual_invoice",
+    paymentProvider: row.payment_provider || "manual",
+    paymentReference: row.payment_reference || undefined,
     subtotalCents:
       row.subtotal_cents && row.subtotal_cents > 0
         ? row.subtotal_cents
@@ -271,6 +378,8 @@ function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
     taxCents: row.tax_cents || 0,
     taxRateBps: row.tax_rate_bps || 0,
     totalCents: row.total_cents,
+    refundedCents,
+    refundableCents: Math.max(0, row.total_cents - refundedCents),
     currency: row.currency,
     createdAt: row.created_at,
     paidAt: row.paid_at || undefined,
@@ -282,6 +391,7 @@ function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
     trackingUrl: row.tracking_url || undefined,
     fulfillmentNote: row.fulfillment_note || undefined,
     items,
+    refunds,
   };
 }
 
@@ -317,7 +427,10 @@ function mapStore(row: StoreRow, products: Product[], orders: Order[]): Store {
     orderCount: orders.length,
     revenueCents: orders
       .filter((order) => isRevenueOrderStatus(order.status))
-      .reduce((sum, order) => sum + order.totalCents, 0),
+      .reduce(
+        (sum, order) => sum + Math.max(0, order.totalCents - order.refundedCents),
+        0,
+      ),
     inventoryCount: products.reduce(
       (sum, product) => sum + product.inventoryCount,
       0,
@@ -332,6 +445,19 @@ function mapDemoStoreForUser(store: Store, userId: string): Store {
   return {
     ...store,
     ownerId: userId,
+  };
+}
+
+function mapShippingZone(row: ShippingZoneRow): ShippingZone {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    name: row.name,
+    countries: row.countries || [],
+    rateCents: row.rate_cents || 0,
+    freeShippingThresholdCents: row.free_shipping_threshold_cents || 0,
+    status: row.status,
+    createdAt: row.created_at,
   };
 }
 
@@ -355,11 +481,34 @@ function byOrderId(items: OrderItem[]) {
   return grouped;
 }
 
+function refundsByOrderId(items: OrderRefund[]) {
+  const grouped = new Map<string, OrderRefund[]>();
+
+  for (const item of items) {
+    grouped.set(item.orderId, [...(grouped.get(item.orderId) || []), item]);
+  }
+
+  return grouped;
+}
+
 function byProductId(items: ProductVariant[]) {
   const grouped = new Map<string, ProductVariant[]>();
 
   for (const item of items) {
     grouped.set(item.productId, [...(grouped.get(item.productId) || []), item]);
+  }
+
+  return grouped;
+}
+
+function byCollectionId(items: CollectionProductRow[]) {
+  const grouped = new Map<string, CollectionProductRow[]>();
+
+  for (const item of items) {
+    grouped.set(item.collection_id, [
+      ...(grouped.get(item.collection_id) || []),
+      item,
+    ]);
   }
 
   return grouped;
@@ -433,6 +582,39 @@ async function loadProductVariants(
   return ((data || []) as ProductVariantRow[]).map(mapProductVariant);
 }
 
+async function loadShippingZones(
+  storeIds: string[],
+  activeOnly = false,
+  client?: SupabaseClient,
+) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("shipping_zones")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq("status", "active");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as ShippingZoneRow[]).map(mapShippingZone);
+}
+
 async function loadProducts(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -455,6 +637,83 @@ async function loadProducts(storeIds: string[]) {
   return attachProductVariants(products, variants);
 }
 
+async function loadCollectionProducts(
+  collectionIds: string[],
+  client?: SupabaseClient,
+) {
+  if (collectionIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  const { data, error } = await db
+    .from("collection_products")
+    .select("collection_id, product_id, sort_order")
+    .in("collection_id", collectionIds)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return (data || []) as CollectionProductRow[];
+}
+
+async function loadCollections(
+  storeIds: string[],
+  activeOnly = false,
+  client?: SupabaseClient,
+) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("collections")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq("status", "active");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const rows = (data || []) as CollectionRow[];
+  const collectionProducts = await loadCollectionProducts(
+    rows.map((row) => row.id),
+    db,
+  );
+  const productsByCollection = byCollectionId(collectionProducts);
+
+  return rows.map((row) => {
+    const productIds = (productsByCollection.get(row.id) || [])
+      .sort(
+        (a, b) =>
+          (a.sort_order || 0) - (b.sort_order || 0) ||
+          a.product_id.localeCompare(b.product_id),
+      )
+      .map((item) => item.product_id);
+
+    return mapCollection(row, productIds);
+  });
+}
+
 async function loadOrderItems(orderIds: string[]) {
   if (orderIds.length === 0) {
     return [];
@@ -474,6 +733,29 @@ async function loadOrderItems(orderIds: string[]) {
   return ((data || []) as OrderItemRow[]).map(mapOrderItem);
 }
 
+async function loadOrderRefunds(orderIds: string[]) {
+  if (orderIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("order_refunds")
+    .select("*")
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as OrderRefundRow[]).map(mapOrderRefund);
+}
+
 async function loadOrders(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -491,10 +773,17 @@ async function loadOrders(storeIds: string[]) {
   }
 
   const rows = (data || []) as OrderRow[];
-  const items = await loadOrderItems(rows.map((row) => row.id));
+  const orderIds = rows.map((row) => row.id);
+  const [items, refunds] = await Promise.all([
+    loadOrderItems(orderIds),
+    loadOrderRefunds(orderIds),
+  ]);
   const itemsByOrder = byOrderId(items);
+  const refundsByOrder = refundsByOrderId(refunds);
 
-  return rows.map((row) => mapOrder(row, itemsByOrder.get(row.id) || []));
+  return rows.map((row) =>
+    mapOrder(row, itemsByOrder.get(row.id) || [], refundsByOrder.get(row.id) || []),
+  );
 }
 
 async function loadDiscounts(storeIds: string[]) {
@@ -546,8 +835,14 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
 
   return {
     store,
+    shippingZones: mockShippingZones.filter(
+      (zone) => zone.storeId === store.id && zone.status === "active",
+    ),
     products: mockProducts.filter(
       (product) => product.storeId === store.id && product.status === "active",
+    ),
+    collections: mockCollections.filter(
+      (collection) => collection.storeId === store.id && collection.status === "active",
     ),
     orders: [],
     discounts: [],
@@ -610,12 +905,32 @@ async function loadPublicStorefrontFromClient(
   }
 
   const productRowsMapped = ((productRows || []) as ProductRow[]).map(mapProduct);
-  const variants = await loadProductVariants([row.id], true, db);
+  const [variants, shippingZones] = await Promise.all([
+    loadProductVariants([row.id], true, db),
+    loadShippingZones([row.id], true, db),
+  ]);
   const products = attachProductVariants(productRowsMapped, variants);
+  const allCollections = await loadCollections([row.id], true, db);
+  const activeProductIds = new Set(products.map((product) => product.id));
+  const collections = allCollections
+    .map((collection) => {
+      const productIds = collection.productIds.filter((id) =>
+        activeProductIds.has(id),
+      );
+
+      return {
+        ...collection,
+        productIds,
+        productCount: productIds.length,
+      };
+    })
+    .filter((collection) => collection.productCount > 0);
 
   return {
     store: mapStore(row, products, []),
+    shippingZones,
     products,
+    collections,
     orders: [],
     discounts: [],
     inventoryAdjustments: [],
@@ -749,6 +1064,9 @@ export async function getDashboardOverview(
       storeIds.includes(product.storeId),
     );
     const orders = mockOrders.filter((order) => storeIds.includes(order.storeId));
+    const refundsByOrder = refundsByOrderId(
+      mockOrderRefunds.filter((refund) => storeIds.includes(refund.storeId)),
+    );
 
     return {
       stores,
@@ -759,7 +1077,14 @@ export async function getDashboardOverview(
       totalOrders: orders.length,
       totalRevenueCents: orders
         .filter((order) => isRevenueOrderStatus(order.status))
-        .reduce((sum, order) => sum + order.totalCents, 0),
+        .reduce((sum, order) => {
+          const refundedCents = (refundsByOrder.get(order.id) || []).reduce(
+            (refundSum, refund) => refundSum + refund.amountCents,
+            0,
+          );
+
+          return sum + Math.max(0, order.totalCents - refundedCents);
+        }, 0),
     };
   }
 
@@ -775,7 +1100,10 @@ export async function getDashboardOverview(
     totalOrders: orders.length,
     totalRevenueCents: orders
       .filter((order) => isRevenueOrderStatus(order.status))
-      .reduce((sum, order) => sum + order.totalCents, 0),
+      .reduce(
+        (sum, order) => sum + Math.max(0, order.totalCents - order.refundedCents),
+        0,
+      ),
   };
 }
 
@@ -794,7 +1122,11 @@ export async function getStoreWorkspace(
 
     return {
       store: mapDemoStoreForUser(store, userId),
+      shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
       products: mockProducts.filter((product) => product.storeId === store.id),
+      collections: mockCollections.filter(
+        (collection) => collection.storeId === store.id,
+      ),
       orders: mockOrders.filter((order) => order.storeId === store.id),
       discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
       inventoryAdjustments: mockInventoryAdjustments.filter(
@@ -838,16 +1170,28 @@ export async function getStoreWorkspace(
     return null;
   }
 
-  const [products, orders, discounts, inventoryAdjustments] = await Promise.all([
-    loadProducts([storeId]),
-    loadOrders([storeId]),
-    loadDiscounts([storeId]),
-    loadInventoryAdjustments([storeId]),
-  ]);
+  const [
+    products,
+    shippingZones,
+    collections,
+    orders,
+    discounts,
+    inventoryAdjustments,
+  ] =
+    await Promise.all([
+      loadProducts([storeId]),
+      loadShippingZones([storeId]),
+      loadCollections([storeId]),
+      loadOrders([storeId]),
+      loadDiscounts([storeId]),
+      loadInventoryAdjustments([storeId]),
+    ]);
 
   return {
     store: mapStore(row, products, orders),
+    shippingZones,
     products,
+    collections,
     orders,
     discounts,
     inventoryAdjustments,
@@ -941,6 +1285,38 @@ export async function getAvailableProductSlug(storeId: string, name: string) {
   while (true) {
     const { data, error } = await db
       .from("products")
+      .select("id")
+      .eq("store_id", storeId)
+      .eq("slug", candidate)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return candidate;
+    }
+
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+}
+
+export async function getAvailableCollectionSlug(storeId: string, title: string) {
+  const base = slugify(title) || "collection";
+
+  if (!getSupabaseConfig()) {
+    return base;
+  }
+
+  const db = getSupabaseAdmin();
+  let candidate = base;
+  let suffix = 2;
+
+  while (true) {
+    const { data, error } = await db
+      .from("collections")
       .select("id")
       .eq("store_id", storeId)
       .eq("slug", candidate)

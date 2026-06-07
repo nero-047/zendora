@@ -102,10 +102,14 @@ export async function GET() {
     try {
       const [
         { error: storeColumnError },
+        { error: shippingZoneColumnError },
         { error: productColumnError },
+        { error: collectionColumnError },
+        { error: collectionProductColumnError },
         { error: productVariantColumnError },
         { error: orderColumnError },
         { error: orderItemColumnError },
+        { error: orderRefundColumnError },
         { error: discountColumnError },
         { error: inventoryAdjustmentColumnError },
       ] = await Promise.all([
@@ -116,8 +120,26 @@ export async function GET() {
             { count: "exact", head: true },
           ),
         supabase
+          .from("shipping_zones")
+          .select(
+            "id, store_id, name, countries, rate_cents, free_shipping_threshold_cents, status",
+            { count: "exact", head: true },
+          ),
+        supabase
           .from("products")
           .select("id, sku, category", { count: "exact", head: true }),
+        supabase
+          .from("collections")
+          .select("id, store_id, title, slug, description, image_url, status, sort_order", {
+            count: "exact",
+            head: true,
+          }),
+        supabase
+          .from("collection_products")
+          .select("id, collection_id, product_id, sort_order", {
+            count: "exact",
+            head: true,
+          }),
         supabase
           .from("product_variants")
           .select(
@@ -127,7 +149,7 @@ export async function GET() {
         supabase
           .from("orders")
           .select(
-            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, subtotal_cents, discount_code, discount_cents, shipping_cents, tax_cents, tax_rate_bps, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
+            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, order_source, internal_note, payment_status, payment_method, payment_provider, payment_reference, subtotal_cents, discount_code, discount_cents, shipping_cents, tax_cents, tax_rate_bps, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
             { count: "exact", head: true },
           ),
         supabase
@@ -136,6 +158,12 @@ export async function GET() {
             count: "exact",
             head: true,
           }),
+        supabase
+          .from("order_refunds")
+          .select(
+            "id, store_id, order_id, clerk_user_id, amount_cents, reason, note, restocked_inventory",
+            { count: "exact", head: true },
+          ),
         supabase
           .from("discount_codes")
           .select("id, code, type, value, status", { count: "exact", head: true }),
@@ -148,10 +176,14 @@ export async function GET() {
       ]);
       const error =
         storeColumnError ||
+        shippingZoneColumnError ||
         productColumnError ||
+        collectionColumnError ||
+        collectionProductColumnError ||
         productVariantColumnError ||
         orderColumnError ||
         orderItemColumnError ||
+        orderRefundColumnError ||
         discountColumnError ||
         inventoryAdjustmentColumnError;
 
@@ -160,7 +192,7 @@ export async function GET() {
         ok: !error,
         detail: error
           ? `Supabase schema is missing MVP columns: ${error.message}`
-          : "Supabase store, catalog, variants, inventory audit, order lifecycle, fulfillment, discount, shipping, and tax columns are reachable.",
+          : "Supabase store, catalog, collections, variants, refunds, inventory audit, order source, lifecycle, payment, fulfillment, shipping zones, discount, shipping, and tax columns are reachable.",
       });
     } catch (error) {
       checks.push({

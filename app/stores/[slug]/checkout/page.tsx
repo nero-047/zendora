@@ -15,13 +15,14 @@ export default async function StoreCheckoutPage({
     notFound();
   }
 
-  const { store, products } = workspace;
+  const { store, products, shippingZones } = workspace;
 
   return (
     <main className="liquid-bg min-h-screen">
       <CheckoutForm
         freeShippingThresholdCents={store.freeShippingThresholdCents}
         products={products}
+        shippingZones={shippingZones}
         shippingRateCents={store.shippingRateCents}
         storeName={store.name}
         storeSlug={store.slug}

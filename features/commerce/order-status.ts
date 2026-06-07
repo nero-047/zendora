@@ -1,10 +1,38 @@
-import type { Order, OrderStatus } from "@/features/commerce/types";
+import type {
+  Order,
+  OrderSource,
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+} from "@/features/commerce/types";
 
 export const orderStatusLabels: Record<OrderStatus, string> = {
   pending: "Pending",
   paid: "Paid",
   fulfilled: "Fulfilled",
   cancelled: "Cancelled",
+};
+
+export const orderSourceLabels: Record<OrderSource, string> = {
+  storefront: "Storefront",
+  manual: "Manual",
+};
+
+export const paymentStatusLabels: Record<PaymentStatus, string> = {
+  pending: "Pending",
+  authorized: "Authorized",
+  paid: "Paid",
+  partially_refunded: "Partially refunded",
+  refunded: "Refunded",
+  voided: "Voided",
+};
+
+export const paymentMethodLabels: Record<PaymentMethod, string> = {
+  manual_invoice: "Manual invoice",
+  bank_transfer: "Bank transfer",
+  cash_on_delivery: "Cash on delivery",
+  card: "Card",
+  other: "Other",
 };
 
 const transitionOptions: Record<OrderStatus, OrderStatus[]> = {
@@ -51,5 +79,9 @@ export function getOrderLifecycleEvents(order: Order) {
       label: "Inventory restocked",
       value: order.inventoryRestockedAt,
     },
+    ...order.refunds.map((refund) => ({
+      label: "Refund recorded",
+      value: refund.createdAt,
+    })),
   ].filter((event) => Boolean(event.value));
 }

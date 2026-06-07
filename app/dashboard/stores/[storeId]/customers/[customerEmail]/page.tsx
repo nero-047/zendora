@@ -162,8 +162,15 @@ export default async function CustomerDetailPage({
               </div>
               <div className="grid gap-2 sm:justify-items-end">
                 <p className="text-sm font-semibold text-slate-950">
-                  {formatCurrency(order.totalCents, order.currency)}
+                  {order.refundedCents > 0
+                    ? formatCurrency(order.refundableCents, order.currency)
+                    : formatCurrency(order.totalCents, order.currency)}
                 </p>
+                {order.refundedCents > 0 ? (
+                  <p className="text-xs font-medium text-red-600">
+                    {formatCurrency(order.refundedCents, order.currency)} refunded
+                  </p>
+                ) : null}
                 <Link
                   className="secondary-button min-h-10 px-3 text-sm"
                   href={`/dashboard/stores/${store.id}/orders/${order.id}`}

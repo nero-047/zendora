@@ -3,32 +3,72 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import type { ActionState } from "@/features/commerce/action-state";
 import { initialActionState } from "@/features/commerce/action-state";
 import { createCheckoutOrderAction } from "@/features/commerce/actions";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
-import type { Product } from "@/features/commerce/types";
+import type { Product, ShippingZone } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
 type CheckoutFormProps = {
   freeShippingThresholdCents: number;
   storeName: string;
   storeSlug: string;
+  shippingZones: ShippingZone[];
   shippingRateCents: number;
   taxRateBps: number;
   products: Product[];
 };
 
+function normalizeShippingCountry(value: string) {
+  return value.trim().toLowerCase().replace(/[.]/g, "").replace(/\s+/g, " ");
+}
+
+function getShippingEstimate(input: {
+  freeShippingThresholdCents: number;
+  shippingCountry: string;
+  shippingRateCents: number;
+  shippingZones: ShippingZone[];
+  subtotalCents: number;
+}) {
+  const normalizedCountry = normalizeShippingCountry(input.shippingCountry);
+  const zone = input.shippingZones.find(
+    (shippingZone) =>
+      shippingZone.status === "active" &&
+      shippingZone.countries.some(
+        (country) => normalizeShippingCountry(country) === normalizedCountry,
+      ),
+  );
+  const rateCents = zone?.rateCents ?? input.shippingRateCents;
+  const freeShippingThresholdCents =
+    zone?.freeShippingThresholdCents ?? input.freeShippingThresholdCents;
+
+  if (input.subtotalCents <= 0) {
+    return { cents: 0, zone };
+  }
+
+  if (
+    freeShippingThresholdCents > 0 &&
+    input.subtotalCents >= freeShippingThresholdCents
+  ) {
+    return { cents: 0, zone };
+  }
+
+  return { cents: rateCents, zone };
+}
+
 export function CheckoutForm({
   freeShippingThresholdCents,
   storeName,
   storeSlug,
+  shippingZones,
   shippingRateCents,
   taxRateBps,
   products,
 }: CheckoutFormProps) {
+  const [shippingCountry, setShippingCountry] = useState("United States");
   const { cartItems, clearCart, updateQuantity } = useStoreCart(
     storeSlug,
     products,
@@ -60,14 +100,15 @@ export function CheckoutForm({
       sum + (item.variant?.priceCents ?? item.product.priceCents) * item.quantity,
     0,
   );
-  const estimatedShippingCents =
-    totalCents > 0 &&
-    freeShippingThresholdCents > 0 &&
-    totalCents >= freeShippingThresholdCents
-      ? 0
-      : totalCents > 0
-        ? shippingRateCents
-        : 0;
+  const shippingEstimate = getShippingEstimate({
+    freeShippingThresholdCents,
+    shippingCountry,
+    shippingRateCents,
+    shippingZones,
+    subtotalCents: totalCents,
+  });
+  const estimatedShippingCents = shippingEstimate.cents;
+  const shippingLabel = shippingEstimate.zone?.name || "Base rate";
   const estimatedTaxCents =
     totalCents > 0 ? Math.round((totalCents * taxRateBps) / 10000) : 0;
   const estimatedTotalCents =
@@ -230,8 +271,9 @@ export function CheckoutForm({
             <input
               autoComplete="shipping country-name"
               className="field"
-              defaultValue="United States"
               name="shippingCountry"
+              onChange={(event) => setShippingCountry(event.target.value)}
+              value={shippingCountry}
             />
             {state.errors?.shippingCountry ? (
               <span className="text-xs font-medium text-red-600">
@@ -251,6 +293,20 @@ export function CheckoutForm({
           {state.errors?.customerNote ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.customerNote[0]}
+            </span>
+          ) : null}
+        </label>
+
+        <label className="grid gap-2">
+          <span className="label">Payment</span>
+          <select className="field" defaultValue="manual_invoice" name="paymentMethod">
+            <option value="manual_invoice">Manual invoice</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="cash_on_delivery">Cash on delivery</option>
+          </select>
+          {state.errors?.paymentMethod ? (
+            <span className="text-xs font-medium text-red-600">
+              {state.errors.paymentMethod[0]}
             </span>
           ) : null}
         </label>
@@ -399,7 +455,14 @@ export function CheckoutForm({
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-slate-500">Shipping</span>
+              <span className="text-sm font-semibold text-slate-500">
+                Shipping
+                {shippingZones.length > 0 ? (
+                  <span className="block text-xs font-medium text-slate-400">
+                    {shippingLabel}
+                  </span>
+                ) : null}
+              </span>
               <span className="text-sm font-semibold text-slate-950">
                 {formatCurrency(estimatedShippingCents, currency)}
               </span>

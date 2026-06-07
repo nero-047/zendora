@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  BanknoteArrowDown,
   CheckCircle,
+  CreditCard,
   ExternalLink,
   Mail,
   MapPin,
@@ -13,17 +15,30 @@ import {
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { RefundForm } from "@/features/commerce/components/refund-form";
 import {
+  confirmOrderPaymentAction,
   updateOrderFulfillmentAction,
   updateOrderStatusAction,
 } from "@/features/commerce/actions";
 import { getStoreWorkspace } from "@/features/commerce/data";
 import {
   getOrderLifecycleEvents,
+  orderSourceLabels,
   getOrderStatusOptions,
   orderStatusLabels,
+  paymentMethodLabels,
+  paymentStatusLabels,
 } from "@/features/commerce/order-status";
+import type { RefundReason } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
+
+const refundReasonLabels: Record<RefundReason, string> = {
+  customer_request: "Customer request",
+  damaged: "Damaged item",
+  fraud: "Fraud",
+  other: "Other",
+};
 
 export default async function OrderDetailPage({
   params,
@@ -63,6 +78,9 @@ export default async function OrderDetailPage({
             <span className="status-pill mb-3">
               <ReceiptText aria-hidden="true" size={14} />
               {orderStatusLabels[order.status]}
+            </span>
+            <span className="status-pill mb-3 ml-2">
+              {orderSourceLabels[order.source]}
             </span>
             <h1 className="text-3xl font-semibold text-slate-950">
               Order {order.id.slice(0, 8)}
@@ -154,11 +172,149 @@ export default async function OrderDetailPage({
                 <span>Total</span>
                 <span>{formatCurrency(order.totalCents, order.currency)}</span>
               </div>
+              {order.refundedCents > 0 ? (
+                <>
+                  <div className="flex items-center justify-between gap-3 text-red-600">
+                    <span>Refunded</span>
+                    <span>-{formatCurrency(order.refundedCents, order.currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 pt-2 text-base font-semibold text-slate-950">
+                    <span>Net paid</span>
+                    <span>
+                      {formatCurrency(order.refundableCents, order.currency)}
+                    </span>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
 
         <div className="grid gap-5">
+          <RefundForm order={order} storeId={workspace.store.id} />
+
+          <section className="soft-panel p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-slate-950">Payment</h2>
+              <CreditCard aria-hidden="true" className="text-sky-700" size={18} />
+            </div>
+            <div className="mt-4 grid gap-2 text-sm text-slate-600">
+              <p>
+                <span className="font-semibold text-slate-950">Status:</span>{" "}
+                {paymentStatusLabels[order.paymentStatus]}
+              </p>
+              <p>
+                <span className="font-semibold text-slate-950">Method:</span>{" "}
+                {paymentMethodLabels[order.paymentMethod]}
+              </p>
+              <p>
+                <span className="font-semibold text-slate-950">Provider:</span>{" "}
+                {order.paymentProvider}
+              </p>
+              {order.paymentReference ? (
+                <p>
+                  <span className="font-semibold text-slate-950">Reference:</span>{" "}
+                  {order.paymentReference}
+                </p>
+              ) : null}
+              {order.paidAt ? (
+                <p>
+                  <span className="font-semibold text-slate-950">Captured:</span>{" "}
+                  {new Date(order.paidAt).toLocaleString()}
+                </p>
+              ) : null}
+            </div>
+
+            {order.status !== "cancelled" ? (
+              <form
+                action={confirmOrderPaymentAction.bind(
+                  null,
+                  workspace.store.id,
+                  order.id,
+                )}
+                className="mt-4 grid gap-3"
+              >
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Payment method
+                  <select
+                    className="field"
+                    defaultValue={order.paymentMethod}
+                    name="paymentMethod"
+                  >
+                    <option value="manual_invoice">Manual invoice</option>
+                    <option value="bank_transfer">Bank transfer</option>
+                    <option value="cash_on_delivery">Cash on delivery</option>
+                    <option value="card">Card</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Provider
+                  <input
+                    className="field"
+                    defaultValue={order.paymentProvider}
+                    name="paymentProvider"
+                    placeholder="Manual, Stripe, bank transfer"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Reference
+                  <input
+                    className="field"
+                    defaultValue={order.paymentReference || ""}
+                    name="paymentReference"
+                    placeholder="Receipt, transfer, or capture id"
+                  />
+                </label>
+                <button className="secondary-button w-fit px-4 text-sm" type="submit">
+                  <CheckCircle aria-hidden="true" size={16} />
+                  Confirm payment
+                </button>
+              </form>
+            ) : null}
+          </section>
+
+          <section className="soft-panel overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+                <BanknoteArrowDown aria-hidden="true" size={18} />
+                Refund history
+              </h2>
+            </div>
+            {order.refunds.length > 0 ? (
+              order.refunds.map((refund) => (
+                <div
+                  className="border-b border-slate-100 p-4 last:border-0"
+                  key={refund.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {refundReasonLabels[refund.reason]}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {new Date(refund.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <span className="text-sm font-semibold text-red-600">
+                      -{formatCurrency(refund.amountCents, order.currency)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {refund.restockedInventory ? "Inventory restocked" : "No restock"}
+                  </p>
+                  {refund.note ? (
+                    <p className="mt-2 rounded-[8px] bg-slate-50 p-3 text-sm text-slate-600">
+                      {refund.note}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p className="p-4 text-sm text-slate-500">No refunds recorded.</p>
+            )}
+          </section>
+
           <section className="soft-panel p-4">
             <h2 className="text-lg font-semibold text-slate-950">Customer</h2>
             <div className="mt-4 grid gap-3 text-sm text-slate-600">
@@ -297,6 +453,15 @@ export default async function OrderDetailPage({
               <h2 className="text-lg font-semibold text-slate-950">Note</h2>
               <p className="mt-4 text-sm leading-6 text-slate-600">
                 {order.customerNote}
+              </p>
+            </section>
+          ) : null}
+
+          {order.internalNote ? (
+            <section className="soft-panel p-4">
+              <h2 className="text-lg font-semibold text-slate-950">Internal note</h2>
+              <p className="mt-4 text-sm leading-6 text-slate-600">
+                {order.internalNote}
               </p>
             </section>
           ) : null}

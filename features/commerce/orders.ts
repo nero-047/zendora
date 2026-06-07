@@ -31,7 +31,7 @@ export function getOrderStats(orders: Order[]) {
   );
   const needsFulfillment = orders.filter((order) => order.status === "paid");
   const totalRevenueCents = paidOrders.reduce(
-    (sum, order) => sum + order.totalCents,
+    (sum, order) => sum + Math.max(0, order.totalCents - order.refundedCents),
     0,
   );
 
@@ -58,13 +58,23 @@ function getOrderSearchText(order: Order) {
     order.customerName,
     order.customerEmail,
     order.customerPhone,
+    order.source,
+    order.internalNote,
     order.discountCode,
+    order.paymentStatus,
+    order.paymentMethod,
+    order.paymentProvider,
+    order.paymentReference,
     order.trackingCarrier,
     order.trackingNumber,
     order.shippingAddress?.city,
     order.shippingAddress?.region,
     order.items
       ?.flatMap((item) => [item.productName, item.variantName, item.variantSku])
+      .filter(Boolean)
+      .join(" "),
+    order.refunds
+      .flatMap((refund) => [refund.reason, refund.note])
       .filter(Boolean)
       .join(" "),
   ]
