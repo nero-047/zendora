@@ -25,6 +25,13 @@ function assert(condition, message) {
   }
 }
 
+function getAssertableHtml(body) {
+  return body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\s+/g, " ");
+}
+
 async function run() {
   const checks = [];
 
@@ -85,9 +92,25 @@ async function run() {
       includes: ["Everyday Carry", "Field Carry Pack"],
     },
     {
+      label: "filtered collection",
+      path: "/stores/northline-supply/collections/everyday-carry?q=bottle&sort=price-asc",
+      includes: ["Hydra Bottle", "1 of 3 products"],
+      excludes: ["Field Carry Pack", "Trail Watch"],
+      visibleOnly: true,
+    },
+    {
       label: "checkout",
       path: "/stores/northline-supply/checkout",
       includes: ["Checkout", "Customer", "Delivery"],
+    },
+    {
+      label: "cart permalink checkout",
+      path: "/stores/northline-supply/checkout?cart=%5B%7B%22productId%22%3A%22demo-product-hydra-bottle%22%2C%22variantId%22%3A%22demo-variant-hydra-bottle-steel%22%2C%22quantity%22%3A2%7D%5D",
+      includes: [
+        "Hydra Bottle",
+        "demo-variant-hydra-bottle-steel",
+        "quantity&quot;:2",
+      ],
     },
     {
       label: "order receipt",
@@ -117,10 +140,22 @@ async function run() {
       `${check.path} did not return an HTML response.`,
     );
 
+    const assertableBody = check.visibleOnly
+      ? getAssertableHtml(result.body)
+      : result.body.replace(/<!--[\s\S]*?-->/g, "");
+    const visibleBody = getAssertableHtml(result.body);
+
     for (const expectedText of check.includes) {
       assert(
-        result.body.includes(expectedText),
+        assertableBody.includes(expectedText),
         `${check.path} did not render expected text: ${expectedText}`,
+      );
+    }
+
+    for (const excludedText of check.excludes || []) {
+      assert(
+        !visibleBody.includes(excludedText),
+        `${check.path} rendered excluded text: ${excludedText}`,
       );
     }
 

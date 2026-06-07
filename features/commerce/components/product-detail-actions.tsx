@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowRight, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { getCheckoutPermalink } from "@/features/commerce/cart-permalinks";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
 import type { Product } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function ProductDetailActions({
     activeVariants.find((variant) => variant.id === selectedVariantId) ||
     defaultVariant;
   const { cart, updateQuantity } = useStoreCart(storeSlug, products);
+  const checkoutHref = getCheckoutPermalink(storeSlug, cart);
   const selectedQuantity =
     cart.find(
       (line) =>
@@ -115,7 +117,7 @@ export function ProductDetailActions({
         </button>
       )}
 
-      <Link className="secondary-button w-full px-4" href={`/stores/${storeSlug}/checkout`}>
+      <Link className="secondary-button w-full px-4" href={checkoutHref}>
         Checkout
         <ArrowRight aria-hidden="true" size={16} />
       </Link>

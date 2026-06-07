@@ -28,12 +28,12 @@ function subscribe(callback: () => void) {
   };
 }
 
-function readSnapshot(storageKey: string) {
+function readSnapshot(storageKey: string, fallbackSnapshot = "[]") {
   if (typeof window === "undefined") {
-    return "[]";
+    return fallbackSnapshot;
   }
 
-  return window.localStorage.getItem(storageKey) || "[]";
+  return window.localStorage.getItem(storageKey) || fallbackSnapshot;
 }
 
 function parseSnapshot(snapshot: string) {
@@ -121,16 +121,24 @@ function normalizeCartLines(
   });
 }
 
-export function useStoreCart(storeSlug: string, products: Product[]) {
+export function useStoreCart(
+  storeSlug: string,
+  products: Product[],
+  initialCart?: CartLine[],
+) {
   const storageKey = getCartStorageKey(storeSlug);
   const productsById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
     [products],
   );
+  const initialSnapshot = useMemo(
+    () => JSON.stringify(normalizeCartLines(initialCart || [], productsById)),
+    [initialCart, productsById],
+  );
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => readSnapshot(storageKey),
-    () => "[]",
+    () => readSnapshot(storageKey, initialSnapshot),
+    () => initialSnapshot,
   );
   const cart = useMemo(
     () => normalizeCartLines(parseSnapshot(snapshot), productsById),

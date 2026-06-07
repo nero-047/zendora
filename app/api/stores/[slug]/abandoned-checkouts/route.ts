@@ -9,9 +9,23 @@ import type {
   ProductVariant,
 } from "@/features/commerce/types";
 import { isSupabaseConfigured } from "@/lib/env";
+import {
+  consumeRateLimit,
+  getClientFingerprint,
+  readLimitedJsonBody,
+} from "@/lib/request-guards";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
+
+const abandonedCheckoutIpRateLimit = {
+  limit: 90,
+  windowMs: 60 * 1000,
+};
+const abandonedCheckoutEmailRateLimit = {
+  limit: 24,
+  windowMs: 60 * 1000,
+};
 
 const abandonedCheckoutLineSchema = z.object({
   productId: z.string().trim().min(1),
@@ -96,19 +110,57 @@ function getCapturedLines(input: {
   return { lines: capturedLines };
 }
 
+function rateLimitedResponse(retryAfterSeconds: number) {
+  return Response.json(
+    { ok: false, error: "Checkout recovery capture rate limit exceeded." },
+    {
+      headers: {
+        "Retry-After": String(retryAfterSeconds),
+      },
+      status: 429,
+    },
+  );
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const body = await request.json().catch(() => null);
-  const parsed = abandonedCheckoutCaptureSchema.safeParse(body);
+  const clientRateLimit = consumeRateLimit(
+    `abandoned-checkout:capture:${slug}:${getClientFingerprint(request)}`,
+    abandonedCheckoutIpRateLimit,
+  );
+
+  if (!clientRateLimit.ok) {
+    return rateLimitedResponse(clientRateLimit.retryAfterSeconds);
+  }
+
+  const body = await readLimitedJsonBody(request);
+
+  if (!body.ok) {
+    return Response.json(
+      { ok: false, error: body.error },
+      { status: body.status },
+    );
+  }
+
+  const parsed = abandonedCheckoutCaptureSchema.safeParse(body.value);
 
   if (!parsed.success) {
     return Response.json(
       { ok: false, error: "Check the checkout recovery details." },
       { status: 400 },
     );
+  }
+
+  const emailRateLimit = consumeRateLimit(
+    `abandoned-checkout:email:${slug}:${parsed.data.customerEmail.trim().toLowerCase()}`,
+    abandonedCheckoutEmailRateLimit,
+  );
+
+  if (!emailRateLimit.ok) {
+    return rateLimitedResponse(emailRateLimit.retryAfterSeconds);
   }
 
   if (!isSupabaseConfigured()) {

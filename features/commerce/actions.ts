@@ -2,6 +2,7 @@
 
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
@@ -84,9 +85,22 @@ import {
   normalizeGiftCardCode,
 } from "@/features/commerce/gift-cards";
 import { isSupabaseConfigured } from "@/lib/env";
+import {
+  consumeRateLimit,
+  getClientFingerprintFromHeaders,
+} from "@/lib/request-guards";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { uploadProductImageObject } from "@/lib/supabase/storage";
 import { toPriceCents } from "@/lib/utils";
+
+const publicCheckoutActionRateLimit = {
+  limit: 12,
+  windowMs: 60 * 1000,
+};
+const publicCustomerActionRateLimit = {
+  limit: 10,
+  windowMs: 60 * 1000,
+};
 
 const storeSchema = z.object({
   name: z.string().trim().min(2, "Store name must be at least 2 characters."),
@@ -1094,6 +1108,25 @@ function formError(message: string, errors?: ActionState["errors"]): ActionState
     message,
     errors,
   };
+}
+
+async function consumePublicServerActionRateLimit(
+  key: string,
+  policy: { limit: number; windowMs: number },
+) {
+  const headerList = await headers();
+  const rateLimit = consumeRateLimit(
+    `server-action:${key}:${getClientFingerprintFromHeaders(headerList)}`,
+    policy,
+  );
+
+  if (rateLimit.ok) {
+    return null;
+  }
+
+  return formError(
+    `Too many attempts. Wait ${rateLimit.retryAfterSeconds} seconds and try again.`,
+  );
 }
 
 function isUniqueConstraintError(error: { code?: string; message?: string }) {
@@ -3897,6 +3930,15 @@ export async function createCheckoutOrderAction(
     return formError("Check the checkout details.", parsed.error.flatten().fieldErrors);
   }
 
+  const rateLimitError = await consumePublicServerActionRateLimit(
+    `checkout:${storeSlug}:${parsed.data.customerEmail.trim().toLowerCase()}`,
+    publicCheckoutActionRateLimit,
+  );
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   if (!isSupabaseConfigured()) {
     return checkoutDisabledState();
   }
@@ -5640,6 +5682,15 @@ export async function createReturnRequestAction(
     return formError("Check the return request.", parsed.error.flatten().fieldErrors);
   }
 
+  const rateLimitError = await consumePublicServerActionRateLimit(
+    `return-request:${storeSlug}:${orderId}`,
+    publicCustomerActionRateLimit,
+  );
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const receipt = await getPublicOrderReceipt({
     slug: storeSlug,
     orderId,
@@ -5845,6 +5896,15 @@ export async function createProductReviewAction(
 
   if (!parsed.success) {
     return formError("Check the review details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const rateLimitError = await consumePublicServerActionRateLimit(
+    `product-review:${storeSlug}:${orderId}:${parsed.data.orderItemId}`,
+    publicCustomerActionRateLimit,
+  );
+
+  if (rateLimitError) {
+    return rateLimitError;
   }
 
   const receipt = await getPublicOrderReceipt({

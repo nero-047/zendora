@@ -9,6 +9,10 @@ import {
   isClerkWebhookConfigured,
   isSupabaseConfigured,
 } from "@/lib/env";
+import {
+  getContentLengthLimitError,
+  WEBHOOK_BODY_LIMIT_BYTES,
+} from "@/lib/request-guards";
 
 type UserWebhookPayload = Extract<
   WebhookEvent,
@@ -37,6 +41,18 @@ export async function POST(req: NextRequest) {
     return Response.json(
       { error: "CLERK_WEBHOOK_SIGNING_SECRET is not configured." },
       { status: 503 },
+    );
+  }
+
+  const bodyLimitError = getContentLengthLimitError(
+    req.headers,
+    WEBHOOK_BODY_LIMIT_BYTES,
+  );
+
+  if (bodyLimitError) {
+    return Response.json(
+      { error: bodyLimitError.error },
+      { status: bodyLimitError.status },
     );
   }
 

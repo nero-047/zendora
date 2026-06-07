@@ -1,4 +1,9 @@
 import { isRevenueOrderStatus } from "@/features/commerce/order-status";
+import {
+  getOrderFulfillmentSummary,
+  getOrderRiskAssessment,
+  orderRiskLevelLabels,
+} from "@/features/commerce/order-insights";
 import type { Order, OrderStatus } from "@/features/commerce/types";
 
 export const orderStatusFilters = [
@@ -53,6 +58,9 @@ export function getOrderStats(orders: Order[]) {
 }
 
 function getOrderSearchText(order: Order) {
+  const fulfillmentSummary = getOrderFulfillmentSummary(order);
+  const riskAssessment = getOrderRiskAssessment(order);
+
   return [
     order.id,
     order.customerName,
@@ -67,6 +75,10 @@ function getOrderSearchText(order: Order) {
     order.paymentReference,
     order.trackingCarrier,
     order.trackingNumber,
+    fulfillmentSummary.label,
+    fulfillmentSummary.detail,
+    orderRiskLevelLabels[riskAssessment.level],
+    riskAssessment.factors.map((factor) => factor.label).join(" "),
     order.fulfillments
       .flatMap((fulfillment) => [
         fulfillment.status,

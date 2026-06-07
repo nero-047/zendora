@@ -16,6 +16,11 @@ import { ManualOrderForm } from "@/features/commerce/components/manual-order-for
 import { getCustomerHref } from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
 import {
+  getOrderFulfillmentSummary,
+  getOrderRiskAssessment,
+  orderRiskLevelLabels,
+} from "@/features/commerce/order-insights";
+import {
   orderSourceLabels,
   orderStatusLabels,
   paymentStatusLabels,
@@ -164,95 +169,101 @@ export default async function OrdersPage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto]">
           <span>Order</span>
           <span className="hidden xl:inline">Source</span>
           <span className="hidden xl:inline">Status</span>
           <span className="hidden xl:inline">Payment</span>
           <span className="hidden xl:inline">Fulfillment</span>
+          <span className="hidden xl:inline">Risk</span>
           <span className="hidden xl:inline">Total</span>
           <span>View</span>
         </div>
-        {filteredOrders.map((order) => (
-          <div
-            className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto]"
-            key={order.id}
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold text-slate-950">
-                  Order {order.id.slice(0, 8)}
+        {filteredOrders.map((order) => {
+          const fulfillmentSummary = getOrderFulfillmentSummary(order);
+          const riskAssessment = getOrderRiskAssessment(order, { orders });
+
+          return (
+            <div
+              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto]"
+              key={order.id}
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-semibold text-slate-950">
+                    Order {order.id.slice(0, 8)}
+                  </p>
+                  <span className="status-pill xl:hidden">
+                    {orderStatusLabels[order.status]}
+                  </span>
+                  <span className="status-pill xl:hidden">
+                    {paymentStatusLabels[order.paymentStatus]}
+                  </span>
+                  <span className="status-pill xl:hidden">
+                    {orderSourceLabels[order.source]}
+                  </span>
+                  <span className="status-pill xl:hidden">
+                    {orderRiskLevelLabels[riskAssessment.level]}
+                  </span>
+                </div>
+                <Link
+                  className="mt-1 block truncate text-sm font-semibold text-sky-700"
+                  href={getCustomerHref(store.id, order.customerEmail)}
+                >
+                  {order.customerName}
+                </Link>
+                <p className="truncate text-xs text-slate-500">{order.customerEmail}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {new Date(order.createdAt).toLocaleString()}
                 </p>
-                <span className="status-pill xl:hidden">
-                  {orderStatusLabels[order.status]}
-                </span>
-                <span className="status-pill xl:hidden">
-                  {paymentStatusLabels[order.paymentStatus]}
-                </span>
-                <span className="status-pill xl:hidden">
-                  {orderSourceLabels[order.source]}
-                </span>
+                {order.items?.length ? (
+                  <p className="mt-2 truncate text-xs text-slate-500">
+                    {order.items
+                      .slice(0, 3)
+                      .map((item) =>
+                        `${item.quantity} x ${item.productName}${
+                          item.variantName ? ` (${item.variantName})` : ""
+                        }`,
+                      )
+                      .join(" / ")}
+                  </p>
+                ) : null}
               </div>
-              <Link
-                className="mt-1 block truncate text-sm font-semibold text-sky-700"
-                href={getCustomerHref(store.id, order.customerEmail)}
-              >
-                {order.customerName}
-              </Link>
-              <p className="truncate text-xs text-slate-500">{order.customerEmail}</p>
-              <p className="mt-2 text-xs text-slate-500">
-                {new Date(order.createdAt).toLocaleString()}
-              </p>
-              {order.items?.length ? (
-                <p className="mt-2 truncate text-xs text-slate-500">
-                  {order.items
-                    .slice(0, 3)
-                    .map((item) =>
-                      `${item.quantity} x ${item.productName}${
-                        item.variantName ? ` (${item.variantName})` : ""
-                      }`,
-                    )
-                    .join(" / ")}
-                </p>
-              ) : null}
-            </div>
-            <span className="status-pill hidden w-fit xl:inline-flex">
-              {orderSourceLabels[order.source]}
-            </span>
-            <span className="status-pill hidden w-fit xl:inline-flex">
-              {orderStatusLabels[order.status]}
-            </span>
-            <span className="status-pill hidden w-fit xl:inline-flex">
-              {paymentStatusLabels[order.paymentStatus]}
-            </span>
-            <span className="hidden text-sm text-slate-600 xl:inline">
-              {order.trackingNumber ? (
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {orderSourceLabels[order.source]}
+              </span>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {orderStatusLabels[order.status]}
+              </span>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {paymentStatusLabels[order.paymentStatus]}
+              </span>
+              <span className="hidden text-sm text-slate-600 xl:inline">
                 <span className="inline-flex items-center gap-2">
                   <Truck aria-hidden="true" size={15} />
-                  {order.trackingCarrier
-                    ? `${order.trackingCarrier} ${order.trackingNumber}`
-                    : order.trackingNumber}
+                  {fulfillmentSummary.latestFulfillment?.trackingNumber ||
+                    order.trackingNumber ||
+                    fulfillmentSummary.label}
                 </span>
-              ) : order.status === "fulfilled" ? (
-                "Fulfilled"
-              ) : (
-                "Not fulfilled"
-              )}
-            </span>
-            <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
-              {order.refundedCents > 0
-                ? formatCurrency(order.refundableCents, order.currency)
-                : formatCurrency(order.totalCents, order.currency)}
-            </span>
-            <Link
-              className="secondary-button min-h-10 px-3 text-sm"
-              href={getOrderHref(store.id, order.id)}
-            >
-              <ReceiptText aria-hidden="true" size={16} />
-              Details
-            </Link>
-          </div>
-        ))}
+              </span>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {orderRiskLevelLabels[riskAssessment.level]}
+              </span>
+              <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
+                {order.refundedCents > 0
+                  ? formatCurrency(order.refundableCents, order.currency)
+                  : formatCurrency(order.totalCents, order.currency)}
+              </span>
+              <Link
+                className="secondary-button min-h-10 px-3 text-sm"
+                href={getOrderHref(store.id, order.id)}
+              >
+                <ReceiptText aria-hidden="true" size={16} />
+                Details
+              </Link>
+            </div>
+          );
+        })}
         {filteredOrders.length === 0 ? (
           <p className="p-5 text-sm text-slate-500">
             No orders match the current filters.

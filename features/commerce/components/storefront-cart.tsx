@@ -11,8 +11,15 @@ import {
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import {
+  defaultStorefrontCatalogFilters,
+  hasActiveStorefrontCatalogFilters,
+  serializeStorefrontCatalogFilters,
+  type StorefrontCatalogFilters,
+} from "@/features/commerce/catalog-filters";
+import { getCheckoutPermalink } from "@/features/commerce/cart-permalinks";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
 import type { Product } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
@@ -20,13 +27,24 @@ import { formatCurrency } from "@/lib/utils";
 type StorefrontCartProps = {
   storeSlug: string;
   products: Product[];
+  initialFilters?: StorefrontCatalogFilters;
 };
 
-export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("all");
-  const [availability, setAvailability] = useState("all");
-  const [sort, setSort] = useState("featured");
+function getAvailableInventory(product: Product) {
+  const activeVariants = product.variants.filter(
+    (variant) => variant.status === "active",
+  );
+
+  return activeVariants.length > 0
+    ? activeVariants.reduce((sum, variant) => sum + variant.inventoryCount, 0)
+    : product.inventoryCount;
+}
+
+export function StorefrontCart({
+  storeSlug,
+  products,
+  initialFilters = defaultStorefrontCatalogFilters,
+}: StorefrontCartProps) {
   const { cart, cartItems, updateQuantity } = useStoreCart(storeSlug, products);
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalCents = cartItems.reduce(
@@ -45,20 +63,39 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
     ].sort((a, b) => a.localeCompare(b)),
     [products],
   );
+  const normalizedInitialFilters = useMemo<StorefrontCatalogFilters>(
+    () => ({
+      query: initialFilters.query.trim().slice(0, 80),
+      category:
+        initialFilters.category === "all" ||
+        categories.includes(initialFilters.category)
+          ? initialFilters.category
+          : "all",
+      availability: initialFilters.availability,
+      sort: initialFilters.sort,
+    }),
+    [categories, initialFilters],
+  );
+  const [query, setQuery] = useState(normalizedInitialFilters.query);
+  const [category, setCategory] = useState(normalizedInitialFilters.category);
+  const [availability, setAvailability] = useState(
+    normalizedInitialFilters.availability,
+  );
+  const [sort, setSort] = useState(normalizedInitialFilters.sort);
+  const currentFilters = useMemo<StorefrontCatalogFilters>(
+    () => ({
+      query,
+      category,
+      availability,
+      sort,
+    }),
+    [availability, category, query, sort],
+  );
   const filteredProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
     const filtered = products.filter((product) => {
-      const activeVariants = product.variants.filter(
-        (variant) => variant.status === "active",
-      );
-      const availableInventory =
-        activeVariants.length > 0
-          ? activeVariants.reduce(
-              (sum, variant) => sum + variant.inventoryCount,
-              0,
-            )
-          : product.inventoryCount;
+      const availableInventory = getAvailableInventory(product);
       const matchesCategory = category === "all" || product.category === category;
       const matchesAvailability =
         availability === "all" ||
@@ -106,17 +143,38 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
       return 0;
     });
   }, [availability, category, products, query, sort]);
-  const hasActiveFilters =
-    Boolean(query.trim()) ||
-    category !== "all" ||
-    availability !== "all" ||
-    sort !== "featured";
+  const hasActiveFilters = hasActiveStorefrontCatalogFilters(currentFilters);
+  const checkoutHref = getCheckoutPermalink(storeSlug, cart);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const filterParams = new URLSearchParams(
+      serializeStorefrontCatalogFilters(currentFilters),
+    );
+
+    for (const key of ["q", "category", "availability", "sort"]) {
+      params.delete(key);
+    }
+
+    for (const [key, value] of filterParams.entries()) {
+      params.set(key, value);
+    }
+
+    const queryString = params.toString();
+    const pathname = window.location.pathname;
+    const nextHref = queryString ? `${pathname}?${queryString}` : pathname;
+    const currentHref = `${window.location.pathname}${window.location.search}`;
+
+    if (currentHref !== nextHref) {
+      window.history.replaceState(null, "", nextHref);
+    }
+  }, [currentFilters]);
 
   function clearFilters() {
-    setQuery("");
-    setCategory("all");
-    setAvailability("all");
-    setSort("featured");
+    setQuery(defaultStorefrontCatalogFilters.query);
+    setCategory(defaultStorefrontCatalogFilters.category);
+    setAvailability(defaultStorefrontCatalogFilters.availability);
+    setSort(defaultStorefrontCatalogFilters.sort);
   }
 
   function addProduct(product: Product) {
@@ -142,7 +200,7 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="status-pill">
               <SlidersHorizontal aria-hidden="true" size={14} />
-              {filteredProducts.length} products
+              {filteredProducts.length} of {products.length} products
             </span>
             {hasActiveFilters ? (
               <button
@@ -190,7 +248,12 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
               <span className="sr-only">Availability</span>
               <select
                 className="field"
-                onChange={(event) => setAvailability(event.target.value)}
+                onChange={(event) =>
+                  setAvailability(
+                    event.target
+                      .value as StorefrontCatalogFilters["availability"],
+                  )
+                }
                 value={availability}
               >
                 <option value="all">All stock</option>
@@ -203,7 +266,9 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
               <span className="sr-only">Sort products</span>
               <select
                 className="field"
-                onChange={(event) => setSort(event.target.value)}
+                onChange={(event) =>
+                  setSort(event.target.value as StorefrontCatalogFilters["sort"])
+                }
                 value={sort}
               >
                 <option value="featured">Featured</option>
@@ -232,6 +297,7 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
           const selectedQuantity = cartLine?.quantity || 0;
           const inventoryCount =
             defaultVariant?.inventoryCount ?? product.inventoryCount;
+          const availableInventory = getAvailableInventory(product);
           const isSoldOut = inventoryCount === 0;
 
           return (
@@ -315,7 +381,7 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
                 </div>
                 <p className="mt-3 text-xs font-medium text-slate-500">
                   {[
-                    `${product.inventoryCount} in stock`,
+                    `${availableInventory} in stock`,
                     activeVariants.length > 0
                       ? `${activeVariants.length} variants`
                       : product.sku,
@@ -393,7 +459,7 @@ export function StorefrontCart({ storeSlug, products }: StorefrontCartProps) {
           {cartItems.length > 0 ? (
             <Link
               className="primary-button mt-4 w-full px-3 text-sm"
-              href={`/stores/${storeSlug}/checkout`}
+              href={checkoutHref}
             >
               Checkout
               <ArrowRight aria-hidden="true" size={16} />

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Layers3, Sparkles } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
+import { parseStorefrontCatalogFilters } from "@/features/commerce/catalog-filters";
 import {
   StorefrontFooter,
   StorefrontHeader,
@@ -18,6 +19,7 @@ import {
 
 type PublicStorePageProps = {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({
@@ -47,8 +49,12 @@ export async function generateMetadata({
 
 export default async function PublicStorePage({
   params,
+  searchParams,
 }: PublicStorePageProps) {
-  const { slug } = await params;
+  const [{ slug }, query] = await Promise.all([
+    params,
+    searchParams || Promise.resolve({}),
+  ]);
   const workspace = await getPublicStorefront(slug);
 
   if (!workspace) {
@@ -57,6 +63,7 @@ export default async function PublicStorePage({
 
   const { store, products, collections, navigationMenus } = workspace;
   const heroProduct = products[0];
+  const catalogFilters = parseStorefrontCatalogFilters(query);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -120,7 +127,11 @@ export default async function PublicStorePage({
         </section>
       ) : null}
 
-      <StorefrontCart products={products} storeSlug={store.slug} />
+      <StorefrontCart
+        initialFilters={catalogFilters}
+        products={products}
+        storeSlug={store.slug}
+      />
 
       <StorefrontFooter menus={navigationMenus} />
     </main>

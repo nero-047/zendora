@@ -87,17 +87,21 @@ const policies = loadTsModule("features/commerce/policies.ts");
 const storePages = loadTsModule("features/commerce/store-pages.ts");
 const seo = loadTsModule("features/commerce/seo.ts");
 const payments = loadTsModule("features/commerce/payments.ts");
+const orderInsights = loadTsModule("features/commerce/order-insights.ts");
 const returns = loadTsModule("features/commerce/returns.ts");
 const reviews = loadTsModule("features/commerce/reviews.ts");
 const giftCards = loadTsModule("features/commerce/gift-cards.ts");
 const fulfillments = loadTsModule("features/commerce/fulfillments.ts");
 const customers = loadTsModule("features/commerce/customers.ts");
 const navigation = loadTsModule("features/commerce/navigation.ts");
+const cartPermalinks = loadTsModule("features/commerce/cart-permalinks.ts");
+const catalogFilters = loadTsModule("features/commerce/catalog-filters.ts");
 const launchReadiness = loadTsModule("features/commerce/launch-readiness.ts");
 const abandonedCheckouts = loadTsModule(
   "features/commerce/abandoned-checkouts.ts",
 );
 const permissions = loadTsModule("features/commerce/permissions.ts");
+const requestGuards = loadTsModule("lib/request-guards.ts");
 const runtimeEnv = loadTsModule("lib/env.ts");
 const mockData = loadTsModule("features/commerce/mock-data.ts");
 
@@ -211,6 +215,148 @@ const tests = [
       assertFalse(
         fulfillments.canTransitionFulfillmentStatus("cancelled", "created"),
         "cancelled shipments should be terminal",
+      );
+    },
+  ],
+  [
+    "order insights summarize fulfillment and risk for merchant triage",
+    () => {
+      const makeOrder = (overrides = {}) => ({
+        id: "order_current",
+        storeId: "store_1",
+        customerName: "Nina Shah",
+        customerEmail: "nina@example.com",
+        status: "paid",
+        source: "storefront",
+        paymentStatus: "paid",
+        paymentMethod: "card",
+        paymentProvider: "Stripe",
+        subtotalCents: 10000,
+        discountCents: 0,
+        giftCardCents: 0,
+        shippingCents: 0,
+        taxCents: 0,
+        taxRateBps: 0,
+        totalCents: 10000,
+        amountDueCents: 0,
+        refundedCents: 0,
+        refundableCents: 10000,
+        currency: "USD",
+        createdAt: "2026-06-06T10:00:00.000Z",
+        shippingAddress: {
+          line1: "1 Main Street",
+          city: "Austin",
+          region: "TX",
+          postalCode: "78701",
+          country: "US",
+        },
+        items: [],
+        fulfillments: [],
+        refunds: [],
+        returnRequests: [],
+        paymentTransactions: [
+          {
+            id: "txn_capture",
+            storeId: "store_1",
+            orderId: "order_current",
+            type: "capture",
+            status: "succeeded",
+            paymentMethod: "card",
+            paymentProvider: "Stripe",
+            amountCents: 10000,
+            currency: "USD",
+            metadata: {},
+            createdAt: "2026-06-06T10:02:00.000Z",
+          },
+        ],
+        ...overrides,
+      });
+      const readyOrder = makeOrder();
+      const readySummary = orderInsights.getOrderFulfillmentSummary(readyOrder);
+
+      assertEqual(
+        readySummary.stage,
+        "unfulfilled",
+        "paid orders without shipments should be ready for fulfillment",
+      );
+      assertEqual(
+        readySummary.detail,
+        "Paid order is ready for fulfillment.",
+        "paid fulfillment detail should guide the operator",
+      );
+
+      const shippedSummary = orderInsights.getOrderFulfillmentSummary(
+        makeOrder({
+          fulfillments: [
+            {
+              id: "fulfillment_1",
+              storeId: "store_1",
+              orderId: "order_current",
+              status: "in_transit",
+              trackingNumber: "1Z999",
+              createdAt: "2026-06-06T11:00:00.000Z",
+              updatedAt: "2026-06-06T11:00:00.000Z",
+            },
+          ],
+        }),
+      );
+
+      assertEqual(
+        shippedSummary.stage,
+        "in_transit",
+        "active in-transit shipments should drive fulfillment summary",
+      );
+      assertTrue(
+        shippedSummary.hasTracking,
+        "fulfillment summary should surface tracking presence",
+      );
+
+      const riskyOrder = makeOrder({
+        id: "order_risky",
+        customerEmail: "risk@example.com",
+        status: "pending",
+        paymentStatus: "pending",
+        paymentMethod: "cash_on_delivery",
+        totalCents: 125000,
+        amountDueCents: 125000,
+        refundableCents: 125000,
+        createdAt: "2026-06-01T10:00:00.000Z",
+        shippingAddress: undefined,
+        paymentTransactions: [],
+      });
+      const riskyAssessment = orderInsights.getOrderRiskAssessment(riskyOrder, {
+        now: new Date("2026-06-07T10:00:00.000Z"),
+        orders: [
+          makeOrder({
+            id: "order_cancelled_1",
+            customerEmail: "risk@example.com",
+            status: "cancelled",
+          }),
+          makeOrder({
+            id: "order_cancelled_2",
+            customerEmail: "risk@example.com",
+            status: "cancelled",
+          }),
+        ],
+      });
+      const riskFactorIds = riskyAssessment.factors.map((factor) => factor.id);
+
+      assertEqual(
+        riskyAssessment.level,
+        "high",
+        "open high-value stale COD orders should be high risk",
+      );
+      assertDeepEqual(
+        riskFactorIds,
+        [
+          "payment_open",
+          "stale_pending_payment",
+          "high_value_order",
+          "cash_on_delivery_review",
+          "missing_shipping_address",
+          "repeat_cancelled_customer_orders",
+        ],
+        "risk assessment should explain each merchant review flag",
       );
     },
   ],
@@ -1363,6 +1509,164 @@ const tests = [
       } finally {
         restoreEnv();
       }
+    },
+  ],
+  [
+    "cart permalinks serialize and normalize checkout carts",
+    () => {
+      const cartPayload = cartPermalinks.serializeCartPermalinkLines([
+        {
+          productId: "demo-product-hydra-bottle",
+          variantId: "demo-variant-hydra-bottle-steel",
+          quantity: 2,
+        },
+        {
+          productId: "demo-product-hydra-bottle",
+          variantId: "demo-variant-hydra-bottle-steel",
+          quantity: 120,
+        },
+        {
+          productId: "",
+          quantity: 1,
+        },
+      ]);
+      const parsed = cartPermalinks.parseCartPermalinkLines(cartPayload);
+
+      assertDeepEqual(
+        parsed,
+        [
+          {
+            productId: "demo-product-hydra-bottle",
+            variantId: "demo-variant-hydra-bottle-steel",
+            quantity: 99,
+          },
+        ],
+        "cart permalinks should merge duplicate lines and cap quantities",
+      );
+      assertEqual(
+        cartPermalinks.getCheckoutPermalink("northline-supply", parsed),
+        `/stores/northline-supply/checkout?cart=${encodeURIComponent(cartPayload)}`,
+        "checkout permalinks should carry the encoded cart payload",
+      );
+      assertDeepEqual(
+        cartPermalinks.parseCartPermalinkLines("not-json"),
+        [],
+        "invalid cart permalink payloads should be ignored",
+      );
+    },
+  ],
+  [
+    "storefront catalog filters parse and serialize shareable URLs",
+    () => {
+      const parsed = catalogFilters.parseStorefrontCatalogFilters({
+        q: "  bottle  ",
+        category: "Drinkware",
+        availability: "available",
+        sort: "price-asc",
+      });
+
+      assertDeepEqual(
+        parsed,
+        {
+          query: "bottle",
+          category: "Drinkware",
+          availability: "available",
+          sort: "price-asc",
+        },
+        "catalog filters should normalize valid query params",
+      );
+      assertEqual(
+        catalogFilters.serializeStorefrontCatalogFilters(parsed),
+        "q=bottle&category=Drinkware&availability=available&sort=price-asc",
+        "catalog filters should serialize non-default values",
+      );
+      assertTrue(
+        catalogFilters.hasActiveStorefrontCatalogFilters(parsed),
+        "non-default catalog filters should be active",
+      );
+
+      const defaults = catalogFilters.parseStorefrontCatalogFilters({
+        q: "   ",
+        availability: "retired",
+        sort: "random",
+      });
+
+      assertDeepEqual(
+        defaults,
+        catalogFilters.defaultStorefrontCatalogFilters,
+        "invalid catalog filters should fall back to defaults",
+      );
+      assertEqual(
+        catalogFilters.serializeStorefrontCatalogFilters(defaults),
+        "",
+        "default catalog filters should serialize to an empty query string",
+      );
+    },
+  ],
+  [
+    "request guards limit repeated public writes",
+    () => {
+      const key = "business-rules-request-guard";
+      const policy = {
+        limit: 2,
+        windowMs: 1000,
+      };
+      const first = requestGuards.consumeRateLimit(key, policy, 1000);
+      const second = requestGuards.consumeRateLimit(key, policy, 1100);
+      const third = requestGuards.consumeRateLimit(key, policy, 1200);
+      const afterReset = requestGuards.consumeRateLimit(key, policy, 2101);
+      const fingerprint = requestGuards.getClientFingerprint(
+        new Request("https://example.test", {
+          headers: {
+            "user-agent": "CheckoutBot",
+            "x-forwarded-for": "203.0.113.7, 10.0.0.1",
+          },
+        }),
+      );
+      const headerFingerprint = requestGuards.getClientFingerprintFromHeaders(
+        new Headers({
+          "cf-connecting-ip": "198.51.100.8",
+          "user-agent": "ServerActionClient",
+        }),
+      );
+      const contentLengthOk = requestGuards.getContentLengthLimitError(
+        new Headers({ "content-length": "4096" }),
+        4096,
+      );
+      const contentLengthTooLarge = requestGuards.getContentLengthLimitError(
+        new Headers({ "content-length": "4097" }),
+        4096,
+      );
+
+      assertTrue(first.ok, "first request should be accepted");
+      assertTrue(second.ok, "second request inside the limit should be accepted");
+      assertFalse(third.ok, "third request inside the limit should be rejected");
+      assertEqual(
+        third.retryAfterSeconds,
+        1,
+        "rejected requests should include a retry window",
+      );
+      assertTrue(afterReset.ok, "requests should be accepted after the window resets");
+      assertEqual(
+        fingerprint,
+        "203.0.113.7:CheckoutBot",
+        "fingerprints should prefer forwarded client IP and user agent",
+      );
+      assertEqual(
+        headerFingerprint,
+        "198.51.100.8:ServerActionClient",
+        "server action fingerprints should work from header collections",
+      );
+      assertEqual(
+        contentLengthOk,
+        null,
+        "content-length equal to the limit should be accepted",
+      );
+      assertEqual(
+        contentLengthTooLarge.status,
+        413,
+        "oversized content-length should be rejected before body parsing",
+      );
     },
   ],
 ];

@@ -26,6 +26,7 @@ type CheckoutFormProps = {
   taxRateBps: number;
   products: Product[];
   initialCart?: CartLine[];
+  initialCartKey?: string;
   initialCustomerEmail?: string;
   initialCustomerName?: string;
   initialRecoveryToken?: string;
@@ -78,6 +79,7 @@ export function CheckoutForm({
   taxRateBps,
   products,
   initialCart,
+  initialCartKey,
   initialCustomerEmail,
   initialCustomerName,
   initialRecoveryToken,
@@ -86,11 +88,12 @@ export function CheckoutForm({
   const [customerName, setCustomerName] = useState(initialCustomerName || "");
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail || "");
   const [recoveryToken, setRecoveryToken] = useState(initialRecoveryToken || "");
-  const restoredRecoveryTokenRef = useRef("");
+  const restoredInitialCartKeyRef = useRef("");
   const [shippingCountry, setShippingCountry] = useState("United States");
   const { cartItems, clearCart, replaceCart, updateQuantity } = useStoreCart(
     storeSlug,
     products,
+    initialCart,
   );
   async function checkoutAction(
     currentState: ActionState,
@@ -126,16 +129,16 @@ export function CheckoutForm({
 
   useEffect(() => {
     if (
-      !initialRecoveryToken ||
+      !initialCartKey ||
       !initialCart?.length ||
-      restoredRecoveryTokenRef.current === initialRecoveryToken
+      restoredInitialCartKeyRef.current === initialCartKey
     ) {
       return;
     }
 
     replaceCart(initialCart);
-    restoredRecoveryTokenRef.current = initialRecoveryToken;
-  }, [initialCart, initialRecoveryToken, replaceCart]);
+    restoredInitialCartKeyRef.current = initialCartKey;
+  }, [initialCart, initialCartKey, replaceCart]);
 
   const totalCents = cartItems.reduce(
     (sum, item) =>

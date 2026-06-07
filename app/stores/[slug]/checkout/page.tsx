@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { parseCartPermalinkLines } from "@/features/commerce/cart-permalinks";
 import { CheckoutForm } from "@/features/commerce/components/checkout-form";
 import { StorefrontFooter } from "@/features/commerce/components/storefront-navigation";
 import {
@@ -17,6 +18,7 @@ import {
 type CheckoutPageProps = {
   params: Promise<{ slug: string }>;
   searchParams?: Promise<{
+    cart?: string | string[];
     recovery?: string | string[];
   }>;
 };
@@ -53,6 +55,7 @@ export default async function StoreCheckoutPage({
   const recoveryToken = Array.isArray(query.recovery)
     ? query.recovery[0]
     : query.recovery;
+  const cartParam = Array.isArray(query.cart) ? query.cart[0] : query.cart;
   const workspace = await getPublicStorefront(slug);
 
   if (!workspace) {
@@ -67,11 +70,17 @@ export default async function StoreCheckoutPage({
     : null;
   const { store, products, shippingZones, navigationMenus } = workspace;
   const checkoutSessionId = randomBytes(16).toString("hex");
-  const initialCart = recoveredCheckout?.checkout.lines.map((line) => ({
-    productId: line.productId,
-    variantId: line.productVariantId,
-    quantity: line.quantity,
-  }));
+  const recoveredCart =
+    recoveredCheckout?.checkout.lines.map((line) => ({
+      productId: line.productId,
+      variantId: line.productVariantId,
+      quantity: line.quantity,
+    })) || [];
+  const permalinkCart = parseCartPermalinkLines(cartParam);
+  const initialCart = recoveredCart.length > 0 ? recoveredCart : permalinkCart;
+  const initialCartKey =
+    recoveredCheckout?.checkout.recoveryToken ||
+    (permalinkCart.length > 0 ? `cart:${cartParam}` : undefined);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -79,6 +88,7 @@ export default async function StoreCheckoutPage({
         checkoutSessionId={checkoutSessionId}
         freeShippingThresholdCents={store.freeShippingThresholdCents}
         initialCart={initialCart}
+        initialCartKey={initialCartKey}
         initialCustomerEmail={recoveredCheckout?.checkout.customerEmail}
         initialCustomerName={recoveredCheckout?.checkout.customerName}
         initialRecoveryToken={recoveredCheckout?.checkout.recoveryToken}

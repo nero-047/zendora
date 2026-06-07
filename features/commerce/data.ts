@@ -938,6 +938,40 @@ function mapDemoStoreForUser(store: Store, userId: string): Store {
   };
 }
 
+function getDemoStoresForUser(userId: string) {
+  return mockStores.map((store) => mapDemoStoreForUser(store, userId));
+}
+
+function getMockDashboardOverviewForStores(stores: Store[]): DashboardOverview {
+  const storeIds = stores.map((store) => store.id);
+  const products = mockProducts.filter((product) =>
+    storeIds.includes(product.storeId),
+  );
+  const orders = mockOrders.filter((order) => storeIds.includes(order.storeId));
+  const refundsByOrder = refundsByOrderId(
+    mockOrderRefunds.filter((refund) => storeIds.includes(refund.storeId)),
+  );
+
+  return {
+    stores,
+    lowStockProducts: products
+      .filter((product) => product.inventoryCount <= 12)
+      .slice(0, 4),
+    totalProducts: products.length,
+    totalOrders: orders.length,
+    totalRevenueCents: orders
+      .filter((order) => isRevenueOrderStatus(order.status))
+      .reduce((sum, order) => {
+        const refundedCents = (refundsByOrder.get(order.id) || []).reduce(
+          (refundSum, refund) => refundSum + refund.amountCents,
+          0,
+        );
+
+        return sum + Math.max(0, order.totalCents - refundedCents);
+      }, 0),
+  };
+}
+
 function mapShippingZone(row: ShippingZoneRow): ShippingZone {
   return {
     id: row.id,
@@ -1211,7 +1245,7 @@ async function loadProductVariants(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1244,7 +1278,7 @@ async function loadShippingZones(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1292,7 +1326,7 @@ async function loadCollectionProducts(
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1326,7 +1360,7 @@ async function loadCollections(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1385,7 +1419,7 @@ async function loadOrderRefunds(orderIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1408,7 +1442,7 @@ async function loadOrderFulfillments(orderIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1431,7 +1465,7 @@ async function loadOrderReturnRequests(orderIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1454,7 +1488,7 @@ async function loadOrderPaymentTransactions(orderIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1529,7 +1563,7 @@ async function loadAbandonedCheckouts(storeIds: string[]) {
     .order("last_seen_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1562,7 +1596,7 @@ async function loadProductReviews(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1581,7 +1615,7 @@ async function loadProductReviewsByOrder(orderId: string) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1623,7 +1657,7 @@ async function loadGiftCardRedemptions(giftCardIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1646,7 +1680,7 @@ async function loadGiftCards(storeIds: string[]) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1826,7 +1860,7 @@ async function loadStorePolicies(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1859,7 +1893,7 @@ async function loadStorePages(
   const { data, error } = await query;
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1885,7 +1919,7 @@ async function loadStoreNavigationMenus(
     .order("location", { ascending: true });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1912,7 +1946,7 @@ async function loadCustomerProfiles(
     .order("updated_at", { ascending: false });
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return [];
     }
 
@@ -1965,6 +1999,62 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   };
 }
 
+function getMockStoreWorkspaceForUser(
+  userId: string,
+  storeId: string,
+): StoreWorkspace | null {
+  const store = mockStores.find(
+    (item) => item.id === storeId || item.slug === storeId,
+  );
+
+  if (!store) {
+    return null;
+  }
+
+  return {
+    membershipRole: "owner",
+    store: mapDemoStoreForUser(store, userId),
+    members: [
+      {
+        storeId: store.id,
+        userId,
+        email: "founder@zendora.dev",
+        name: "Store owner",
+        role: "owner",
+        createdAt: store.createdAt,
+      },
+    ],
+    invitations: [],
+    auditEvents: [],
+    notifications: [],
+    policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
+    customPages: mockStorePages.filter((page) => page.storeId === store.id),
+    navigationMenus: mockStoreNavigationMenus.filter(
+      (menu) => menu.storeId === store.id,
+    ),
+    customerProfiles: mockCustomerProfiles.filter(
+      (profile) => profile.storeId === store.id,
+    ),
+    shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
+    products: mockProducts.filter((product) => product.storeId === store.id),
+    collections: mockCollections.filter(
+      (collection) => collection.storeId === store.id,
+    ),
+    orders: mockOrders.filter((order) => order.storeId === store.id),
+    abandonedCheckouts: mockAbandonedCheckouts.filter(
+      (checkout) => checkout.storeId === store.id,
+    ),
+    productReviews: mockProductReviews.filter(
+      (review) => review.storeId === store.id,
+    ),
+    giftCards: mockGiftCards.filter((giftCard) => giftCard.storeId === store.id),
+    discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
+    inventoryAdjustments: mockInventoryAdjustments.filter(
+      (adjustment) => adjustment.storeId === store.id,
+    ),
+  };
+}
+
 function getCatalogErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -1977,11 +2067,7 @@ function getCatalogErrorMessage(error: unknown) {
   return "";
 }
 
-function shouldUseDemoCatalogFallback(error: unknown) {
-  if (!isDemoDataEnabled()) {
-    return false;
-  }
-
+function isCommerceSchemaUnavailableError(error: unknown) {
   const message = getCatalogErrorMessage(error).toLowerCase();
 
   return (
@@ -1990,6 +2076,14 @@ function shouldUseDemoCatalogFallback(error: unknown) {
     message.includes("relation") ||
     message.includes("does not exist")
   );
+}
+
+function shouldUseEmptyCatalogFallback(error: unknown) {
+  return isCommerceSchemaUnavailableError(error);
+}
+
+function shouldUseDemoCatalogFallback(error: unknown) {
+  return isDemoDataEnabled() && isCommerceSchemaUnavailableError(error);
 }
 
 async function loadPublicStorefrontFromClient(
@@ -2020,6 +2114,29 @@ async function loadPublicStorefrontFromClient(
     .order("created_at", { ascending: false });
 
   if (productError) {
+    if (shouldUseEmptyCatalogFallback(productError)) {
+      return {
+        store: mapStore(row, [], []),
+        members: [],
+        invitations: [],
+        auditEvents: [],
+        notifications: [],
+        policies: [],
+        customPages: [],
+        navigationMenus: [],
+        customerProfiles: [],
+        shippingZones: [],
+        products: [],
+        collections: [],
+        orders: [],
+        abandonedCheckouts: [],
+        productReviews: [],
+        giftCards: [],
+        discounts: [],
+        inventoryAdjustments: [],
+      };
+    }
+
     throw new Error(productError.message);
   }
 
@@ -2095,6 +2212,10 @@ export async function upsertProfileForUser(user: AppUser) {
   });
 
   if (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return;
+    }
+
     throw error;
   }
 }
@@ -2139,64 +2260,73 @@ export async function listStoresForUser(userId: string): Promise<Store[]> {
       return [];
     }
 
-    return mockStores.map((store) => mapDemoStoreForUser(store, userId));
+    return getDemoStoresForUser(userId);
   }
 
   const db = getSupabaseAdmin();
-  const { data: membershipRows, error: membershipError } = await db
-    .from("store_memberships")
-    .select("store_id")
-    .eq("clerk_user_id", userId);
 
-  if (membershipError) {
-    throw membershipError;
-  }
+  try {
+    const { data: membershipRows, error: membershipError } = await db
+      .from("store_memberships")
+      .select("store_id")
+      .eq("clerk_user_id", userId);
 
-  const memberStoreIds = (membershipRows || []).map((row) => row.store_id);
-  const storeRows = new Map<string, StoreRow>();
+    if (membershipError) {
+      throw membershipError;
+    }
 
-  const { data: ownedStores, error: ownedError } = await db
-    .from("stores")
-    .select("*")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: false });
+    const memberStoreIds = (membershipRows || []).map((row) => row.store_id);
+    const storeRows = new Map<string, StoreRow>();
 
-  if (ownedError) {
-    throw ownedError;
-  }
-
-  for (const row of (ownedStores || []) as StoreRow[]) {
-    storeRows.set(row.id, row);
-  }
-
-  if (memberStoreIds.length > 0) {
-    const { data: memberStores, error: memberError } = await db
+    const { data: ownedStores, error: ownedError } = await db
       .from("stores")
       .select("*")
-      .in("id", memberStoreIds);
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: false });
 
-    if (memberError) {
-      throw memberError;
+    if (ownedError) {
+      throw ownedError;
     }
 
-    for (const row of (memberStores || []) as StoreRow[]) {
+    for (const row of (ownedStores || []) as StoreRow[]) {
       storeRows.set(row.id, row);
     }
+
+    if (memberStoreIds.length > 0) {
+      const { data: memberStores, error: memberError } = await db
+        .from("stores")
+        .select("*")
+        .in("id", memberStoreIds);
+
+      if (memberError) {
+        throw memberError;
+      }
+
+      for (const row of (memberStores || []) as StoreRow[]) {
+        storeRows.set(row.id, row);
+      }
+    }
+
+    const stores = [...storeRows.values()];
+    const products = await loadProducts(stores.map((store) => store.id));
+    const orders = await loadOrders(stores.map((store) => store.id));
+    const productsByStore = byStoreId(products);
+    const ordersByStore = byStoreId(orders);
+
+    return stores.map((store) =>
+      mapStore(
+        store,
+        productsByStore.get(store.id) || [],
+        ordersByStore.get(store.id) || [],
+      ),
+    );
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return isDemoDataEnabled() ? getDemoStoresForUser(userId) : [];
+    }
+
+    throw error;
   }
-
-  const stores = [...storeRows.values()];
-  const products = await loadProducts(stores.map((store) => store.id));
-  const orders = await loadOrders(stores.map((store) => store.id));
-  const productsByStore = byStoreId(products);
-  const ordersByStore = byStoreId(orders);
-
-  return stores.map((store) =>
-    mapStore(
-      store,
-      productsByStore.get(store.id) || [],
-      ordersByStore.get(store.id) || [],
-    ),
-  );
 }
 
 export async function getDashboardOverview(
@@ -2205,37 +2335,32 @@ export async function getDashboardOverview(
   const stores = await listStoresForUser(userId);
 
   if (!isSupabaseConfigured()) {
-    const storeIds = stores.map((store) => store.id);
-    const products = mockProducts.filter((product) =>
-      storeIds.includes(product.storeId),
-    );
-    const orders = mockOrders.filter((order) => storeIds.includes(order.storeId));
-    const refundsByOrder = refundsByOrderId(
-      mockOrderRefunds.filter((refund) => storeIds.includes(refund.storeId)),
-    );
-
-    return {
-      stores,
-      lowStockProducts: products
-        .filter((product) => product.inventoryCount <= 12)
-        .slice(0, 4),
-      totalProducts: products.length,
-      totalOrders: orders.length,
-      totalRevenueCents: orders
-        .filter((order) => isRevenueOrderStatus(order.status))
-        .reduce((sum, order) => {
-          const refundedCents = (refundsByOrder.get(order.id) || []).reduce(
-            (refundSum, refund) => refundSum + refund.amountCents,
-            0,
-          );
-
-          return sum + Math.max(0, order.totalCents - refundedCents);
-        }, 0),
-    };
+    return getMockDashboardOverviewForStores(stores);
   }
 
-  const products = await loadProducts(stores.map((store) => store.id));
-  const orders = await loadOrders(stores.map((store) => store.id));
+  let products: Product[];
+  let orders: Order[];
+
+  try {
+    products = await loadProducts(stores.map((store) => store.id));
+    orders = await loadOrders(stores.map((store) => store.id));
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      if (isDemoDataEnabled()) {
+        return getMockDashboardOverviewForStores(stores);
+      }
+
+      return {
+        stores,
+        lowStockProducts: [],
+        totalProducts: 0,
+        totalOrders: 0,
+        totalRevenueCents: 0,
+      };
+    }
+
+    throw error;
+  }
 
   return {
     stores,
@@ -2258,64 +2383,15 @@ export async function getStoreWorkspace(
   storeId: string,
 ): Promise<StoreWorkspace | null> {
   if (!isSupabaseConfigured()) {
-    if (!isDemoDataEnabled()) {
-      return null;
-    }
-
-    const store = mockStores.find(
-      (item) => item.id === storeId || item.slug === storeId,
-    );
-
-    if (!store) {
-      return null;
-    }
-
-    return {
-      membershipRole: "owner",
-      store: mapDemoStoreForUser(store, userId),
-      members: [
-        {
-          storeId: store.id,
-          userId,
-          email: "founder@zendora.dev",
-          name: "Store owner",
-          role: "owner",
-          createdAt: store.createdAt,
-        },
-      ],
-      invitations: [],
-      auditEvents: [],
-      notifications: [],
-      policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
-      customPages: mockStorePages.filter((page) => page.storeId === store.id),
-      navigationMenus: mockStoreNavigationMenus.filter(
-        (menu) => menu.storeId === store.id,
-      ),
-      customerProfiles: mockCustomerProfiles.filter(
-        (profile) => profile.storeId === store.id,
-      ),
-      shippingZones: mockShippingZones.filter((zone) => zone.storeId === store.id),
-      products: mockProducts.filter((product) => product.storeId === store.id),
-      collections: mockCollections.filter(
-        (collection) => collection.storeId === store.id,
-      ),
-      orders: mockOrders.filter((order) => order.storeId === store.id),
-      abandonedCheckouts: mockAbandonedCheckouts.filter(
-        (checkout) => checkout.storeId === store.id,
-      ),
-      productReviews: mockProductReviews.filter(
-        (review) => review.storeId === store.id,
-      ),
-      giftCards: mockGiftCards.filter((giftCard) => giftCard.storeId === store.id),
-      discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
-      inventoryAdjustments: mockInventoryAdjustments.filter(
-        (adjustment) => adjustment.storeId === store.id,
-      ),
-    };
+    return isDemoDataEnabled()
+      ? getMockStoreWorkspaceForUser(userId, storeId)
+      : null;
   }
 
   if (!isUuid(storeId)) {
-    return null;
+    return isDemoDataEnabled()
+      ? getMockStoreWorkspaceForUser(userId, storeId)
+      : null;
   }
 
   const db = getSupabaseAdmin();
@@ -2326,6 +2402,12 @@ export async function getStoreWorkspace(
     .maybeSingle();
 
   if (storeError) {
+    if (isCommerceSchemaUnavailableError(storeError)) {
+      return isDemoDataEnabled()
+        ? getMockStoreWorkspaceForUser(userId, storeId)
+        : null;
+    }
+
     throw storeError;
   }
 
@@ -2342,6 +2424,12 @@ export async function getStoreWorkspace(
     .maybeSingle();
 
   if (membershipError) {
+    if (isCommerceSchemaUnavailableError(membershipError)) {
+      return isDemoDataEnabled()
+        ? getMockStoreWorkspaceForUser(userId, storeId)
+        : null;
+    }
+
     throw membershipError;
   }
 
@@ -2351,6 +2439,56 @@ export async function getStoreWorkspace(
 
   const membershipRole =
     row.owner_id === userId ? "owner" : (membership as StoreMembershipRow).role;
+
+  let workspaceData: [
+    Product[],
+    ShippingZone[],
+    ProductCollection[],
+    Order[],
+    AbandonedCheckout[],
+    ProductReview[],
+    GiftCard[],
+    Discount[],
+    InventoryAdjustment[],
+    StoreMember[],
+    StoreInvitation[],
+    StoreAuditEvent[],
+    StoreNotification[],
+    StorePolicy[],
+    StorePage[],
+    StoreNavigationMenu[],
+    CustomerProfile[],
+  ];
+
+  try {
+    workspaceData = await Promise.all([
+      loadProducts([storeId]),
+      loadShippingZones([storeId]),
+      loadCollections([storeId]),
+      loadOrders([storeId]),
+      loadAbandonedCheckouts([storeId]),
+      loadProductReviews([storeId]),
+      loadGiftCards([storeId]),
+      loadDiscounts([storeId]),
+      loadInventoryAdjustments([storeId]),
+      loadStoreMembers([storeId]),
+      loadStoreInvitations([storeId]),
+      loadStoreAuditEvents([storeId]),
+      loadStoreNotifications([storeId]),
+      loadStorePolicies([storeId]),
+      loadStorePages([storeId]),
+      loadStoreNavigationMenus([storeId]),
+      loadCustomerProfiles([storeId]),
+    ]);
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return isDemoDataEnabled()
+        ? getMockStoreWorkspaceForUser(userId, storeId)
+        : null;
+    }
+
+    throw error;
+  }
 
   const [
     products,
@@ -2370,26 +2508,7 @@ export async function getStoreWorkspace(
     customPages,
     navigationMenus,
     customerProfiles,
-  ] =
-    await Promise.all([
-      loadProducts([storeId]),
-      loadShippingZones([storeId]),
-      loadCollections([storeId]),
-      loadOrders([storeId]),
-      loadAbandonedCheckouts([storeId]),
-      loadProductReviews([storeId]),
-      loadGiftCards([storeId]),
-      loadDiscounts([storeId]),
-      loadInventoryAdjustments([storeId]),
-      loadStoreMembers([storeId]),
-      loadStoreInvitations([storeId]),
-      loadStoreAuditEvents([storeId]),
-      loadStoreNotifications([storeId]),
-      loadStorePolicies([storeId]),
-      loadStorePages([storeId]),
-      loadStoreNavigationMenus([storeId]),
-      loadCustomerProfiles([storeId]),
-    ]);
+  ] = workspaceData;
 
   return {
     membershipRole,
@@ -2425,8 +2544,12 @@ export async function getPublicStorefront(
     try {
       return await loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
     } catch (error) {
-      if (demoStorefront && shouldUseDemoCatalogFallback(error)) {
+      if (shouldUseDemoCatalogFallback(error)) {
         return demoStorefront;
+      }
+
+      if (isCommerceSchemaUnavailableError(error)) {
+        return null;
       }
 
       throw error;
@@ -2437,8 +2560,12 @@ export async function getPublicStorefront(
     try {
       return await loadPublicStorefrontFromClient(getSupabasePublic(), slug);
     } catch (error) {
-      if (demoStorefront && shouldUseDemoCatalogFallback(error)) {
+      if (shouldUseDemoCatalogFallback(error)) {
         return demoStorefront;
+      }
+
+      if (isCommerceSchemaUnavailableError(error)) {
+        return null;
       }
 
       throw error;
@@ -2455,7 +2582,15 @@ export async function getLivePublicStorefront(
     return null;
   }
 
-  return loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
+  try {
+    return await loadPublicStorefrontFromClient(getSupabaseAdmin(), slug);
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export async function getPublicAbandonedCheckout(input: {
@@ -2506,7 +2641,17 @@ export async function getPublicAbandonedCheckout(input: {
   }
 
   const db = getSupabaseAdmin();
-  const storefront = await loadPublicStorefrontFromClient(db, input.slug);
+  let storefront: StoreWorkspace | null;
+
+  try {
+    storefront = await loadPublicStorefrontFromClient(db, input.slug);
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 
   if (!storefront) {
     return null;
@@ -2521,7 +2666,7 @@ export async function getPublicAbandonedCheckout(input: {
     .maybeSingle();
 
   if (error) {
-    if (shouldUseDemoCatalogFallback(error)) {
+    if (shouldUseEmptyCatalogFallback(error)) {
       return null;
     }
 
@@ -2608,6 +2753,10 @@ export async function getPublicOrderReceipt(input: {
     .maybeSingle();
 
   if (storeError) {
+    if (isCommerceSchemaUnavailableError(storeError)) {
+      return null;
+    }
+
     throw storeError;
   }
 
@@ -2625,11 +2774,45 @@ export async function getPublicOrderReceipt(input: {
     .maybeSingle();
 
   if (orderError) {
+    if (isCommerceSchemaUnavailableError(orderError)) {
+      return null;
+    }
+
     throw orderError;
   }
 
   if (!orderRow) {
     return null;
+  }
+
+  let receiptData: [
+    OrderItem[],
+    OrderFulfillment[],
+    OrderRefund[],
+    OrderReturnRequest[],
+    OrderPaymentTransaction[],
+    StorePolicy[],
+    StoreNavigationMenu[],
+    ProductReview[],
+  ];
+
+  try {
+    receiptData = await Promise.all([
+      loadOrderItems([input.orderId]),
+      loadOrderFulfillments([input.orderId]),
+      loadOrderRefunds([input.orderId]),
+      loadOrderReturnRequests([input.orderId]),
+      loadOrderPaymentTransactions([input.orderId]),
+      loadStorePolicies([store.id]),
+      loadStoreNavigationMenus([store.id]),
+      loadProductReviewsByOrder(input.orderId),
+    ]);
+  } catch (error) {
+    if (isCommerceSchemaUnavailableError(error)) {
+      return null;
+    }
+
+    throw error;
   }
 
   const [
@@ -2641,16 +2824,7 @@ export async function getPublicOrderReceipt(input: {
     policies,
     navigationMenus,
     productReviews,
-  ] = await Promise.all([
-    loadOrderItems([input.orderId]),
-    loadOrderFulfillments([input.orderId]),
-    loadOrderRefunds([input.orderId]),
-    loadOrderReturnRequests([input.orderId]),
-    loadOrderPaymentTransactions([input.orderId]),
-    loadStorePolicies([store.id]),
-    loadStoreNavigationMenus([store.id]),
-    loadProductReviewsByOrder(input.orderId),
-  ]);
+  ] = receiptData;
   const order = mapOrder(
     orderRow as OrderRow,
     items,
@@ -2688,6 +2862,10 @@ export async function getAvailableStoreSlug(name: string) {
       .maybeSingle();
 
     if (error) {
+      if (isCommerceSchemaUnavailableError(error)) {
+        return candidate;
+      }
+
       throw error;
     }
 

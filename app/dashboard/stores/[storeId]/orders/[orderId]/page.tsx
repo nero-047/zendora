@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
   BanknoteArrowDown,
   CheckCircle,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
   ShoppingBag,
   Star,
+  ShieldCheck,
   Truck,
 } from "lucide-react";
 
@@ -40,6 +42,11 @@ import {
   paymentTransactionTypeLabels,
   summarizePaymentTransactions,
 } from "@/features/commerce/payments";
+import {
+  getOrderFulfillmentSummary,
+  getOrderRiskAssessment,
+  orderRiskLevelLabels,
+} from "@/features/commerce/order-insights";
 import {
   fulfillmentStatuses,
   fulfillmentStatusLabels,
@@ -99,6 +106,10 @@ export default async function OrderDetailPage({
     (review) => review.orderId === order.id,
   );
   const fulfillments = sortFulfillments(order.fulfillments);
+  const fulfillmentSummary = getOrderFulfillmentSummary(order);
+  const riskAssessment = getOrderRiskAssessment(order, {
+    orders: workspace.orders,
+  });
 
   return (
     <div className="grid gap-5">
@@ -152,6 +163,72 @@ export default async function OrderDetailPage({
             Update status
           </button>
         </form>
+      </section>
+
+      <section className="grid gap-5 lg:grid-cols-3">
+        <div className="soft-panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase text-slate-400">
+              Fulfillment state
+            </h2>
+            <Truck aria-hidden="true" className="text-sky-700" size={18} />
+          </div>
+          <p className="mt-4 text-2xl font-semibold text-slate-950">
+            {fulfillmentSummary.label}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {fulfillmentSummary.detail}
+          </p>
+        </div>
+
+        <div className="soft-panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase text-slate-400">
+              Risk review
+            </h2>
+            {riskAssessment.level === "low" ? (
+              <ShieldCheck aria-hidden="true" className="text-emerald-700" size={18} />
+            ) : (
+              <AlertTriangle aria-hidden="true" className="text-amber-700" size={18} />
+            )}
+          </div>
+          <p className="mt-4 text-2xl font-semibold text-slate-950">
+            {orderRiskLevelLabels[riskAssessment.level]}
+          </p>
+          <div className="mt-3 grid gap-2">
+            {riskAssessment.factors.length > 0 ? (
+              riskAssessment.factors.slice(0, 3).map((factor) => (
+                <p className="text-sm leading-6 text-slate-600" key={factor.id}>
+                  <span className="font-semibold text-slate-950">
+                    {factor.label}:
+                  </span>{" "}
+                  {factor.detail}
+                </p>
+              ))
+            ) : (
+              <p className="text-sm leading-6 text-slate-600">
+                No payment, shipping, or customer-history risk flags.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="soft-panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase text-slate-400">
+              Payment due
+            </h2>
+            <CreditCard aria-hidden="true" className="text-sky-700" size={18} />
+          </div>
+          <p className="mt-4 text-2xl font-semibold text-slate-950">
+            {formatCurrency(riskAssessment.amountDueCents, order.currency)}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {paymentStatusLabels[order.paymentStatus]} payment status with{" "}
+            {formatCurrency(paymentSummary.netCapturedCents, order.currency)} net
+            captured.
+          </p>
+        </div>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1fr_0.85fr]">

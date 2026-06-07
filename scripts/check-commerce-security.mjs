@@ -2,13 +2,22 @@ import { existsSync, readFileSync } from "node:fs";
 import ts from "typescript";
 
 const actionsPath = "features/commerce/actions.ts";
+const abandonedCheckoutRoutePath =
+  "app/api/stores/[slug]/abandoned-checkouts/route.ts";
+const clerkWebhookRoutePath = "app/api/webhooks/clerk/route.ts";
 const dataPath = "features/commerce/data.ts";
 const envPath = "lib/env.ts";
+const nextConfigPath = "next.config.ts";
+const requestGuardsPath = "lib/request-guards.ts";
 const schemaPath = "supabase/schema.sql";
 const smokePath = "scripts/smoke.mjs";
 const sourceText = readFileSync(actionsPath, "utf8");
+const abandonedCheckoutRouteText = readFileSync(abandonedCheckoutRoutePath, "utf8");
+const clerkWebhookRouteText = readFileSync(clerkWebhookRoutePath, "utf8");
 const dataText = readFileSync(dataPath, "utf8");
 const envText = readFileSync(envPath, "utf8");
+const nextConfigText = readFileSync(nextConfigPath, "utf8");
+const requestGuardsText = readFileSync(requestGuardsPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
 const smokeText = readFileSync(smokePath, "utf8");
 const errorBoundaryPaths = [
@@ -147,6 +156,19 @@ if (
   failures.push("Demo data fallback must be explicitly gated off in production.");
 }
 
+if (
+  !dataText.includes("isCommerceSchemaUnavailableError") ||
+  !dataText.includes("shouldUseEmptyCatalogFallback") ||
+  !dataText.includes("getDemoStoresForUser") ||
+  !dataText.includes("getMockDashboardOverviewForStores") ||
+  !dataText.includes("getMockStoreWorkspaceForUser") ||
+  !dataText.includes("return isDemoDataEnabled() ? getDemoStoresForUser(userId) : []") ||
+  !dataText.includes("return await loadPublicStorefrontFromClient") ||
+  !dataText.includes("if (isCommerceSchemaUnavailableError(error))")
+) {
+  failures.push(`${dataPath} must degrade schema-unavailable Supabase reads into empty, demo, or not-found states instead of page crashes.`);
+}
+
 for (const errorBoundaryPath of errorBoundaryPaths) {
   if (!existsSync(errorBoundaryPath)) {
     failures.push(`${errorBoundaryPath} is missing a route-level error boundary.`);
@@ -162,6 +184,66 @@ for (const errorBoundaryPath of errorBoundaryPaths) {
   ) {
     failures.push(`${errorBoundaryPath} must be a client error boundary with retry and logging.`);
   }
+}
+
+if (
+  !requestGuardsText.includes("JSON_BODY_LIMIT_BYTES") ||
+  !requestGuardsText.includes("WEBHOOK_BODY_LIMIT_BYTES") ||
+  !requestGuardsText.includes("content-length") ||
+  !requestGuardsText.includes("getReader()") ||
+  !requestGuardsText.includes("getContentLengthLimitError") ||
+  !requestGuardsText.includes("getClientFingerprintFromHeaders") ||
+  !requestGuardsText.includes("consumeRateLimit")
+) {
+  failures.push(`${requestGuardsPath} must enforce JSON body limits and reusable request rate limits.`);
+}
+
+if (
+  !nextConfigText.includes("poweredByHeader: false") ||
+  !nextConfigText.includes('"Content-Security-Policy"') ||
+  !nextConfigText.includes("default-src 'self'") ||
+  !nextConfigText.includes("script-src 'self'") ||
+  !nextConfigText.includes("connect-src 'self'") ||
+  !nextConfigText.includes("https://*.supabase.co") ||
+  !nextConfigText.includes("https://*.clerk.com") ||
+  !nextConfigText.includes("object-src 'none'") ||
+  !nextConfigText.includes("base-uri 'self'") ||
+  !nextConfigText.includes("frame-ancestors 'none'") ||
+  !nextConfigText.includes('"Strict-Transport-Security"') ||
+  !nextConfigText.includes('"X-Content-Type-Options"') ||
+  !nextConfigText.includes('"X-Frame-Options"') ||
+  !nextConfigText.includes('"Referrer-Policy"') ||
+  !nextConfigText.includes('"Permissions-Policy"')
+) {
+  failures.push(`${nextConfigPath} must keep production browser security headers and CSP configured.`);
+}
+
+if (
+  !abandonedCheckoutRouteText.includes("readLimitedJsonBody(") ||
+  !abandonedCheckoutRouteText.includes("consumeRateLimit(") ||
+  !abandonedCheckoutRouteText.includes("getClientFingerprint(") ||
+  !abandonedCheckoutRouteText.includes('"Retry-After"')
+) {
+  failures.push(`${abandonedCheckoutRoutePath} must guard public abandoned-checkout capture requests.`);
+}
+
+if (
+  !clerkWebhookRouteText.includes("getContentLengthLimitError(") ||
+  !clerkWebhookRouteText.includes("WEBHOOK_BODY_LIMIT_BYTES") ||
+  !clerkWebhookRouteText.includes("verifyWebhook(req)")
+) {
+  failures.push(`${clerkWebhookRoutePath} must reject oversized webhook bodies before signature verification.`);
+}
+
+if (
+  !sourceText.includes("consumePublicServerActionRateLimit(") ||
+  !sourceText.includes("publicCheckoutActionRateLimit") ||
+  !sourceText.includes("publicCustomerActionRateLimit") ||
+  !sourceText.includes("`checkout:${storeSlug}:") ||
+  !sourceText.includes("`return-request:${storeSlug}:${orderId}`") ||
+  !sourceText.includes("`product-review:${storeSlug}:${orderId}:${parsed.data.orderItemId}`")
+) {
+  failures.push("Public checkout, return, and review Server Actions must enforce request throttling.");
 }
 
 if (

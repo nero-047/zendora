@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { Layers3 } from "lucide-react";
 
+import { parseStorefrontCatalogFilters } from "@/features/commerce/catalog-filters";
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
 import {
   StorefrontFooter,
@@ -18,6 +19,7 @@ import type { Product } from "@/features/commerce/types";
 
 type CollectionPageProps = {
   params: Promise<{ slug: string; collectionSlug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 async function getStoreCollection(slug: string, collectionSlug: string) {
@@ -74,8 +76,12 @@ export async function generateMetadata({
 
 export default async function PublicCollectionPage({
   params,
+  searchParams,
 }: CollectionPageProps) {
-  const { slug, collectionSlug } = await params;
+  const [{ slug, collectionSlug }, query] = await Promise.all([
+    params,
+    searchParams || Promise.resolve({}),
+  ]);
   const data = await getStoreCollection(slug, collectionSlug);
 
   if (!data) {
@@ -84,6 +90,7 @@ export default async function PublicCollectionPage({
 
   const { store, collection, products, navigationMenus } = data;
   const heroImage = collection.imageUrl || products[0]?.imageUrl;
+  const catalogFilters = parseStorefrontCatalogFilters(query);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -124,7 +131,11 @@ export default async function PublicCollectionPage({
         ) : null}
       </section>
 
-      <StorefrontCart products={products} storeSlug={store.slug} />
+      <StorefrontCart
+        initialFilters={catalogFilters}
+        products={products}
+        storeSlug={store.slug}
+      />
       <StorefrontFooter menus={navigationMenus} />
     </main>
   );
