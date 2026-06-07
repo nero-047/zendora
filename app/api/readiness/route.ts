@@ -98,9 +98,86 @@ export async function GET() {
         detail: sanitizeError(error),
       });
     }
+
+    try {
+      const [
+        { error: storeColumnError },
+        { error: productColumnError },
+        { error: productVariantColumnError },
+        { error: orderColumnError },
+        { error: orderItemColumnError },
+        { error: discountColumnError },
+        { error: inventoryAdjustmentColumnError },
+      ] = await Promise.all([
+        supabase
+          .from("stores")
+          .select(
+            "id, shipping_rate_cents, free_shipping_threshold_cents, tax_rate_bps",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("products")
+          .select("id, sku, category", { count: "exact", head: true }),
+        supabase
+          .from("product_variants")
+          .select(
+            "id, store_id, product_id, option_name, option_value, sku, price_cents, currency, inventory_count, status, sort_order",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("orders")
+          .select(
+            "id, customer_phone, shipping_address_line1, shipping_city, shipping_postal_code, subtotal_cents, discount_code, discount_cents, shipping_cents, tax_cents, tax_rate_bps, paid_at, fulfilled_at, cancelled_at, inventory_restocked_at, tracking_carrier, tracking_number, tracking_url, fulfillment_note",
+            { count: "exact", head: true },
+          ),
+        supabase
+          .from("order_items")
+          .select("id, product_variant_id, variant_name, variant_sku", {
+            count: "exact",
+            head: true,
+          }),
+        supabase
+          .from("discount_codes")
+          .select("id, code, type, value, status", { count: "exact", head: true }),
+        supabase
+          .from("inventory_adjustments")
+          .select(
+            "id, store_id, product_id, product_variant_id, clerk_user_id, reason, delta, previous_inventory, next_inventory",
+            { count: "exact", head: true },
+          ),
+      ]);
+      const error =
+        storeColumnError ||
+        productColumnError ||
+        productVariantColumnError ||
+        orderColumnError ||
+        orderItemColumnError ||
+        discountColumnError ||
+        inventoryAdjustmentColumnError;
+
+      checks.push({
+        name: "supabase_schema_columns",
+        ok: !error,
+        detail: error
+          ? `Supabase schema is missing MVP columns: ${error.message}`
+          : "Supabase store, catalog, variants, inventory audit, order lifecycle, fulfillment, discount, shipping, and tax columns are reachable.",
+      });
+    } catch (error) {
+      checks.push({
+        name: "supabase_schema_columns",
+        ok: false,
+        detail: sanitizeError(error),
+      });
+    }
   } else {
     checks.push({
       name: "supabase_schema",
+      ok: false,
+      detail:
+        "Skipped because SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is missing.",
+    });
+    checks.push({
+      name: "supabase_schema_columns",
       ok: false,
       detail:
         "Skipped because SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is missing.",

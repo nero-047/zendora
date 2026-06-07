@@ -20,9 +20,12 @@ export default async function StoreCheckoutPage({
   return (
     <main className="liquid-bg min-h-screen">
       <CheckoutForm
+        freeShippingThresholdCents={store.freeShippingThresholdCents}
         products={products}
+        shippingRateCents={store.shippingRateCents}
         storeName={store.name}
         storeSlug={store.slug}
+        taxRateBps={store.taxRateBps}
       />
     </main>
   );

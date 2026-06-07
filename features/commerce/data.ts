@@ -3,14 +3,28 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { AppUser } from "@/features/auth/app-user";
-import { mockOrders, mockProducts, mockStores } from "@/features/commerce/mock-data";
+import {
+  mockDiscounts,
+  mockInventoryAdjustments,
+  mockOrders,
+  mockProducts,
+  mockStores,
+} from "@/features/commerce/mock-data";
+import { isRevenueOrderStatus } from "@/features/commerce/order-status";
 import type {
   DashboardOverview,
+  Discount,
+  DiscountStatus,
+  DiscountType,
   Order,
   OrderItem,
   OrderStatus,
   Product,
+  ProductVariant,
+  ProductVariantStatus,
   ProductStatus,
+  InventoryAdjustment,
+  InventoryAdjustmentReason,
   Store,
   StoreStatus,
   StoreWorkspace,
@@ -33,6 +47,9 @@ type StoreRow = {
   currency: string;
   theme_color: string;
   status: StoreStatus;
+  shipping_rate_cents: number | null;
+  free_shipping_threshold_cents: number | null;
+  tax_rate_bps: number | null;
   created_at: string;
 };
 
@@ -41,6 +58,8 @@ type ProductRow = {
   store_id: string;
   name: string;
   slug: string;
+  sku: string | null;
+  category: string | null;
   description: string | null;
   price_cents: number;
   currency: string;
@@ -51,14 +70,81 @@ type ProductRow = {
   created_at: string;
 };
 
+type ProductVariantRow = {
+  id: string;
+  store_id: string;
+  product_id: string;
+  option_name: string;
+  option_value: string;
+  sku: string | null;
+  price_cents: number;
+  currency: string;
+  inventory_count: number;
+  status: ProductVariantStatus;
+  sort_order: number | null;
+  created_at: string;
+};
+
+type InventoryAdjustmentRow = {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_variant_id: string | null;
+  clerk_user_id: string;
+  reason: InventoryAdjustmentReason;
+  reference: string | null;
+  note: string | null;
+  delta: number;
+  previous_inventory: number;
+  next_inventory: number;
+  created_at: string;
+};
+
 type OrderRow = {
   id: string;
   store_id: string;
   customer_name: string | null;
   customer_email: string;
+  customer_phone: string | null;
+  shipping_address_line1: string | null;
+  shipping_address_line2: string | null;
+  shipping_city: string | null;
+  shipping_region: string | null;
+  shipping_postal_code: string | null;
+  shipping_country: string | null;
+  customer_note: string | null;
   status: OrderStatus;
+  subtotal_cents: number | null;
+  discount_code: string | null;
+  discount_cents: number | null;
+  shipping_cents: number | null;
+  tax_cents: number | null;
+  tax_rate_bps: number | null;
   total_cents: number;
   currency: string;
+  created_at: string;
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  cancelled_at: string | null;
+  inventory_restocked_at: string | null;
+  tracking_carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  fulfillment_note: string | null;
+};
+
+type DiscountRow = {
+  id: string;
+  store_id: string;
+  code: string;
+  type: DiscountType;
+  value: number;
+  min_subtotal_cents: number;
+  usage_limit: number | null;
+  redemption_count: number;
+  status: DiscountStatus;
+  starts_at: string | null;
+  ends_at: string | null;
   created_at: string;
 };
 
@@ -66,7 +152,10 @@ type OrderItemRow = {
   id: string;
   order_id: string;
   product_id: string | null;
+  product_variant_id: string | null;
   product_name: string;
+  variant_name: string | null;
+  variant_sku: string | null;
   unit_price_cents: number;
   quantity: number;
   created_at: string;
@@ -78,6 +167,8 @@ function mapProduct(row: ProductRow): Product {
     storeId: row.store_id,
     name: row.name,
     slug: row.slug,
+    sku: row.sku || undefined,
+    category: row.category || undefined,
     description: row.description || "",
     priceCents: row.price_cents,
     currency: row.currency,
@@ -88,6 +179,43 @@ function mapProduct(row: ProductRow): Product {
     imagePath: row.image_path || undefined,
     status: row.status,
     createdAt: row.created_at,
+    variants: [],
+  };
+}
+
+function mapProductVariant(row: ProductVariantRow): ProductVariant {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    productId: row.product_id,
+    optionName: row.option_name,
+    optionValue: row.option_value,
+    sku: row.sku || undefined,
+    priceCents: row.price_cents,
+    currency: row.currency,
+    inventoryCount: row.inventory_count,
+    status: row.status,
+    sortOrder: row.sort_order || 0,
+    createdAt: row.created_at,
+  };
+}
+
+function mapInventoryAdjustment(
+  row: InventoryAdjustmentRow,
+): InventoryAdjustment {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    productId: row.product_id,
+    productVariantId: row.product_variant_id || undefined,
+    clerkUserId: row.clerk_user_id,
+    reason: row.reason,
+    reference: row.reference || undefined,
+    note: row.note || undefined,
+    delta: row.delta,
+    previousInventory: row.previous_inventory,
+    nextInventory: row.next_inventory,
+    createdAt: row.created_at,
   };
 }
 
@@ -96,7 +224,10 @@ function mapOrderItem(row: OrderItemRow): OrderItem {
     id: row.id,
     orderId: row.order_id,
     productId: row.product_id || undefined,
+    productVariantId: row.product_variant_id || undefined,
     productName: row.product_name,
+    variantName: row.variant_name || undefined,
+    variantSku: row.variant_sku || undefined,
     unitPriceCents: row.unit_price_cents,
     quantity: row.quantity,
     createdAt: row.created_at,
@@ -104,16 +235,70 @@ function mapOrderItem(row: OrderItemRow): OrderItem {
 }
 
 function mapOrder(row: OrderRow, items: OrderItem[] = []): Order {
+  const hasShippingAddress = Boolean(
+    row.shipping_address_line1 ||
+      row.shipping_city ||
+      row.shipping_region ||
+      row.shipping_postal_code ||
+      row.shipping_country,
+  );
+
   return {
     id: row.id,
     storeId: row.store_id,
     customerName: row.customer_name || "Guest customer",
     customerEmail: row.customer_email,
+    customerPhone: row.customer_phone || undefined,
+    shippingAddress: hasShippingAddress
+      ? {
+          line1: row.shipping_address_line1 || "",
+          line2: row.shipping_address_line2 || undefined,
+          city: row.shipping_city || "",
+          region: row.shipping_region || "",
+          postalCode: row.shipping_postal_code || "",
+          country: row.shipping_country || "",
+        }
+      : undefined,
+    customerNote: row.customer_note || undefined,
     status: row.status,
+    subtotalCents:
+      row.subtotal_cents && row.subtotal_cents > 0
+        ? row.subtotal_cents
+        : row.total_cents,
+    discountCode: row.discount_code || undefined,
+    discountCents: row.discount_cents || 0,
+    shippingCents: row.shipping_cents || 0,
+    taxCents: row.tax_cents || 0,
+    taxRateBps: row.tax_rate_bps || 0,
     totalCents: row.total_cents,
     currency: row.currency,
     createdAt: row.created_at,
+    paidAt: row.paid_at || undefined,
+    fulfilledAt: row.fulfilled_at || undefined,
+    cancelledAt: row.cancelled_at || undefined,
+    inventoryRestockedAt: row.inventory_restocked_at || undefined,
+    trackingCarrier: row.tracking_carrier || undefined,
+    trackingNumber: row.tracking_number || undefined,
+    trackingUrl: row.tracking_url || undefined,
+    fulfillmentNote: row.fulfillment_note || undefined,
     items,
+  };
+}
+
+function mapDiscount(row: DiscountRow): Discount {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    code: row.code,
+    type: row.type,
+    value: row.value,
+    minSubtotalCents: row.min_subtotal_cents,
+    usageLimit: row.usage_limit || undefined,
+    redemptionCount: row.redemption_count,
+    status: row.status,
+    startsAt: row.starts_at || undefined,
+    endsAt: row.ends_at || undefined,
+    createdAt: row.created_at,
   };
 }
 
@@ -130,11 +315,16 @@ function mapStore(row: StoreRow, products: Product[], orders: Order[]): Store {
     createdAt: row.created_at,
     productCount: products.length,
     orderCount: orders.length,
-    revenueCents: orders.reduce((sum, order) => sum + order.totalCents, 0),
+    revenueCents: orders
+      .filter((order) => isRevenueOrderStatus(order.status))
+      .reduce((sum, order) => sum + order.totalCents, 0),
     inventoryCount: products.reduce(
       (sum, product) => sum + product.inventoryCount,
       0,
     ),
+    shippingRateCents: row.shipping_rate_cents || 0,
+    freeShippingThresholdCents: row.free_shipping_threshold_cents || 0,
+    taxRateBps: row.tax_rate_bps || 0,
   };
 }
 
@@ -165,6 +355,84 @@ function byOrderId(items: OrderItem[]) {
   return grouped;
 }
 
+function byProductId(items: ProductVariant[]) {
+  const grouped = new Map<string, ProductVariant[]>();
+
+  for (const item of items) {
+    grouped.set(item.productId, [...(grouped.get(item.productId) || []), item]);
+  }
+
+  return grouped;
+}
+
+function attachProductVariants(
+  products: Product[],
+  variants: ProductVariant[],
+): Product[] {
+  const variantsByProduct = byProductId(variants);
+
+  return products.map((product) => {
+    const productVariants = (variantsByProduct.get(product.id) || []).sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.optionValue.localeCompare(b.optionValue),
+    );
+
+    const activeVariants = productVariants.filter(
+      (variant) => variant.status === "active",
+    );
+
+    if (productVariants.length === 0 || activeVariants.length === 0) {
+      return {
+        ...product,
+        variants: productVariants,
+      };
+    }
+
+    return {
+      ...product,
+      priceCents: Math.min(...activeVariants.map((variant) => variant.priceCents)),
+      inventoryCount: activeVariants.reduce(
+        (sum, variant) => sum + variant.inventoryCount,
+        0,
+      ),
+      variants: productVariants,
+    };
+  });
+}
+
+async function loadProductVariants(
+  storeIds: string[],
+  activeOnly = false,
+  client?: SupabaseClient,
+) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = client || getSupabaseAdmin();
+  let query = db
+    .from("product_variants")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq("status", "active");
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (shouldUseDemoCatalogFallback(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as ProductVariantRow[]).map(mapProductVariant);
+}
+
 async function loadProducts(storeIds: string[]) {
   if (storeIds.length === 0) {
     return [];
@@ -181,7 +449,10 @@ async function loadProducts(storeIds: string[]) {
     throw error;
   }
 
-  return ((data || []) as ProductRow[]).map(mapProduct);
+  const products = ((data || []) as ProductRow[]).map(mapProduct);
+  const variants = await loadProductVariants(storeIds);
+
+  return attachProductVariants(products, variants);
 }
 
 async function loadOrderItems(orderIds: string[]) {
@@ -226,6 +497,46 @@ async function loadOrders(storeIds: string[]) {
   return rows.map((row) => mapOrder(row, itemsByOrder.get(row.id) || []));
 }
 
+async function loadDiscounts(storeIds: string[]) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("discount_codes")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as DiscountRow[]).map(mapDiscount);
+}
+
+async function loadInventoryAdjustments(storeIds: string[]) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("inventory_adjustments")
+    .select("*")
+    .in("store_id", storeIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as InventoryAdjustmentRow[]).map(
+    mapInventoryAdjustment,
+  );
+}
+
 function getMockPublicStorefront(slug: string): StoreWorkspace | null {
   const store = mockStores.find((item) => item.slug === slug);
 
@@ -239,6 +550,8 @@ function getMockPublicStorefront(slug: string): StoreWorkspace | null {
       (product) => product.storeId === store.id && product.status === "active",
     ),
     orders: [],
+    discounts: [],
+    inventoryAdjustments: [],
   };
 }
 
@@ -296,12 +609,16 @@ async function loadPublicStorefrontFromClient(
     throw new Error(productError.message);
   }
 
-  const products = ((productRows || []) as ProductRow[]).map(mapProduct);
+  const productRowsMapped = ((productRows || []) as ProductRow[]).map(mapProduct);
+  const variants = await loadProductVariants([row.id], true, db);
+  const products = attachProductVariants(productRowsMapped, variants);
 
   return {
     store: mapStore(row, products, []),
     products,
     orders: [],
+    discounts: [],
+    inventoryAdjustments: [],
   };
 }
 
@@ -440,7 +757,9 @@ export async function getDashboardOverview(
         .slice(0, 4),
       totalProducts: products.length,
       totalOrders: orders.length,
-      totalRevenueCents: orders.reduce((sum, order) => sum + order.totalCents, 0),
+      totalRevenueCents: orders
+        .filter((order) => isRevenueOrderStatus(order.status))
+        .reduce((sum, order) => sum + order.totalCents, 0),
     };
   }
 
@@ -454,7 +773,9 @@ export async function getDashboardOverview(
       .slice(0, 4),
     totalProducts: products.length,
     totalOrders: orders.length,
-    totalRevenueCents: orders.reduce((sum, order) => sum + order.totalCents, 0),
+    totalRevenueCents: orders
+      .filter((order) => isRevenueOrderStatus(order.status))
+      .reduce((sum, order) => sum + order.totalCents, 0),
   };
 }
 
@@ -475,6 +796,10 @@ export async function getStoreWorkspace(
       store: mapDemoStoreForUser(store, userId),
       products: mockProducts.filter((product) => product.storeId === store.id),
       orders: mockOrders.filter((order) => order.storeId === store.id),
+      discounts: mockDiscounts.filter((discount) => discount.storeId === store.id),
+      inventoryAdjustments: mockInventoryAdjustments.filter(
+        (adjustment) => adjustment.storeId === store.id,
+      ),
     };
   }
 
@@ -513,15 +838,19 @@ export async function getStoreWorkspace(
     return null;
   }
 
-  const [products, orders] = await Promise.all([
+  const [products, orders, discounts, inventoryAdjustments] = await Promise.all([
     loadProducts([storeId]),
     loadOrders([storeId]),
+    loadDiscounts([storeId]),
+    loadInventoryAdjustments([storeId]),
   ]);
 
   return {
     store: mapStore(row, products, orders),
     products,
     orders,
+    discounts,
+    inventoryAdjustments,
   };
 }
 

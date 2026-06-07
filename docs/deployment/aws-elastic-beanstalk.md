@@ -21,7 +21,7 @@ The app includes:
 - `/api/readiness` for Supabase/Clerk integration readiness
 - `npm run check:deploy` to validate the base demo deployment variables
 - `npm run check:integrations` to validate full DB/storage/webhook variables
-- `npm run package:eb` to create `dist/zendora-eb-source.zip`
+- `npm run package:eb` to create `dist/zendora-eb-source.zip` without `.env*` files
 - `npm run smoke` for a basic deployed-app smoke test
 - `npm run smoke:deploy` for strict readiness once all secrets are set
 
@@ -132,7 +132,7 @@ eb create zendora-prod
 eb setenv KEY=value KEY2=value2
 npm run check:deploy
 npm run package:eb
-eb deploy
+eb deploy zendora-prod --archive dist/zendora-eb-source.zip --region ap-southeast-1
 SMOKE_BASE_URL=https://your-eb-or-custom-domain npm run smoke
 ```
 

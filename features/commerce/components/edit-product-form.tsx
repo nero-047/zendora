@@ -1,33 +1,47 @@
 "use client";
 
 import { useActionState } from "react";
-import { ImagePlus, Loader2, PackagePlus } from "lucide-react";
+import { ImagePlus, Loader2, Save } from "lucide-react";
 
 import { initialActionState } from "@/features/commerce/action-state";
-import { createProductAction } from "@/features/commerce/actions";
+import { updateProductAction } from "@/features/commerce/actions";
+import type { Product } from "@/features/commerce/types";
 
-export function CreateProductForm({ storeId }: { storeId: string }) {
+export function EditProductForm({
+  product,
+  storeId,
+}: {
+  product: Product;
+  storeId: string;
+}) {
+  const variantOptionName = product.variants[0]?.optionName || "";
+  const variantRows = product.variants
+    .map((variant) =>
+      [
+        variant.optionValue,
+        variant.sku || "",
+        (variant.priceCents / 100).toFixed(2),
+        String(variant.inventoryCount),
+        variant.status,
+      ].join(" | "),
+    )
+    .join("\n");
   const [state, formAction, pending] = useActionState(
-    createProductAction.bind(null, storeId),
+    updateProductAction.bind(null, storeId, product.id),
     initialActionState,
   );
 
   return (
     <form action={formAction} className="glass-panel grid gap-5 p-5">
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-[8px] bg-emerald-500/12 text-emerald-700">
-          <PackagePlus aria-hidden="true" size={21} />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold text-slate-950">Add product</h1>
-          <p className="text-sm text-slate-500">Images upload to Supabase Storage.</p>
-        </div>
+      <div>
+        <h1 className="text-xl font-semibold text-slate-950">Edit product</h1>
+        <p className="mt-1 text-sm font-medium text-slate-500">{product.name}</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2">
           <span className="label">Product name</span>
-          <input className="field" name="name" placeholder="Field Carry Pack" />
+          <input className="field" defaultValue={product.name} name="name" />
           {state.errors?.name ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.name[0]}
@@ -37,9 +51,10 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
 
         <label className="grid gap-2">
           <span className="label">Status</span>
-          <select className="field" name="status" defaultValue="draft">
+          <select className="field" defaultValue={product.status} name="status">
             <option value="draft">Draft</option>
             <option value="active">Active</option>
+            <option value="archived">Archived</option>
           </select>
           {state.errors?.status ? (
             <span className="text-xs font-medium text-red-600">
@@ -52,7 +67,7 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2">
           <span className="label">SKU</span>
-          <input className="field" name="sku" placeholder="NLS-BAG-001" />
+          <input className="field" defaultValue={product.sku} name="sku" />
           {state.errors?.sku ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.sku[0]}
@@ -62,7 +77,7 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
 
         <label className="grid gap-2">
           <span className="label">Category</span>
-          <input className="field" name="category" placeholder="Bags" />
+          <input className="field" defaultValue={product.category} name="category" />
           {state.errors?.category ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.category[0]}
@@ -75,8 +90,8 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
         <span className="label">Description</span>
         <textarea
           className="field min-h-28 resize-none"
+          defaultValue={product.description}
           name="description"
-          placeholder="Weather-resistant day pack with a structured laptop sleeve."
         />
         {state.errors?.description ? (
           <span className="text-xs font-medium text-red-600">
@@ -88,7 +103,12 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2">
           <span className="label">Price</span>
-          <input className="field" name="price" placeholder="129.00" inputMode="decimal" />
+          <input
+            className="field"
+            defaultValue={(product.priceCents / 100).toFixed(2)}
+            inputMode="decimal"
+            name="price"
+          />
           {state.errors?.price ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.price[0]}
@@ -98,7 +118,12 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
 
         <label className="grid gap-2">
           <span className="label">Inventory</span>
-          <input className="field" name="inventory" defaultValue="24" inputMode="numeric" />
+          <input
+            className="field"
+            defaultValue={product.inventoryCount}
+            inputMode="numeric"
+            name="inventory"
+          />
           {state.errors?.inventory ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.inventory[0]}
@@ -110,7 +135,12 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
       <div className="grid gap-4 md:grid-cols-[0.45fr_1fr]">
         <label className="grid gap-2">
           <span className="label">Option</span>
-          <input className="field" name="variantOptionName" placeholder="Color" />
+          <input
+            className="field"
+            defaultValue={variantOptionName}
+            name="variantOptionName"
+            placeholder="Color"
+          />
           {state.errors?.variantOptionName ? (
             <span className="text-xs font-medium text-red-600">
               {state.errors.variantOptionName[0]}
@@ -122,6 +152,7 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
           <span className="label">Variants</span>
           <textarea
             className="field min-h-28 resize-none"
+            defaultValue={variantRows}
             name="variantRows"
             placeholder="Forest | NLS-BAG-001-FOR | 129.00 | 14 | active"
           />
@@ -162,7 +193,7 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
         {pending ? (
           <Loader2 aria-hidden="true" className="animate-spin" size={18} />
         ) : (
-          <PackagePlus aria-hidden="true" size={18} />
+          <Save aria-hidden="true" size={18} />
         )}
         Save product
       </button>

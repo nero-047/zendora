@@ -32,7 +32,12 @@ if (gitFiles.status !== 0) {
 const files = gitFiles.stdout
   .split("\0")
   .filter(Boolean)
-  .filter((file) => file !== ".env.local" && !file.startsWith("dist/"));
+  .filter(
+    (file) =>
+      file !== ".env" &&
+      !file.startsWith(".env.") &&
+      !file.startsWith("dist/"),
+  );
 
 if (files.length === 0) {
   console.error("No source files found to package.");

@@ -1,0 +1,254 @@
+import Image from "next/image";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import {
+  ArrowLeft,
+  Boxes,
+  CircleDollarSign,
+  Edit3,
+  Filter,
+  Package,
+  PackagePlus,
+  Search,
+  Store,
+  TriangleAlert,
+} from "lucide-react";
+
+import { requireAppUser } from "@/features/auth/app-user";
+import { getStoreWorkspace } from "@/features/commerce/data";
+import {
+  filterProducts,
+  getProductCategories,
+  getProductEditHref,
+  getProductStats,
+  productStatusFilters,
+  productStatusLabels,
+  readProductSearchParam,
+  parseProductStatusFilter,
+} from "@/features/commerce/products";
+import { formatCurrency } from "@/lib/utils";
+
+export default async function ProductsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ storeId: string }>;
+  searchParams: Promise<{
+    q?: string | string[];
+    status?: string | string[];
+    category?: string | string[];
+  }>;
+}) {
+  const { storeId } = await params;
+  const query = await searchParams;
+  const user = await requireAppUser();
+  const workspace = await getStoreWorkspace(user.id, storeId);
+
+  if (!workspace) {
+    notFound();
+  }
+
+  const { store, products } = workspace;
+  const searchQuery = readProductSearchParam(query.q);
+  const selectedStatus = parseProductStatusFilter(query.status);
+  const selectedCategory = readProductSearchParam(query.category);
+  const categories = getProductCategories(products);
+  const filteredProducts = filterProducts({
+    products,
+    query: searchQuery,
+    status: selectedStatus,
+    category: selectedCategory,
+  });
+  const stats = getProductStats(products);
+  const metricCards = [
+    {
+      icon: Package,
+      label: "Products",
+      value: String(stats.totalProducts),
+    },
+    {
+      icon: Store,
+      label: "Active",
+      value: String(stats.activeProducts),
+    },
+    {
+      icon: TriangleAlert,
+      label: "Low stock",
+      value: String(stats.lowStockProducts),
+    },
+    {
+      icon: Boxes,
+      label: "Inventory",
+      value: String(stats.totalInventory),
+    },
+    {
+      icon: CircleDollarSign,
+      label: "Stock value",
+      value: formatCurrency(stats.inventoryValueCents, store.currency),
+    },
+  ];
+
+  return (
+    <div className="grid gap-5">
+      <Link
+        className="secondary-button w-fit px-4 text-sm"
+        href={`/dashboard/stores/${store.id}`}
+      >
+        <ArrowLeft aria-hidden="true" size={16} />
+        {store.name}
+      </Link>
+
+      <section className="glass-panel p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="status-pill mb-3">
+              <Package aria-hidden="true" size={14} />
+              Products
+            </span>
+            <h1 className="text-3xl font-semibold text-slate-950">
+              Product catalog
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+              Search products, watch inventory, and keep the storefront catalog
+              ready to sell.
+            </p>
+          </div>
+          <Link
+            className="primary-button px-4 text-sm"
+            href={`/dashboard/stores/${store.id}/products/new`}
+          >
+            <PackagePlus aria-hidden="true" size={17} />
+            Product
+          </Link>
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        {metricCards.map(({ icon: Icon, label, value }) => (
+          <div className="soft-panel p-4" key={label}>
+            <Icon aria-hidden="true" className="text-sky-700" size={20} />
+            <p className="mt-4 text-sm font-semibold text-slate-500">{label}</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-950">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="soft-panel p-4">
+        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto]" method="get">
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Search products
+            <span className="relative">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                size={16}
+              />
+              <input
+                className="field pl-9"
+                defaultValue={searchQuery}
+                name="q"
+                placeholder="Name, SKU, category"
+              />
+            </span>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Status
+            <select className="field min-w-40" defaultValue={selectedStatus} name="status">
+              {productStatusFilters.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all" ? "All statuses" : productStatusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Category
+            <select
+              className="field min-w-44"
+              defaultValue={selectedCategory}
+              name="category"
+            >
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="secondary-button mt-auto min-h-12 px-4 text-sm" type="submit">
+            <Filter aria-hidden="true" size={16} />
+            Filter
+          </button>
+        </form>
+      </section>
+
+      <section className="soft-panel overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.4fr_auto_auto_auto_auto]">
+          <span>Product</span>
+          <span className="hidden xl:inline">Status</span>
+          <span className="hidden xl:inline">Stock</span>
+          <span className="hidden xl:inline">Price</span>
+          <span>Edit</span>
+        </div>
+        {filteredProducts.map((product) => (
+          <div
+            className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.4fr_auto_auto_auto_auto]"
+            key={product.id}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <Image
+                alt={product.name}
+                className="h-16 w-16 rounded-[8px] object-cover"
+                height={128}
+                src={product.imageUrl}
+                width={128}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">
+                  {product.name}
+                </p>
+                <p className="mt-1 truncate text-xs text-slate-500">
+                  {[
+                    product.category,
+                    product.variants.length > 0
+                      ? `${product.variants.length} variants`
+                      : product.sku,
+                  ].filter(Boolean).join(" / ") ||
+                    product.slug}
+                </p>
+                <p className="mt-2 text-xs font-semibold text-slate-700 xl:hidden">
+                  {product.inventoryCount} in stock /{" "}
+                  {product.variants.length > 0 ? "From " : ""}
+                  {formatCurrency(product.priceCents, product.currency)}
+                </p>
+              </div>
+            </div>
+            <span className="status-pill hidden w-fit xl:inline-flex">
+              {productStatusLabels[product.status]}
+            </span>
+            <span className="hidden text-sm font-semibold text-slate-700 xl:inline">
+              {product.inventoryCount}
+            </span>
+            <span className="hidden text-sm font-semibold text-slate-950 xl:inline">
+              {product.variants.length > 0 ? "From " : ""}
+              {formatCurrency(product.priceCents, product.currency)}
+            </span>
+            <Link
+              aria-label={`Edit ${product.name}`}
+              className="icon-button h-10 min-h-10 w-10"
+              href={getProductEditHref(store.id, product.id)}
+            >
+              <Edit3 aria-hidden="true" size={16} />
+            </Link>
+          </div>
+        ))}
+        {filteredProducts.length === 0 ? (
+          <p className="p-5 text-sm text-slate-500">
+            No products match the current filters.
+          </p>
+        ) : null}
+      </section>
+    </div>
+  );
+}

@@ -6,6 +6,7 @@ import type { Product } from "@/features/commerce/types";
 
 export type CartLine = {
   productId: string;
+  variantId?: string;
   quantity: number;
 };
 
@@ -47,6 +48,10 @@ function dispatchCartChange() {
   window.dispatchEvent(new Event("zendora-cart"));
 }
 
+function getCartLineKey(productId: string, variantId?: string) {
+  return `${productId}:${variantId || ""}`;
+}
+
 function normalizeCartLines(
   lines: unknown,
   productsById: Map<string, Product>,
@@ -68,6 +73,8 @@ function normalizeCartLines(
     }
 
     const productId = String(line.productId);
+    const variantId =
+      "variantId" in line && line.variantId ? String(line.variantId) : undefined;
     const product = productsById.get(productId);
     const quantity = Number(line.quantity);
 
@@ -75,20 +82,43 @@ function normalizeCartLines(
       continue;
     }
 
+    const activeVariants = product.variants.filter(
+      (variant) => variant.status === "active",
+    );
+    const variant = variantId
+      ? activeVariants.find((item) => item.id === variantId)
+      : undefined;
+
+    if (activeVariants.length > 0 && !variant) {
+      continue;
+    }
+
+    if (variantId && activeVariants.length === 0) {
+      continue;
+    }
+
+    const key = getCartLineKey(productId, variant?.id);
+    const inventoryCount = variant?.inventoryCount ?? product.inventoryCount;
+
     quantitiesByProduct.set(
-      productId,
+      key,
       Math.min(
-        (quantitiesByProduct.get(productId) || 0) + quantity,
-        product.inventoryCount,
+        (quantitiesByProduct.get(key) || 0) + quantity,
+        inventoryCount,
         99,
       ),
     );
   }
 
-  return [...quantitiesByProduct.entries()].map(([productId, quantity]) => ({
-    productId,
-    quantity,
-  }));
+  return [...quantitiesByProduct.entries()].map(([key, quantity]) => {
+    const [productId, variantId] = key.split(":");
+
+    return {
+      productId,
+      variantId: variantId || undefined,
+      quantity,
+    };
+  });
 }
 
 export function useStoreCart(storeSlug: string, products: Product[]) {
@@ -118,8 +148,15 @@ export function useStoreCart(storeSlug: string, products: Product[]) {
             line,
           ): line is CartLine & {
             product: Product;
+            variant?: Product["variants"][number];
           } => Boolean(line.product),
-        ),
+        )
+        .map((line) => ({
+          ...line,
+          variant: line.variantId
+            ? line.product.variants.find((variant) => variant.id === line.variantId)
+            : undefined,
+        })),
     [cart, productsById],
   );
 
@@ -145,29 +182,55 @@ export function useStoreCart(storeSlug: string, products: Product[]) {
   }, [storageKey]);
 
   const updateQuantity = useCallback(
-    (productId: string, nextQuantity: number) => {
+    (productId: string, nextQuantity: number, variantId?: string) => {
       const product = productsById.get(productId);
 
       if (!product) {
         return;
       }
 
-      if (nextQuantity <= 0) {
-        writeCart(cart.filter((line) => line.productId !== productId));
+      const activeVariants = product.variants.filter(
+        (variant) => variant.status === "active",
+      );
+      const variant = variantId
+        ? activeVariants.find((item) => item.id === variantId)
+        : undefined;
+
+      if (activeVariants.length > 0 && !variant) {
         return;
       }
 
-      const quantity = Math.min(nextQuantity, product.inventoryCount, 99);
-      const existing = cart.find((line) => line.productId === productId);
+      if (variantId && activeVariants.length === 0) {
+        return;
+      }
+
+      const lineKey = getCartLineKey(productId, variant?.id);
+
+      if (nextQuantity <= 0) {
+        writeCart(
+          cart.filter(
+            (line) => getCartLineKey(line.productId, line.variantId) !== lineKey,
+          ),
+        );
+        return;
+      }
+
+      const inventoryCount = variant?.inventoryCount ?? product.inventoryCount;
+      const quantity = Math.min(nextQuantity, inventoryCount, 99);
+      const existing = cart.find(
+        (line) => getCartLineKey(line.productId, line.variantId) === lineKey,
+      );
 
       if (!existing) {
-        writeCart([...cart, { productId, quantity }]);
+        writeCart([...cart, { productId, variantId: variant?.id, quantity }]);
         return;
       }
 
       writeCart(
         cart.map((line) =>
-          line.productId === productId ? { ...line, quantity } : line,
+          getCartLineKey(line.productId, line.variantId) === lineKey
+            ? { ...line, quantity }
+            : line,
         ),
       );
     },

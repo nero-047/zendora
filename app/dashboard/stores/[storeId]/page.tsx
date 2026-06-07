@@ -4,18 +4,33 @@ import { notFound } from "next/navigation";
 import {
   ArrowUpRight,
   CheckCircle,
+  Edit3,
   ExternalLink,
   PackagePlus,
   PauseCircle,
+  Percent,
   PlayCircle,
+  ReceiptText,
   ShoppingBag,
+  Users,
 } from "lucide-react";
 
 import { requireAppUser } from "@/features/auth/app-user";
+import { DiscountForm } from "@/features/commerce/components/discount-form";
+import { StoreSettingsForm } from "@/features/commerce/components/store-settings-form";
+import {
+  getCustomerStats,
+  getCustomerSummaries,
+} from "@/features/commerce/customers";
 import { getStoreWorkspace } from "@/features/commerce/data";
+import {
+  getOrderStatusOptions,
+  orderStatusLabels,
+} from "@/features/commerce/order-status";
 import {
   pauseStoreAction,
   publishStoreAction,
+  updateDiscountStatusAction,
   updateOrderStatusAction,
 } from "@/features/commerce/actions";
 import { formatCurrency } from "@/lib/utils";
@@ -33,7 +48,9 @@ export default async function StorePage({
     notFound();
   }
 
-  const { store, products, orders } = workspace;
+  const { store, products, orders, discounts } = workspace;
+  const customers = getCustomerSummaries(orders, store.currency);
+  const customerStats = getCustomerStats(customers);
 
   return (
     <div className="grid gap-5">
@@ -53,6 +70,18 @@ export default async function StorePage({
             <Link className="secondary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ExternalLink aria-hidden="true" size={17} />
               View
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/customers`}>
+              <Users aria-hidden="true" size={17} />
+              Customers
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/orders`}>
+              <ReceiptText aria-hidden="true" size={17} />
+              Orders
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/products`}>
+              <ShoppingBag aria-hidden="true" size={17} />
+              Products
             </Link>
             <Link className="primary-button px-4 text-sm" href={`/dashboard/stores/${store.id}/products/new`}>
               <PackagePlus aria-hidden="true" size={17} />
@@ -81,6 +110,8 @@ export default async function StorePage({
         {[
           ["Revenue", formatCurrency(store.revenueCents)],
           ["Orders", String(store.orderCount)],
+          ["Customers", String(customerStats.totalCustomers)],
+          ["Repeat buyers", String(customerStats.repeatCustomers)],
           ["Inventory", String(store.inventoryCount)],
           ["Products", String(store.productCount)],
         ].map(([label, value]) => (
@@ -91,22 +122,85 @@ export default async function StorePage({
         ))}
       </section>
 
+      <StoreSettingsForm store={store} />
+
+      <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <DiscountForm storeId={store.id} />
+
+        <div className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 p-4">
+            <h2 className="text-lg font-semibold text-slate-950">Discount codes</h2>
+          </div>
+          {discounts.length > 0 ? (
+            discounts.map((discount) => (
+              <div className="border-b border-slate-100 p-4 last:border-0" key={discount.id}>
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-emerald-500/10 text-emerald-700">
+                    <Percent aria-hidden="true" size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-950">{discount.code}</p>
+                      <span className="status-pill">{discount.status}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {discount.type === "percent"
+                        ? `${discount.value}% off`
+                        : `${formatCurrency(discount.value, store.currency)} off`}
+                      {discount.minSubtotalCents > 0
+                        ? ` / min ${formatCurrency(discount.minSubtotalCents, store.currency)}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {discount.redemptionCount}
+                      {discount.usageLimit ? `/${discount.usageLimit}` : ""} redemptions
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  action={updateDiscountStatusAction.bind(null, store.id, discount.id)}
+                  className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"
+                >
+                  <select
+                    aria-label={`Status for ${discount.code}`}
+                    className="field min-h-10 py-2 text-sm"
+                    defaultValue={discount.status}
+                    name="status"
+                  >
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                  </select>
+                  <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                    <CheckCircle aria-hidden="true" size={16} />
+                    Update
+                  </button>
+                </form>
+              </div>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-slate-500">No discount codes yet.</p>
+          )}
+        </div>
+      </section>
+
       <section className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
         <div>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-950">Products</h2>
-            <Link className="text-sm font-semibold text-sky-700" href={`/dashboard/stores/${store.id}/products/new`}>
-              Add product
+            <Link className="text-sm font-semibold text-sky-700" href={`/dashboard/stores/${store.id}/products`}>
+              View all
             </Link>
           </div>
           <div className="soft-panel overflow-hidden">
-            <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400">
+            <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 sm:grid-cols-[1fr_auto_auto_auto]">
               <span>Product</span>
-              <span>Stock</span>
-              <span>Price</span>
+              <span className="hidden sm:inline">Stock</span>
+              <span className="hidden sm:inline">Price</span>
+              <span>Edit</span>
             </div>
             {products.map((product) => (
-              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0" key={product.id}>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0 sm:grid-cols-[1fr_auto_auto_auto]" key={product.id}>
                 <div className="flex min-w-0 items-center gap-3">
                   <Image
                     alt={product.name}
@@ -117,11 +211,34 @@ export default async function StorePage({
                   />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-950">{product.name}</p>
-                    <p className="truncate text-xs text-slate-500">{product.status}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {[
+                        product.status,
+                        product.category,
+                        product.variants.length > 0
+                          ? `${product.variants.length} variants`
+                          : product.sku,
+                      ].filter(Boolean).join(" / ")}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-slate-700 sm:hidden">
+                      {product.inventoryCount} in stock /{" "}
+                      {product.variants.length > 0 ? "From " : ""}
+                      {formatCurrency(product.priceCents, product.currency)}
+                    </p>
                   </div>
                 </div>
-                <span className="text-sm font-semibold text-slate-700">{product.inventoryCount}</span>
-                <span className="text-sm font-semibold text-slate-950">{formatCurrency(product.priceCents, product.currency)}</span>
+                <span className="hidden text-sm font-semibold text-slate-700 sm:inline">{product.inventoryCount}</span>
+                <span className="hidden text-sm font-semibold text-slate-950 sm:inline">
+                  {product.variants.length > 0 ? "From " : ""}
+                  {formatCurrency(product.priceCents, product.currency)}
+                </span>
+                <Link
+                  aria-label={`Edit ${product.name}`}
+                  className="icon-button h-10 min-h-10 w-10"
+                  href={`/dashboard/stores/${store.id}/products/${product.id}/edit`}
+                >
+                  <Edit3 aria-hidden="true" size={16} />
+                </Link>
               </div>
             ))}
             {products.length === 0 ? (
@@ -131,7 +248,12 @@ export default async function StorePage({
         </div>
 
         <div>
-          <h2 className="mb-3 text-lg font-semibold text-slate-950">Recent orders</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-950">Recent orders</h2>
+            <Link className="text-sm font-semibold text-sky-700" href={`/dashboard/stores/${store.id}/orders`}>
+              View all
+            </Link>
+          </div>
           <div className="soft-panel overflow-hidden">
             {orders.length > 0 ? (
               orders.slice(0, 6).map((order) => (
@@ -143,6 +265,9 @@ export default async function StorePage({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-950">{order.customerName}</p>
                       <p className="truncate text-xs text-slate-500">{order.customerEmail}</p>
+                      <span className="status-pill mt-2 w-fit">
+                        {orderStatusLabels[order.status]}
+                      </span>
                     </div>
                     <span className="text-sm font-semibold text-slate-950">{formatCurrency(order.totalCents, order.currency)}</span>
                   </div>
@@ -152,6 +277,7 @@ export default async function StorePage({
                       {order.items.slice(0, 3).map((item) => (
                         <p className="truncate" key={item.id}>
                           {item.quantity} x {item.productName}
+                          {item.variantName ? ` (${item.variantName})` : ""}
                         </p>
                       ))}
                     </div>
@@ -159,7 +285,7 @@ export default async function StorePage({
 
                   <form
                     action={updateOrderStatusAction.bind(null, store.id, order.id)}
-                    className="mt-3 grid grid-cols-[1fr_auto] gap-2"
+                    className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]"
                   >
                     <select
                       aria-label={`Status for ${order.customerName}`}
@@ -167,15 +293,27 @@ export default async function StorePage({
                       defaultValue={order.status}
                       name="status"
                     >
-                      <option value="pending">Pending</option>
-                      <option value="paid">Paid</option>
-                      <option value="fulfilled">Fulfilled</option>
-                      <option value="cancelled">Cancelled</option>
+                      {getOrderStatusOptions(order.status).map((status) => (
+                        <option key={status} value={status}>
+                          {orderStatusLabels[status]}
+                        </option>
+                      ))}
                     </select>
-                    <button className="secondary-button min-h-10 px-3 text-sm" type="submit">
+                    <button
+                      className="secondary-button min-h-10 px-3 text-sm"
+                      disabled={getOrderStatusOptions(order.status).length === 1}
+                      type="submit"
+                    >
                       <CheckCircle aria-hidden="true" size={16} />
                       Update
                     </button>
+                    <Link
+                      className="secondary-button min-h-10 px-3 text-sm"
+                      href={`/dashboard/stores/${store.id}/orders/${order.id}`}
+                    >
+                      <ReceiptText aria-hidden="true" size={16} />
+                      Details
+                    </Link>
                   </form>
                 </div>
               ))
