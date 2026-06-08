@@ -2996,6 +2996,11 @@ const tests = [
         0,
         "zero tax rate should have zero tax",
       );
+      assertEqual(
+        businessRules.calculateTaxCents(12345, 825, true),
+        0,
+        "tax-exempt customers should have zero tax",
+      );
     },
   ],
   [
@@ -3071,6 +3076,32 @@ const tests = [
           amountDueCents: 0,
         },
         "checkout totals should cap over-sized discount and gift card amounts",
+      );
+
+      const taxExempt = businessRules.calculateCheckoutTotals({
+        discountCents: 2500,
+        freeShippingThresholdCents: 12000,
+        giftCardCents: 3000,
+        shippingCountry: "United States",
+        shippingRateCents: 900,
+        shippingZones: [zone],
+        subtotalCents: 10000,
+        taxExempt: true,
+        taxRateBps: 1000,
+      });
+
+      assertDeepEqual(
+        {
+          taxCents: taxExempt.taxCents,
+          totalCents: taxExempt.totalCents,
+          amountDueCents: taxExempt.amountDueCents,
+        },
+        {
+          taxCents: 0,
+          totalCents: 8000,
+          amountDueCents: 5000,
+        },
+        "checkout totals should honor tax-exempt customer profiles",
       );
     },
   ],

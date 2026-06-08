@@ -11,7 +11,11 @@ import {
   canRedeemGiftCard,
   normalizeGiftCardCode,
 } from "@/features/commerce/gift-cards";
-import { mockDiscounts, mockGiftCards } from "@/features/commerce/mock-data";
+import {
+  mockCustomerProfiles,
+  mockDiscounts,
+  mockGiftCards,
+} from "@/features/commerce/mock-data";
 import type { Discount, GiftCard, Product } from "@/features/commerce/types";
 import { isSupabaseConfigured } from "@/lib/env";
 import {
@@ -36,6 +40,7 @@ const checkoutPreviewLineSchema = z.object({
 
 const checkoutPreviewSchema = z.object({
   cart: z.array(checkoutPreviewLineSchema).min(1).max(50),
+  customerEmail: z.string().trim().email().max(120).optional(),
   discountCode: z.string().trim().max(32).optional(),
   giftCardCode: z.string().trim().max(40).optional(),
   shippingCountry: z.string().trim().min(2).max(80),
@@ -63,6 +68,10 @@ type GiftCardRow = {
 
 function normalizeDiscountCode(value: string | undefined) {
   return value?.trim().toUpperCase() || null;
+}
+
+function normalizeCustomerEmail(value: string | undefined) {
+  return value?.trim().toLowerCase() || null;
 }
 
 function getCartSubtotal(input: {
@@ -305,6 +314,30 @@ async function findLiveGiftCard(input: {
   } satisfies GiftCard;
 }
 
+async function findLiveCustomerTaxExempt(input: {
+  customerEmail: string | null;
+  storeId: string;
+}) {
+  if (!input.customerEmail) {
+    return false;
+  }
+
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("customer_profiles")
+    .select("tax_exempt")
+    .eq("store_id", input.storeId)
+    .eq("email", input.customerEmail)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Checkout preview customer tax profile lookup failed", error);
+    return false;
+  }
+
+  return Boolean((data as { tax_exempt: boolean | null } | null)?.tax_exempt);
+}
+
 function findDemoDiscount(input: { code: string | null; storeId: string }) {
   return input.code
     ? mockDiscounts.find(
@@ -321,6 +354,23 @@ function findDemoGiftCard(input: { code: string | null; storeId: string }) {
           giftCard.storeId === input.storeId && giftCard.code === input.code,
       ) || null
     : null;
+}
+
+function findDemoCustomerTaxExempt(input: {
+  customerEmail: string | null;
+  storeId: string;
+}) {
+  if (!input.customerEmail) {
+    return false;
+  }
+
+  return Boolean(
+    mockCustomerProfiles.find(
+      (profile) =>
+        profile.storeId === input.storeId &&
+        profile.email.trim().toLowerCase() === input.customerEmail,
+    )?.taxExempt,
+  );
 }
 
 function rateLimitedResponse(retryAfterSeconds: number) {
@@ -389,16 +439,22 @@ export async function POST(
   }
 
   const discountCode = normalizeDiscountCode(parsed.data.discountCode);
+  const customerEmail = normalizeCustomerEmail(parsed.data.customerEmail);
   const giftCardCode = normalizeGiftCardCode(parsed.data.giftCardCode) || null;
   const isDemoStorefront = storefront.store.id.startsWith("demo-");
   let discount: Discount | null = null;
   let giftCard: GiftCard | null = null;
+  let customerTaxExempt = false;
 
   try {
     if (isSupabaseConfigured() && !isDemoStorefront) {
-      [discount, giftCard] = await Promise.all([
+      [discount, giftCard, customerTaxExempt] = await Promise.all([
         findLiveDiscount({ code: discountCode, storeId: storefront.store.id }),
         findLiveGiftCard({ code: giftCardCode, storeId: storefront.store.id }),
+        findLiveCustomerTaxExempt({
+          customerEmail,
+          storeId: storefront.store.id,
+        }),
       ]);
     } else {
       discount = findDemoDiscount({
@@ -407,6 +463,10 @@ export async function POST(
       });
       giftCard = findDemoGiftCard({
         code: giftCardCode,
+        storeId: storefront.store.id,
+      });
+      customerTaxExempt = findDemoCustomerTaxExempt({
+        customerEmail,
         storeId: storefront.store.id,
       });
     }
@@ -437,6 +497,7 @@ export async function POST(
     shippingRateCents: storefront.store.shippingRateCents,
     shippingZones: storefront.shippingZones,
     subtotalCents: subtotal.subtotalCents,
+    taxExempt: customerTaxExempt,
     taxRateBps: storefront.store.taxRateBps,
   });
   const checkoutGiftCard = validateGiftCard({
@@ -461,6 +522,7 @@ export async function POST(
     shippingRateCents: storefront.store.shippingRateCents,
     shippingZones: storefront.shippingZones,
     subtotalCents: subtotal.subtotalCents,
+    taxExempt: customerTaxExempt,
     taxRateBps: storefront.store.taxRateBps,
   });
 
@@ -468,6 +530,7 @@ export async function POST(
     ok: true,
     discountCode: checkoutDiscount.code,
     giftCardCode: checkoutGiftCard.code,
+    taxExempt: customerTaxExempt,
     totals,
   });
 }

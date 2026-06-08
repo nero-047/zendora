@@ -88,8 +88,12 @@ export function calculateShippingQuote(input: {
   };
 }
 
-export function calculateTaxCents(discountedSubtotalCents: number, taxRateBps: number) {
-  if (discountedSubtotalCents <= 0 || taxRateBps <= 0) {
+export function calculateTaxCents(
+  discountedSubtotalCents: number,
+  taxRateBps: number,
+  taxExempt = false,
+) {
+  if (taxExempt || discountedSubtotalCents <= 0 || taxRateBps <= 0) {
     return 0;
   }
 
@@ -104,6 +108,7 @@ export function calculateCheckoutTotals(input: {
   shippingRateCents: number;
   shippingZones: ShippingZone[];
   subtotalCents: number;
+  taxExempt?: boolean;
   taxRateBps: number;
 }) {
   const subtotalCents = Math.max(0, input.subtotalCents);
@@ -123,6 +128,7 @@ export function calculateCheckoutTotals(input: {
   const taxCents = calculateTaxCents(
     discountedSubtotalCents,
     Math.max(0, input.taxRateBps),
+    Boolean(input.taxExempt),
   );
   const totalCents = discountedSubtotalCents + shippingCents + taxCents;
   const giftCardCents = Math.min(

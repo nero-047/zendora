@@ -400,9 +400,13 @@ if (
   !checkoutPreviewRouteText.includes("calculateCheckoutTotals") ||
   !checkoutPreviewRouteText.includes("calculateDiscountCents") ||
   !checkoutPreviewRouteText.includes("calculateGiftCardRedemptionAmount") ||
-  !checkoutPreviewRouteText.includes("canRedeemGiftCard")
+  !checkoutPreviewRouteText.includes("canRedeemGiftCard") ||
+  !checkoutPreviewRouteText.includes("customerEmail") ||
+  !checkoutPreviewRouteText.includes("findLiveCustomerTaxExempt") ||
+  !checkoutPreviewRouteText.includes("findDemoCustomerTaxExempt") ||
+  !checkoutPreviewRouteText.includes("taxExempt: customerTaxExempt")
 ) {
-  failures.push(`${checkoutPreviewRoutePath} must rate-limit public checkout preview requests and validate savings server-side.`);
+  failures.push(`${checkoutPreviewRoutePath} must rate-limit public checkout preview requests and validate savings and tax-exempt totals server-side.`);
 }
 
 if (
@@ -430,9 +434,11 @@ if (
   !checkoutFormText.includes("initialDiscountCode") ||
   !checkoutFormText.includes("initialGiftCardCode") ||
   !checkoutFormText.includes("useState(initialDiscountCode") ||
-  !checkoutFormText.includes("useState(initialGiftCardCode")
+  !checkoutFormText.includes("useState(initialGiftCardCode") ||
+  !checkoutFormText.includes("customerEmailLooksValid") ||
+  !checkoutFormText.includes("Customer profile tax exempt")
 ) {
-  failures.push(`${checkoutFormPath} must hydrate promo and gift-card fields from cart checkout links.`);
+  failures.push(`${checkoutFormPath} must hydrate promo/gift-card fields and preview tax-exempt customer totals.`);
 }
 
 if (
@@ -1373,6 +1379,35 @@ if (
   !sourceText.includes("client_order_key")
 ) {
   failures.push("Checkout mutation must enforce client order idempotency.");
+}
+
+if (
+  !checkoutFormText.includes('name="acceptsMarketing"') ||
+  !checkoutFormText.includes("Email me with news and offers") ||
+  !sourceText.includes(
+    'acceptsMarketing: formData.get("acceptsMarketing") === "on"',
+  ) ||
+  !sourceText.includes('checkoutCustomerTags = ["customer", "checkout"]') ||
+  !sourceText.includes("mergeCheckoutCustomerProfile(") ||
+  !sourceText.includes("accepts_marketing:") ||
+  !sourceText.includes("input.acceptsMarketing") ||
+  !sourceText.includes(
+    'console.warn("Checkout customer profile merge failed", error)',
+  )
+) {
+  failures.push("Checkout must capture marketing consent and non-blockingly merge buyers into customer profiles.");
+}
+
+if (
+  !sourceText.includes("getCheckoutCustomerTaxExempt(") ||
+  !sourceText.includes("getCustomerProfileTaxExempt(") ||
+  !sourceText.includes("taxExempt: customerTaxExempt") ||
+  !sourceText.includes("tax_exempt: Boolean(existing?.tax_exempt)") ||
+  !sourceText.includes(
+    'console.warn("Checkout customer tax profile lookup failed", error)',
+  )
+) {
+  failures.push("Checkout and manual orders must honor tax-exempt customer profiles without blocking checkout on profile lookup failures.");
 }
 
 if (

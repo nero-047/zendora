@@ -45,6 +45,7 @@ type CheckoutPreviewState =
       discountCode: string | null;
       giftCardCode: string | null;
       status: "success";
+      taxExempt: boolean;
       totals: CheckoutPreviewTotals;
     };
 
@@ -174,10 +175,14 @@ export function CheckoutForm({
   }));
   const checkoutPayloadJson = JSON.stringify(checkoutPayload);
   const isEmpty = cartItems.length === 0;
+  const customerEmailLooksValid = customerEmail.trim().includes("@");
   const hasCheckoutCodes = Boolean(
     discountCode.trim() || giftCardCode.trim(),
   );
-  const activePreview = hasCheckoutCodes && !isEmpty ? preview : null;
+  const hasCheckoutPreviewInput = Boolean(
+    hasCheckoutCodes || customerEmailLooksValid,
+  );
+  const activePreview = hasCheckoutPreviewInput && !isEmpty ? preview : null;
   const previewTotals =
     activePreview?.status === "success" ? activePreview.totals : checkoutTotals;
 
@@ -238,7 +243,7 @@ export function CheckoutForm({
   ]);
 
   useEffect(() => {
-    if (!hasCheckoutCodes || isEmpty) {
+    if (!hasCheckoutPreviewInput || isEmpty) {
       return;
     }
 
@@ -252,6 +257,9 @@ export function CheckoutForm({
           {
             body: JSON.stringify({
               cart: JSON.parse(checkoutPayloadJson),
+              customerEmail: customerEmailLooksValid
+                ? customerEmail.trim()
+                : undefined,
               discountCode: discountCode || undefined,
               giftCardCode: giftCardCode || undefined,
               shippingCountry,
@@ -270,13 +278,13 @@ export function CheckoutForm({
         }
 
         if (!response.ok || !payload?.ok) {
-          setPreview({
-            error:
-              typeof payload?.error === "string"
-                ? payload.error
-                : "Checkout code preview is unavailable.",
-            status: "error",
-          });
+	          setPreview({
+	            error:
+	              typeof payload?.error === "string"
+	                ? payload.error
+	                : "Checkout preview is unavailable.",
+	            status: "error",
+	          });
           return;
         }
 
@@ -290,15 +298,16 @@ export function CheckoutForm({
               ? payload.giftCardCode
               : null,
           status: "success",
+          taxExempt: payload.taxExempt === true,
           totals: payload.totals as CheckoutPreviewTotals,
         });
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.warn("Checkout code preview failed", error);
-          setPreview({
-            error: "Checkout code preview is unavailable.",
-            status: "error",
-          });
+	    } catch (error) {
+	      if (!controller.signal.aborted) {
+	        console.warn("Checkout preview failed", error);
+	        setPreview({
+	          error: "Checkout preview is unavailable.",
+	          status: "error",
+	        });
         }
       }
     }, 450);
@@ -311,7 +320,9 @@ export function CheckoutForm({
     checkoutPayloadJson,
     discountCode,
     giftCardCode,
-    hasCheckoutCodes,
+    customerEmail,
+    customerEmailLooksValid,
+    hasCheckoutPreviewInput,
     isEmpty,
     shippingCountry,
     storeSlug,
@@ -394,6 +405,22 @@ export function CheckoutForm({
               {state.errors.customerPhone[0]}
             </span>
           ) : null}
+        </label>
+
+        <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-white/70 p-3 text-sm text-slate-700">
+          <input
+            className="mt-1 h-4 w-4 accent-slate-950"
+            name="acceptsMarketing"
+            type="checkbox"
+          />
+          <span className="grid gap-1">
+            <span className="font-semibold text-slate-900">
+              Email me with news and offers
+            </span>
+            <span className="text-xs text-slate-500">
+              You can unsubscribe any time.
+            </span>
+          </span>
         </label>
 
         <div className="grid gap-4">
@@ -724,7 +751,14 @@ export function CheckoutForm({
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-slate-500">Tax</span>
+              <span className="text-sm font-semibold text-slate-500">
+                Tax
+                {activePreview?.status === "success" && activePreview.taxExempt ? (
+                  <span className="block text-xs font-medium text-slate-400">
+                    Customer profile tax exempt
+                  </span>
+                ) : null}
+              </span>
               <span className="text-sm font-semibold text-slate-950">
                 {formatCurrency(previewTotals.taxCents, currency)}
               </span>
@@ -745,11 +779,11 @@ export function CheckoutForm({
                 </span>
               </div>
             ) : null}
-            {activePreview?.status === "loading" ? (
-              <p className="text-xs font-semibold text-slate-500">
-                Checking promo and gift card codes...
-              </p>
-            ) : null}
+	            {activePreview?.status === "loading" ? (
+	              <p className="text-xs font-semibold text-slate-500">
+	                Checking checkout totals...
+	              </p>
+	            ) : null}
             {activePreview?.status === "error" ? (
               <p className="text-xs font-semibold text-red-600">
                 {activePreview.error}

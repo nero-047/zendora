@@ -278,10 +278,11 @@ async function run() {
               variantId: "demo-variant-hydra-bottle-steel",
               quantity: 2,
             },
-          ],
-          discountCode: "WELCOME10",
-          giftCardCode: "SUMMER-5000",
-          shippingCountry: "United States",
+	          ],
+	          customerEmail: "ari@example.com",
+	          discountCode: "WELCOME10",
+	          giftCardCode: "SUMMER-5000",
+	          shippingCountry: "United States",
         }),
         headers: {
           "Content-Type": "application/json",
@@ -298,12 +299,14 @@ async function run() {
       validPreview.body?.ok === true &&
         validPreview.body.discountCode === "WELCOME10" &&
         validPreview.body.giftCardCode === "SUMMER-5000" &&
-        validPreview.body.totals?.discountCents > 0 &&
-        validPreview.body.totals?.giftCardCents > 0 &&
-        validPreview.body.totals?.amountDueCents <
-          validPreview.body.totals?.totalCents,
-      "checkout preview did not validate promo and gift card savings.",
-    );
+	        validPreview.body.totals?.discountCents > 0 &&
+	        validPreview.body.totals?.giftCardCents > 0 &&
+	        validPreview.body.taxExempt === true &&
+	        validPreview.body.totals?.taxCents === 0 &&
+	        validPreview.body.totals?.amountDueCents <
+	          validPreview.body.totals?.totalCents,
+	      "checkout preview did not validate promo, gift card, and tax-exempt savings.",
+	    );
 
     const invalidPreview = await request(
       "/api/stores/northline-supply/checkout-preview",
@@ -1103,6 +1106,7 @@ async function run() {
       includes: [
         "Checkout",
         "Customer",
+        "Email me with news and offers",
         "Delivery",
         "Country / region",
         "United Kingdom",

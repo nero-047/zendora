@@ -265,6 +265,7 @@ const checkoutSchema = z.object({
     .max(80, "Keep the name under 80 characters."),
   customerEmail: z.string().trim().email("Add a valid customer email."),
   customerPhone: z.string().trim().max(32, "Keep phone under 32 characters.").optional(),
+  acceptsMarketing: z.boolean(),
   shippingAddressLine1: z
     .string()
     .trim()
@@ -777,6 +778,18 @@ type RecreditedGiftCard = {
   amountCents: number;
 };
 
+type CheckoutCustomerProfileRow = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  note: string | null;
+  tags: string[] | null;
+  accepts_marketing: boolean | null;
+  tax_exempt: boolean | null;
+};
+
+const checkoutCustomerTags = ["customer", "checkout"] as const;
+
 function demoDisabledState(): ActionState {
   return {
     status: "success",
@@ -795,6 +808,117 @@ function checkoutDisabledState(): ActionState {
 
 function createCustomerAccessToken() {
   return randomBytes(32).toString("hex");
+}
+
+function normalizeCheckoutCustomerText(value: string | null | undefined) {
+  return value?.trim().replace(/\s+/g, " ") || "";
+}
+
+function mergeCheckoutCustomerTags(existingTags: string[] = []) {
+  const tags = new Set(
+    existingTags
+      .map((tag) => normalizeCheckoutCustomerText(tag).toLowerCase())
+      .filter(Boolean),
+  );
+
+  for (const tag of checkoutCustomerTags) {
+    tags.add(tag);
+  }
+
+  return [...tags].sort((a, b) => a.localeCompare(b));
+}
+
+function createCheckoutCustomerNote(input: {
+  existingNote?: string | null;
+  orderId: string;
+}) {
+  const existingNote = normalizeCheckoutCustomerText(input.existingNote);
+
+  return existingNote || `Checkout customer from order ${input.orderId.slice(0, 8)}.`;
+}
+
+function getCustomerProfileTaxExempt(
+  profiles: Array<{ email: string; taxExempt: boolean }>,
+  customerEmail: string,
+) {
+  const email = customerEmail.trim().toLowerCase();
+
+  return Boolean(
+    profiles.find((profile) => profile.email.trim().toLowerCase() === email)
+      ?.taxExempt,
+  );
+}
+
+async function getCheckoutCustomerTaxExempt(input: {
+  customerEmail: string;
+  db: ReturnType<typeof getSupabaseAdmin>;
+  storeId: string;
+}) {
+  const email = input.customerEmail.trim().toLowerCase();
+  const { data, error } = await input.db
+    .from("customer_profiles")
+    .select("tax_exempt")
+    .eq("store_id", input.storeId)
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Checkout customer tax profile lookup failed", error);
+    return false;
+  }
+
+  return Boolean((data as { tax_exempt: boolean | null } | null)?.tax_exempt);
+}
+
+async function mergeCheckoutCustomerProfile(input: {
+  acceptsMarketing: boolean;
+  customerEmail: string;
+  customerName: string;
+  customerPhone?: string;
+  db: ReturnType<typeof getSupabaseAdmin>;
+  orderId: string;
+  storeId: string;
+}) {
+  const email = input.customerEmail.trim().toLowerCase();
+  const { data: existingProfile, error: lookupError } = await input.db
+    .from("customer_profiles")
+    .select("id, name, phone, note, tags, accepts_marketing, tax_exempt")
+    .eq("store_id", input.storeId)
+    .eq("email", email)
+    .maybeSingle();
+
+  if (lookupError) {
+    throw lookupError;
+  }
+
+  const existing = existingProfile as CheckoutCustomerProfileRow | null;
+  const profileName =
+    normalizeCheckoutCustomerText(input.customerName) ||
+    normalizeCheckoutCustomerText(existing?.name);
+  const profilePhone =
+    normalizeCheckoutCustomerText(input.customerPhone) ||
+    normalizeCheckoutCustomerText(existing?.phone);
+  const { error } = await input.db.from("customer_profiles").upsert(
+    {
+      store_id: input.storeId,
+      email,
+      name: profileName || null,
+      phone: profilePhone || null,
+      note: createCheckoutCustomerNote({
+        existingNote: existing?.note,
+        orderId: input.orderId,
+      }),
+      tags: mergeCheckoutCustomerTags(existing?.tags || []),
+      accepts_marketing:
+        Boolean(existing?.accepts_marketing) || input.acceptsMarketing,
+      tax_exempt: Boolean(existing?.tax_exempt),
+    },
+    { onConflict: "store_id,email" },
+  );
+
+  if (error) {
+    throw error;
+  }
 }
 
 function createGiftCardCode() {
@@ -4296,9 +4420,14 @@ export async function createManualOrderAction(
   }
 
   const discountedSubtotalCents = subtotalCents - manualDiscountCents;
+  const customerTaxExempt = getCustomerProfileTaxExempt(
+    workspace.customerProfiles,
+    parsed.data.customerEmail,
+  );
   const taxCents = calculateTaxCents(
     discountedSubtotalCents,
     workspace.store.taxRateBps,
+    customerTaxExempt,
   );
   const totalCents =
     discountedSubtotalCents + manualShippingCents + taxCents;
@@ -4423,6 +4552,7 @@ export async function createManualOrderAction(
       itemCount: orderItems.length,
       totalCents,
       paymentStatus: parsed.data.paymentStatus,
+      taxExempt: customerTaxExempt,
     },
   });
 
@@ -4476,6 +4606,7 @@ export async function createCheckoutOrderAction(
     customerName: formData.get("customerName"),
     customerEmail: formData.get("customerEmail"),
     customerPhone: formData.get("customerPhone") || undefined,
+    acceptsMarketing: formData.get("acceptsMarketing") === "on",
     shippingAddressLine1: formData.get("shippingAddressLine1"),
     shippingAddressLine2: formData.get("shippingAddressLine2") || undefined,
     shippingCity: formData.get("shippingCity"),
@@ -4631,6 +4762,11 @@ export async function createCheckoutOrderAction(
     });
   }
 
+  const customerTaxExempt = await getCheckoutCustomerTaxExempt({
+    customerEmail: parsed.data.customerEmail,
+    db,
+    storeId: storefront.store.id,
+  });
   const checkoutTotalsBeforeGiftCard = calculateCheckoutTotals({
     discountCents: discount.cents,
     freeShippingThresholdCents: storefront.store.freeShippingThresholdCents,
@@ -4638,6 +4774,7 @@ export async function createCheckoutOrderAction(
     shippingRateCents: storefront.store.shippingRateCents,
     shippingZones: storefront.shippingZones,
     subtotalCents,
+    taxExempt: customerTaxExempt,
     taxRateBps: storefront.store.taxRateBps,
   });
   const giftCard = await getCheckoutGiftCard({
@@ -4661,6 +4798,7 @@ export async function createCheckoutOrderAction(
     shippingRateCents: storefront.store.shippingRateCents,
     shippingZones: storefront.shippingZones,
     subtotalCents,
+    taxExempt: customerTaxExempt,
     taxRateBps: storefront.store.taxRateBps,
   });
   const shippingCents = checkoutTotals.shippingCents;
@@ -4951,6 +5089,20 @@ export async function createCheckoutOrderAction(
     }
   }
 
+  try {
+    await mergeCheckoutCustomerProfile({
+      acceptsMarketing: parsed.data.acceptsMarketing,
+      customerEmail: parsed.data.customerEmail,
+      customerName: parsed.data.customerName,
+      customerPhone: parsed.data.customerPhone,
+      db,
+      orderId: order.id,
+      storeId: storefront.store.id,
+    });
+  } catch (error) {
+    console.warn("Checkout customer profile merge failed", error);
+  }
+
   await recordAuditEvent({
     db,
     storeId: storefront.store.id,
@@ -4965,6 +5117,8 @@ export async function createCheckoutOrderAction(
       totalCents,
       amountDueCents,
       paymentMethod: parsed.data.paymentMethod,
+      acceptsMarketing: parsed.data.acceptsMarketing,
+      taxExempt: customerTaxExempt,
       discountCode: discount.code,
       giftCardCode: giftCard.code,
       giftCardCents,
