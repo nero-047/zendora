@@ -4132,6 +4132,9 @@ const tests = [
         q: "  bottle  ",
         category: "Drinkware",
         availability: "available",
+        minPrice: "40",
+        maxPrice: "50",
+        sale: "true",
         sort: "price-asc",
       });
 
@@ -4141,13 +4144,16 @@ const tests = [
           query: "bottle",
           category: "Drinkware",
           availability: "available",
+          minPrice: "40",
+          maxPrice: "50",
+          saleOnly: true,
           sort: "price-asc",
         },
         "catalog filters should normalize valid query params",
       );
       assertEqual(
         catalogFilters.serializeStorefrontCatalogFilters(parsed),
-        "q=bottle&category=Drinkware&availability=available&sort=price-asc",
+        "q=bottle&category=Drinkware&availability=available&minPrice=40&maxPrice=50&sale=true&sort=price-asc",
         "catalog filters should serialize non-default values",
       );
       assertTrue(
@@ -4158,6 +4164,8 @@ const tests = [
       const defaults = catalogFilters.parseStorefrontCatalogFilters({
         q: "   ",
         availability: "retired",
+        minPrice: "-1",
+        maxPrice: "free",
         sort: "random",
       });
 

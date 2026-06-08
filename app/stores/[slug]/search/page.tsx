@@ -24,6 +24,7 @@ import {
   filterStorefrontProducts,
   getStorefrontProductCategories,
   getStorefrontProductInventory,
+  isStorefrontProductOnSale,
 } from "@/features/commerce/storefront-search";
 import { formatCurrency } from "@/lib/utils";
 
@@ -133,7 +134,7 @@ export default async function StoreSearchPage({
         </section>
 
         <form
-          className="soft-panel mt-5 grid gap-3 p-4 lg:grid-cols-[1fr_180px_180px_180px_auto]"
+          className="soft-panel mt-5 grid gap-3 p-4 lg:grid-cols-[1fr_180px_180px_180px]"
           method="get"
         >
           <label className="relative">
@@ -197,6 +198,39 @@ export default async function StoreSearchPage({
             </select>
           </label>
 
+          <label>
+            <span className="sr-only">Minimum price</span>
+            <input
+              className="field"
+              defaultValue={normalizedFilters.minPrice}
+              inputMode="decimal"
+              name="minPrice"
+              placeholder="Min price"
+            />
+          </label>
+
+          <label>
+            <span className="sr-only">Maximum price</span>
+            <input
+              className="field"
+              defaultValue={normalizedFilters.maxPrice}
+              inputMode="decimal"
+              name="maxPrice"
+              placeholder="Max price"
+            />
+          </label>
+
+          <label className="field flex min-h-12 items-center gap-3">
+            <input
+              className="h-4 w-4 accent-slate-950"
+              defaultChecked={normalizedFilters.saleOnly}
+              name="sale"
+              type="checkbox"
+              value="true"
+            />
+            <span className="text-sm font-semibold text-slate-700">On sale</span>
+          </label>
+
           <button className="primary-button px-4 text-sm" type="submit">
             <Search aria-hidden="true" size={16} />
             Search
@@ -220,6 +254,7 @@ export default async function StoreSearchPage({
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {results.map((product) => {
               const inventory = getStorefrontProductInventory(product);
+              const isOnSale = isStorefrontProductOnSale(product);
 
               return (
                 <article className="soft-panel overflow-hidden" key={product.id}>
@@ -242,6 +277,9 @@ export default async function StoreSearchPage({
                         <ShoppingBag aria-hidden="true" size={14} />
                         {inventory} in stock
                       </span>
+                      {isOnSale ? (
+                        <span className="status-pill">Sale</span>
+                      ) : null}
                     </div>
                     <div>
                       <Link
@@ -255,10 +293,26 @@ export default async function StoreSearchPage({
                       </p>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold text-slate-950">
-                        {product.variants.length > 0 ? "From " : ""}
-                        {formatCurrency(product.priceCents, product.currency)}
-                      </span>
+                      <div>
+                        <span
+                          className={
+                            isOnSale
+                              ? "text-sm font-semibold text-rose-700"
+                              : "text-sm font-semibold text-slate-950"
+                          }
+                        >
+                          {product.variants.length > 0 ? "From " : ""}
+                          {formatCurrency(product.priceCents, product.currency)}
+                        </span>
+                        {isOnSale && product.compareAtCents ? (
+                          <span className="ml-2 text-xs font-semibold text-slate-400 line-through">
+                            {formatCurrency(
+                              product.compareAtCents,
+                              product.currency,
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
                       <Link
                         className="secondary-button min-h-10 px-3 text-sm"
                         href={`/stores/${store.slug}/products/${product.slug}`}

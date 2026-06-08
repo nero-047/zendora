@@ -123,6 +123,7 @@ const productSchema = z.object({
     .optional(),
   description: z.string().trim().max(500, "Keep descriptions under 500 characters."),
   price: z.string().trim().min(1, "Add a price."),
+  compareAtPrice: z.string().trim().optional(),
   inventory: z.coerce
     .number()
     .int("Inventory must be a whole number.")
@@ -729,6 +730,7 @@ type ParsedVariantInput = {
   optionValue: string;
   sku: string | null;
   priceCents: number;
+  compareAtCents: number | null;
   inventoryCount: number;
   status: "active" | "paused";
   sortOrder: number;
@@ -1189,6 +1191,14 @@ function parseOptionalPriceCents(value: string | undefined) {
   return toPriceCents(value);
 }
 
+function parseOptionalCompareAtCents(value: string | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  return toPriceCents(value);
+}
+
 function parseOptionalPositiveInteger(value: string | undefined) {
   if (!value?.trim()) {
     return null;
@@ -1268,8 +1278,18 @@ function parseProductVariantRows(input: {
   const variants: ParsedVariantInput[] = [];
 
   for (const [index, row] of rows.entries()) {
-    const [optionValue, sku = "", price = "", inventory = "", status = "active"] =
-      row.split("|").map((part) => part.trim());
+    const parts = row.split("|").map((part) => part.trim());
+    const hasCompareAtColumn = parts.length >= 6;
+    const [
+      optionValue,
+      sku = "",
+      price = "",
+      compareAtPrice = "",
+      inventory = "",
+      status = "active",
+    ] = hasCompareAtColumn
+      ? parts
+      : [parts[0], parts[1], parts[2], "", parts[3], parts[4] || "active"];
 
     if (!optionValue) {
       return {
@@ -1294,6 +1314,7 @@ function parseProductVariantRows(input: {
     seenOptions.add(optionKey);
 
     const priceCents = toPriceCents(price);
+    const compareAtCents = parseOptionalCompareAtCents(compareAtPrice);
     const inventoryCount = Number(inventory);
     const normalizedStatus = status.toLowerCase();
 
@@ -1302,6 +1323,17 @@ function parseProductVariantRows(input: {
         variants: [],
         errors: {
           variantRows: [`Variant row ${index + 1} needs a valid price.`],
+        },
+      };
+    }
+
+    if (compareAtCents !== null && compareAtCents <= priceCents) {
+      return {
+        variants: [],
+        errors: {
+          variantRows: [
+            `Variant row ${index + 1} compare-at price must be higher than price.`,
+          ],
         },
       };
     }
@@ -1329,6 +1361,7 @@ function parseProductVariantRows(input: {
       optionValue,
       sku: optionalText(sku),
       priceCents,
+      compareAtCents,
       inventoryCount,
       status: normalizedStatus,
       sortOrder: index + 1,
@@ -1474,6 +1507,7 @@ function getManualOrderItems(input: {
 
 function getVariantCatalogTotals(
   fallbackPriceCents: number,
+  fallbackCompareAtCents: number | null,
   fallbackInventoryCount: number,
   variants: ParsedVariantInput[],
 ) {
@@ -1482,12 +1516,18 @@ function getVariantCatalogTotals(
   if (activeVariants.length === 0) {
     return {
       priceCents: fallbackPriceCents,
+      compareAtCents: fallbackCompareAtCents,
       inventoryCount: fallbackInventoryCount,
     };
   }
 
+  const lowestPriceVariant = activeVariants.reduce((lowest, variant) =>
+    variant.priceCents < lowest.priceCents ? variant : lowest,
+  );
+
   return {
-    priceCents: Math.min(...activeVariants.map((variant) => variant.priceCents)),
+    priceCents: lowestPriceVariant.priceCents,
+    compareAtCents: lowestPriceVariant.compareAtCents,
     inventoryCount: activeVariants.reduce(
       (sum, variant) => sum + variant.inventoryCount,
       0,
@@ -2105,6 +2145,7 @@ async function syncProductVariants(input: {
         option_value: variant.optionValue,
         sku: variant.sku,
         price_cents: variant.priceCents,
+        compare_at_cents: variant.compareAtCents,
         currency: input.currency,
         inventory_count: variant.inventoryCount,
         status: variant.status,
@@ -2237,6 +2278,7 @@ export async function createProductAction(
     status: formData.get("status"),
     variantOptionName: formData.get("variantOptionName") || undefined,
     variantRows: formData.get("variantRows") || undefined,
+    compareAtPrice: formData.get("compareAtPrice") || undefined,
   });
 
   if (!parsed.success) {
@@ -2251,6 +2293,14 @@ export async function createProductAction(
     });
   }
 
+  const compareAtCents = parseOptionalCompareAtCents(parsed.data.compareAtPrice);
+
+  if (compareAtCents !== null && compareAtCents <= priceCents) {
+    return formError("Compare-at price must be higher than the sale price.", {
+      compareAtPrice: ["Compare-at price must be higher than price."],
+    });
+  }
+
   const parsedVariants = parseProductVariantRows({
     optionName: parsed.data.variantOptionName,
     rows: parsed.data.variantRows,
@@ -2262,6 +2312,7 @@ export async function createProductAction(
 
   const catalogTotals = getVariantCatalogTotals(
     priceCents,
+    compareAtCents,
     parsed.data.inventory,
     parsedVariants.variants,
   );
@@ -2290,6 +2341,7 @@ export async function createProductAction(
         category: optionalText(parsed.data.category),
         description: parsed.data.description,
         price_cents: catalogTotals.priceCents,
+        compare_at_cents: catalogTotals.compareAtCents,
         currency: workspace.store.currency,
         inventory_count: catalogTotals.inventoryCount,
         image_url: image.imageUrl,
@@ -2330,6 +2382,7 @@ export async function createProductAction(
       metadata: {
         status: parsed.data.status,
         priceCents: catalogTotals.priceCents,
+        compareAtCents: catalogTotals.compareAtCents,
         inventoryCount: catalogTotals.inventoryCount,
         variantCount: parsedVariants.variants.length,
       },
@@ -2863,6 +2916,7 @@ export async function updateProductAction(
     status: formData.get("status"),
     variantOptionName: formData.get("variantOptionName") || undefined,
     variantRows: formData.get("variantRows") || undefined,
+    compareAtPrice: formData.get("compareAtPrice") || undefined,
   });
 
   if (!parsed.success) {
@@ -2877,6 +2931,14 @@ export async function updateProductAction(
     });
   }
 
+  const compareAtCents = parseOptionalCompareAtCents(parsed.data.compareAtPrice);
+
+  if (compareAtCents !== null && compareAtCents <= priceCents) {
+    return formError("Compare-at price must be higher than the sale price.", {
+      compareAtPrice: ["Compare-at price must be higher than price."],
+    });
+  }
+
   const parsedVariants = parseProductVariantRows({
     optionName: parsed.data.variantOptionName,
     rows: parsed.data.variantRows,
@@ -2888,6 +2950,7 @@ export async function updateProductAction(
 
   const catalogTotals = getVariantCatalogTotals(
     priceCents,
+    compareAtCents,
     parsed.data.inventory,
     parsedVariants.variants,
   );
@@ -2917,6 +2980,7 @@ export async function updateProductAction(
       category: string | null;
       description: string;
       price_cents: number;
+      compare_at_cents: number | null;
       currency: string;
       inventory_count: number;
       status: z.infer<typeof productUpdateSchema>["status"];
@@ -2928,6 +2992,7 @@ export async function updateProductAction(
       category: optionalText(parsed.data.category),
       description: parsed.data.description,
       price_cents: catalogTotals.priceCents,
+      compare_at_cents: catalogTotals.compareAtCents,
       currency: workspace.store.currency,
       inventory_count: catalogTotals.inventoryCount,
       status: parsed.data.status,

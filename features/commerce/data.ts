@@ -238,6 +238,7 @@ type ProductRow = {
   category: string | null;
   description: string | null;
   price_cents: number;
+  compare_at_cents: number | null;
   currency: string;
   inventory_count: number;
   image_url: string | null;
@@ -254,6 +255,7 @@ type ProductVariantRow = {
   option_value: string;
   sku: string | null;
   price_cents: number;
+  compare_at_cents: number | null;
   currency: string;
   inventory_count: number;
   status: ProductVariantStatus;
@@ -506,6 +508,7 @@ function mapProduct(row: ProductRow): Product {
     category: row.category || undefined,
     description: row.description || "",
     priceCents: row.price_cents,
+    compareAtCents: row.compare_at_cents || undefined,
     currency: row.currency,
     inventoryCount: row.inventory_count,
     imageUrl:
@@ -527,6 +530,7 @@ function mapProductVariant(row: ProductVariantRow): ProductVariant {
     optionValue: row.option_value,
     sku: row.sku || undefined,
     priceCents: row.price_cents,
+    compareAtCents: row.compare_at_cents || undefined,
     currency: row.currency,
     inventoryCount: row.inventory_count,
     status: row.status,
@@ -1211,9 +1215,14 @@ function attachProductVariants(
       };
     }
 
+    const lowestPriceVariant = activeVariants.reduce((lowest, variant) =>
+      variant.priceCents < lowest.priceCents ? variant : lowest,
+    );
+
     return {
       ...product,
-      priceCents: Math.min(...activeVariants.map((variant) => variant.priceCents)),
+      priceCents: lowestPriceVariant.priceCents,
+      compareAtCents: lowestPriceVariant.compareAtCents,
       inventoryCount: activeVariants.reduce(
         (sum, variant) => sum + variant.inventoryCount,
         0,

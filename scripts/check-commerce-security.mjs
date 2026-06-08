@@ -5,6 +5,7 @@ const actionsPath = "features/commerce/actions.ts";
 const abandonedCheckoutRoutePath =
   "app/api/stores/[slug]/abandoned-checkouts/route.ts";
 const buildfilePath = "Buildfile";
+const catalogFiltersPath = "features/commerce/catalog-filters.ts";
 const checkoutFormPath = "features/commerce/components/checkout-form.tsx";
 const checkoutPagePath = "app/stores/[slug]/checkout/page.tsx";
 const checkoutPreviewRoutePath =
@@ -14,6 +15,7 @@ const comparePagePath = "app/stores/[slug]/compare/page.tsx";
 const contactFormPath = "features/commerce/components/contact-form.tsx";
 const contactPagePath = "app/stores/[slug]/contact/page.tsx";
 const contactRoutePath = "app/api/stores/[slug]/contact/route.ts";
+const createProductFormPath = "features/commerce/components/create-product-form.tsx";
 const csvExportPath = "features/commerce/csv-export.ts";
 const dataPath = "features/commerce/data.ts";
 const giftCardBalanceFormPath =
@@ -45,6 +47,7 @@ const productQuestionRoutePath =
   "app/api/stores/[slug]/products/[productId]/questions/route.ts";
 const productRecommendationsPath =
   "features/commerce/product-recommendations.ts";
+const reviewsHelperPath = "features/commerce/reviews.ts";
 const recentlyViewedHelperPath = "features/commerce/recently-viewed.ts";
 const recentlyViewedPagePath = "app/stores/[slug]/recently-viewed/page.tsx";
 const recentlyViewedProductsPagePath =
@@ -56,6 +59,7 @@ const restockAlertFormPath =
 const restockAlertHelperPath = "features/commerce/restock-alerts.ts";
 const restockAlertRoutePath = "app/api/stores/[slug]/restock-alerts/route.ts";
 const envPath = "lib/env.ts";
+const editProductFormPath = "features/commerce/components/edit-product-form.tsx";
 const nextConfigPath = "next.config.ts";
 const orderCancellationFormPath =
   "features/commerce/components/order-cancellation-request-form.tsx";
@@ -67,8 +71,10 @@ const orderDeliveryFormPath =
 const orderDeliveryHelperPath = "features/commerce/order-delivery-request.ts";
 const orderDeliveryRoutePath =
   "app/api/stores/[slug]/orders/[orderId]/delivery-requests/route.ts";
+const orderInvoicePath = "app/stores/[slug]/orders/[orderId]/invoice/page.tsx";
 const orderReceiptPath = "app/stores/[slug]/orders/[orderId]/page.tsx";
 const orderReorderPath = "features/commerce/order-reorder.ts";
+const orderTrackingPath = "app/stores/[slug]/orders/[orderId]/tracking/page.tsx";
 const packageEbPath = "scripts/package-eb.mjs";
 const packageJsonPath = "package.json";
 const prebuildHookPath = ".platform/hooks/prebuild/00_add_swap.sh";
@@ -78,11 +84,13 @@ const requestGuardsPath = "lib/request-guards.ts";
 const robotsPath = "app/robots.ts";
 const schemaPath = "supabase/schema.sql";
 const smokePath = "scripts/smoke.mjs";
+const storeSearchPagePath = "app/stores/[slug]/search/page.tsx";
 const storefrontCartPagePath =
   "features/commerce/components/storefront-cart-page.tsx";
 const storefrontCartPath = "features/commerce/components/storefront-cart.tsx";
 const storefrontNavigationPath =
   "features/commerce/components/storefront-navigation.tsx";
+const storefrontSearchPath = "features/commerce/storefront-search.ts";
 const storefrontWishlistPagePath =
   "features/commerce/components/storefront-wishlist-page.tsx";
 const wishlistButtonPath = "features/commerce/components/wishlist-button.tsx";
@@ -91,6 +99,7 @@ const wishlistPagePath = "app/stores/[slug]/wishlist/page.tsx";
 const sourceText = readFileSync(actionsPath, "utf8");
 const abandonedCheckoutRouteText = readFileSync(abandonedCheckoutRoutePath, "utf8");
 const buildfileText = readFileSync(buildfilePath, "utf8");
+const catalogFiltersText = readFileSync(catalogFiltersPath, "utf8");
 const checkoutFormText = readFileSync(checkoutFormPath, "utf8");
 const checkoutPageText = readFileSync(checkoutPagePath, "utf8");
 const checkoutPreviewRouteText = readFileSync(checkoutPreviewRoutePath, "utf8");
@@ -99,6 +108,7 @@ const comparePageText = readFileSync(comparePagePath, "utf8");
 const contactFormText = readFileSync(contactFormPath, "utf8");
 const contactPageText = readFileSync(contactPagePath, "utf8");
 const contactRouteText = readFileSync(contactRoutePath, "utf8");
+const createProductFormText = readFileSync(createProductFormPath, "utf8");
 const csvExportText = readFileSync(csvExportPath, "utf8");
 const dataText = readFileSync(dataPath, "utf8");
 const giftCardBalanceFormText = readFileSync(giftCardBalanceFormPath, "utf8");
@@ -130,6 +140,7 @@ const productRecommendationsText = readFileSync(
   productRecommendationsPath,
   "utf8",
 );
+const reviewsHelperText = readFileSync(reviewsHelperPath, "utf8");
 const recentlyViewedHelperText = readFileSync(recentlyViewedHelperPath, "utf8");
 const recentlyViewedPageText = readFileSync(recentlyViewedPagePath, "utf8");
 const recentlyViewedProductsPageText = readFileSync(
@@ -141,6 +152,7 @@ const restockAlertFormText = readFileSync(restockAlertFormPath, "utf8");
 const restockAlertHelperText = readFileSync(restockAlertHelperPath, "utf8");
 const restockAlertRouteText = readFileSync(restockAlertRoutePath, "utf8");
 const envText = readFileSync(envPath, "utf8");
+const editProductFormText = readFileSync(editProductFormPath, "utf8");
 const nextConfigText = readFileSync(nextConfigPath, "utf8");
 const orderCancellationFormText = readFileSync(
   orderCancellationFormPath,
@@ -157,8 +169,10 @@ const orderCancellationRouteText = readFileSync(
 const orderDeliveryFormText = readFileSync(orderDeliveryFormPath, "utf8");
 const orderDeliveryHelperText = readFileSync(orderDeliveryHelperPath, "utf8");
 const orderDeliveryRouteText = readFileSync(orderDeliveryRoutePath, "utf8");
+const orderInvoiceText = readFileSync(orderInvoicePath, "utf8");
 const orderReceiptText = readFileSync(orderReceiptPath, "utf8");
 const orderReorderText = readFileSync(orderReorderPath, "utf8");
+const orderTrackingText = readFileSync(orderTrackingPath, "utf8");
 const packageEbText = readFileSync(packageEbPath, "utf8");
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 const prebuildHookText = readFileSync(prebuildHookPath, "utf8");
@@ -168,9 +182,11 @@ const requestGuardsText = readFileSync(requestGuardsPath, "utf8");
 const robotsText = readFileSync(robotsPath, "utf8");
 const schemaText = readFileSync(schemaPath, "utf8");
 const smokeText = readFileSync(smokePath, "utf8");
+const storeSearchPageText = readFileSync(storeSearchPagePath, "utf8");
 const storefrontCartPageText = readFileSync(storefrontCartPagePath, "utf8");
 const storefrontCartText = readFileSync(storefrontCartPath, "utf8");
 const storefrontNavigationText = readFileSync(storefrontNavigationPath, "utf8");
+const storefrontSearchText = readFileSync(storefrontSearchPath, "utf8");
 const storefrontWishlistPageText = readFileSync(
   storefrontWishlistPagePath,
   "utf8",
@@ -440,6 +456,50 @@ if (
 }
 
 if (
+  !storefrontCartText.includes("selectedVariantIds") ||
+  !storefrontCartText.includes("updateSelectedVariant") ||
+  !storefrontCartText.includes("getDefaultProductVariant") ||
+  !storefrontCartText.includes("productCardPriceCents") ||
+  !storefrontCartText.includes("selectedVariant?.priceCents") ||
+  !storefrontCartText.includes("addProduct(product, selectedVariant?.id") ||
+  !storefrontCartText.includes("variant.optionName}: {variant.optionValue")
+) {
+  failures.push(`${storefrontCartPath} must let shoppers pick product-card variants before quick add.`);
+}
+
+if (
+  !storefrontCartText.includes("productCardCompareAtCents") ||
+  !storefrontCartText.includes("hasProductCardSale") ||
+  !storefrontCartText.includes("line-through") ||
+  !storefrontCartText.includes("Sale")
+) {
+  failures.push(`${storefrontCartPath} must merchandise sale pricing on storefront product cards.`);
+}
+
+if (
+  !catalogFiltersText.includes("minPrice") ||
+  !catalogFiltersText.includes("maxPrice") ||
+  !catalogFiltersText.includes("saleOnly") ||
+  !catalogFiltersText.includes("parseStorefrontFilterPriceCents") ||
+  !catalogFiltersText.includes('params.set("sale", "true")') ||
+  !storefrontSearchText.includes("minPriceCents") ||
+  !storefrontSearchText.includes("maxPriceCents") ||
+  !storefrontSearchText.includes("isStorefrontProductOnSale") ||
+  !storefrontCartText.includes("setMinPrice") ||
+  !storefrontCartText.includes("setMaxPrice") ||
+  !storefrontCartText.includes("setSaleOnly") ||
+  !storefrontCartText.includes("Min price") ||
+  !storefrontCartText.includes("Max price") ||
+  !storefrontCartText.includes("On sale") ||
+  !storeSearchPageText.includes("minPrice") ||
+  !storeSearchPageText.includes("maxPrice") ||
+  !storeSearchPageText.includes("sale") ||
+  !storeSearchPageText.includes("On sale")
+) {
+  failures.push("Storefront catalog filters must support shareable price range and on-sale filtering across grids and search.");
+}
+
+if (
   !productCardActionsText.includes("getProductCardCompareHref") ||
   !productCardActionsText.includes("encodeURIComponent") ||
   !productCardActionsText.includes("limit = 3") ||
@@ -455,6 +515,44 @@ if (
   !orderReceiptText.includes("Rebuild checkout")
 ) {
   failures.push(`${orderReceiptPath} must expose a buy-again checkout path on customer order receipts.`);
+}
+
+if (
+  !orderReceiptText.includes("/invoice?token=") ||
+  !orderReceiptText.includes("Print invoice")
+) {
+  failures.push(`${orderReceiptPath} must link customer receipts to a token-protected printable invoice.`);
+}
+
+if (
+  !orderReceiptText.includes("/tracking?token=") ||
+  !orderReceiptText.includes("Track order")
+) {
+  failures.push(`${orderReceiptPath} must link customer receipts to a token-protected tracking page.`);
+}
+
+if (
+  !orderInvoiceText.includes("getPublicOrderReceipt") ||
+  !orderInvoiceText.includes("PrintButton") ||
+  !orderInvoiceText.includes("Customer invoice") ||
+  !orderInvoiceText.includes("Order receipt") ||
+  !orderInvoiceText.includes("index: false") ||
+  !orderInvoiceText.includes("follow: false") ||
+  !orderInvoiceText.includes("notFound()")
+) {
+  failures.push(`${orderInvoicePath} must render a noindex token-protected customer invoice from private receipt data.`);
+}
+
+if (
+  !orderTrackingText.includes("getPublicOrderReceipt") ||
+  !orderTrackingText.includes("Order tracking") ||
+  !orderTrackingText.includes("Carrier tracking") ||
+  !orderTrackingText.includes("Tracking timeline") ||
+  !orderTrackingText.includes("index: false") ||
+  !orderTrackingText.includes("follow: false") ||
+  !orderTrackingText.includes("notFound()")
+) {
+  failures.push(`${orderTrackingPath} must render a noindex token-protected customer tracking page from private receipt data.`);
 }
 
 if (
@@ -549,6 +647,19 @@ if (
   !productPageText.includes("Related products")
 ) {
   failures.push(`${productPagePath} must expose product questions alongside reviews and recommendations.`);
+}
+
+if (
+  !productPageText.includes("approvedReviews") ||
+  !productPageText.includes('review.status === "approved"') ||
+  !productPageText.includes("getProductReviewDistribution") ||
+  !productPageText.includes("Rating breakdown") ||
+  !productPageText.includes("Verified purchase") ||
+  !productPageText.includes("No approved reviews yet") ||
+  !reviewsHelperText.includes("getProductReviewDistribution") ||
+  !reviewsHelperText.includes('review.status === "approved"')
+) {
+  failures.push(`${productPagePath} must render only approved storefront reviews with a verified rating breakdown.`);
 }
 
 if (
@@ -704,6 +815,14 @@ if (!productPageText.includes("ProductDetailActions")) {
   failures.push(`${productPagePath} must keep product purchase and wishlist actions on public product pages.`);
 }
 
+if (
+  !productPageText.includes("searchParams") ||
+  !productPageText.includes("initialVariantId") ||
+  !productPageText.includes("variant")
+) {
+  failures.push(`${productPagePath} must pass selected variant query params into product purchase controls.`);
+}
+
 if (!productPageText.includes("RecentlyViewedTracker")) {
   failures.push(`${productPagePath} must record product views for storefront recently viewed history.`);
 }
@@ -749,6 +868,52 @@ if (
   !productDetailActionsText.includes("Checkout cart")
 ) {
   failures.push(`${productDetailActionsPath} must keep buy-now, cart, and wishlist actions available on product pages.`);
+}
+
+if (
+  !productDetailActionsText.includes("purchaseQuantity") ||
+  !productDetailActionsText.includes("requestedPurchaseQuantity") ||
+  !productDetailActionsText.includes("updatePurchaseQuantity") ||
+  !productDetailActionsText.includes("Decrease purchase quantity") ||
+  !productDetailActionsText.includes("Increase purchase quantity") ||
+  !productDetailActionsText.includes("selectedQuantity + requestedPurchaseQuantity")
+) {
+  failures.push(`${productDetailActionsPath} must let customers choose purchase quantity before add-to-cart and buy-now.`);
+}
+
+if (
+  !productDetailActionsText.includes("updateSelectedVariant") ||
+  !productDetailActionsText.includes("window.history.replaceState") ||
+  !productDetailActionsText.includes('url.searchParams.set("variant"') ||
+  !productDetailActionsText.includes("Selected variant") ||
+  !productDetailActionsText.includes("Availability") ||
+  !productDetailActionsText.includes("stockLabel")
+) {
+  failures.push(`${productDetailActionsPath} must expose shareable selected-variant URLs with clear SKU and stock state.`);
+}
+
+if (
+  !productDetailActionsText.includes("compareAtCents") ||
+  !productDetailActionsText.includes("hasSalePrice") ||
+  !productDetailActionsText.includes("savingsCents") ||
+  !productDetailActionsText.includes("line-through") ||
+  !productDetailActionsText.includes("Save") ||
+  !productDetailActionsText.includes("Sale")
+) {
+  failures.push(`${productDetailActionsPath} must show variant-aware sale pricing and savings on product pages.`);
+}
+
+if (
+  !sourceText.includes("compareAtPrice") ||
+  !sourceText.includes("parseOptionalCompareAtCents") ||
+  !sourceText.includes("compareAtCents <= priceCents") ||
+  !sourceText.includes("compare_at_cents") ||
+  !createProductFormText.includes("compareAtPrice") ||
+  !editProductFormText.includes("compareAtPrice") ||
+  !createProductFormText.includes("Compare-at price") ||
+  !editProductFormText.includes("Compare-at price")
+) {
+  failures.push("Catalog product forms and actions must support validated compare-at sale pricing.");
 }
 
 if (
@@ -989,8 +1154,10 @@ if (
 
 if (
   !schemaText.includes("products_price_nonnegative_check") ||
+  !schemaText.includes("products_compare_at_price_check") ||
   !schemaText.includes("products_inventory_nonnegative_check") ||
   !schemaText.includes("product_variants_price_nonnegative_check") ||
+  !schemaText.includes("product_variants_compare_at_price_check") ||
   !schemaText.includes("product_variants_inventory_nonnegative_check") ||
   !schemaText.includes("collections_sort_order_nonnegative_check") ||
   !schemaText.includes("collection_products_sort_order_nonnegative_check") ||
@@ -1098,11 +1265,15 @@ if (!schemaText.includes("create table if not exists public.customer_profiles"))
 
 const expectedSmokeRoutes = [
   "/stores/northline-supply",
+  "/stores/northline-supply/products/hydra-bottle",
   "/stores/northline-supply/products/field-carry-pack",
+  "/stores/northline-supply/products/field-carry-pack?variant=demo-variant-carry-pack-clay",
+  "/stores/northline-supply/products/trail-watch",
   "/stores/northline-supply/compare?products=field-carry-pack,hydra-bottle,trail-watch",
   "/stores/northline-supply/collections",
   "/stores/northline-supply/collections/everyday-carry",
   "/stores/northline-supply/collections/all?q=bottle&sort=price-asc",
+  "/stores/northline-supply/collections/all?minPrice=40&maxPrice=45&sale=true",
   "/stores/northline-supply/contact",
   "/api/stores/northline-supply/contact",
   "/api/stores/northline-supply/products/demo-product-carry-pack/questions",
@@ -1112,13 +1283,15 @@ const expectedSmokeRoutes = [
   "/api/stores/northline-supply/orders/demo-order-1001/cancellation-requests",
   "/api/stores/northline-supply/orders/demo-order-1001/delivery-requests",
   "/stores/northline-supply/cart",
-  "/stores/northline-supply/search?q=bottle&category=Drinkware&availability=available&sort=price-asc",
+  "/stores/northline-supply/search?q=bottle&category=Drinkware&availability=available&minPrice=40&maxPrice=45&sale=true&sort=price-asc",
   "/stores/northline-supply/checkout",
   "/api/stores/northline-supply/checkout-preview",
   "/stores/northline-supply/orders",
   "/stores/northline-supply/gift-cards",
   "/api/stores/northline-supply/gift-cards/balance",
   "/stores/northline-supply/orders/demo-order-1001?token=demo-token-1001",
+  "/stores/northline-supply/orders/demo-order-1001/invoice?token=demo-token-1001",
+  "/stores/northline-supply/orders/demo-order-1002/tracking?token=demo-token-1002",
   "/stores/northline-supply/pages/about",
   "/stores/northline-supply/policies",
   "/stores/northline-supply/policies/refund",

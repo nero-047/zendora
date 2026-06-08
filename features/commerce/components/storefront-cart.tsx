@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   defaultStorefrontCatalogFilters,
   hasActiveStorefrontCatalogFilters,
+  parseStorefrontFilterPriceCents,
   serializeStorefrontCatalogFilters,
   type StorefrontCatalogFilters,
 } from "@/features/commerce/catalog-filters";
@@ -24,6 +25,7 @@ import { getCheckoutPermalink } from "@/features/commerce/cart-permalinks";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
 import { WishlistButton } from "@/features/commerce/components/wishlist-button";
 import { getProductCardCompareHref } from "@/features/commerce/product-card-actions";
+import { isStorefrontProductOnSale } from "@/features/commerce/storefront-search";
 import type { Product } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -41,6 +43,17 @@ function getAvailableInventory(product: Product) {
   return activeVariants.length > 0
     ? activeVariants.reduce((sum, variant) => sum + variant.inventoryCount, 0)
     : product.inventoryCount;
+}
+
+function getDefaultProductVariant(product: Product) {
+  const activeVariants = product.variants.filter(
+    (variant) => variant.status === "active",
+  );
+
+  return (
+    activeVariants.find((variant) => variant.inventoryCount > 0) ||
+    activeVariants[0]
+  );
 }
 
 export function StorefrontCart({
@@ -75,6 +88,9 @@ export function StorefrontCart({
           ? initialFilters.category
           : "all",
       availability: initialFilters.availability,
+      maxPrice: initialFilters.maxPrice,
+      minPrice: initialFilters.minPrice,
+      saleOnly: initialFilters.saleOnly,
       sort: initialFilters.sort,
     }),
     [categories, initialFilters],
@@ -84,18 +100,33 @@ export function StorefrontCart({
   const [availability, setAvailability] = useState(
     normalizedInitialFilters.availability,
   );
+  const [minPrice, setMinPrice] = useState(normalizedInitialFilters.minPrice);
+  const [maxPrice, setMaxPrice] = useState(normalizedInitialFilters.maxPrice);
+  const [saleOnly, setSaleOnly] = useState(normalizedInitialFilters.saleOnly);
   const [sort, setSort] = useState(normalizedInitialFilters.sort);
+  const [selectedVariantIds, setSelectedVariantIds] = useState<
+    Record<string, string>
+  >({});
   const currentFilters = useMemo<StorefrontCatalogFilters>(
     () => ({
       query,
       category,
       availability,
+      maxPrice,
+      minPrice,
+      saleOnly,
       sort,
     }),
-    [availability, category, query, sort],
+    [availability, category, maxPrice, minPrice, query, saleOnly, sort],
   );
   const filteredProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
+    const minPriceCents = minPrice
+      ? parseStorefrontFilterPriceCents(minPrice)
+      : null;
+    const maxPriceCents = maxPrice
+      ? parseStorefrontFilterPriceCents(maxPrice)
+      : null;
 
     const filtered = products.filter((product) => {
       const availableInventory = getAvailableInventory(product);
@@ -104,6 +135,10 @@ export function StorefrontCart({
         availability === "all" ||
         (availability === "available" && availableInventory > 0) ||
         (availability === "sold-out" && availableInventory === 0);
+      const matchesPrice =
+        (minPriceCents === null || product.priceCents >= minPriceCents) &&
+        (maxPriceCents === null || product.priceCents <= maxPriceCents);
+      const matchesSale = !saleOnly || isStorefrontProductOnSale(product);
       const searchableText = [
         product.name,
         product.description,
@@ -119,6 +154,8 @@ export function StorefrontCart({
       return (
         matchesCategory &&
         matchesAvailability &&
+        matchesPrice &&
+        matchesSale &&
         searchableText.includes(normalizedQuery)
       );
     });
@@ -145,7 +182,7 @@ export function StorefrontCart({
 
       return 0;
     });
-  }, [availability, category, products, query, sort]);
+  }, [availability, category, maxPrice, minPrice, products, query, saleOnly, sort]);
   const hasActiveFilters = hasActiveStorefrontCatalogFilters(currentFilters);
   const checkoutHref = getCheckoutPermalink(storeSlug, cart);
 
@@ -155,7 +192,15 @@ export function StorefrontCart({
       serializeStorefrontCatalogFilters(currentFilters),
     );
 
-    for (const key of ["q", "category", "availability", "sort"]) {
+    for (const key of [
+      "q",
+      "category",
+      "availability",
+      "minPrice",
+      "maxPrice",
+      "sale",
+      "sort",
+    ]) {
       params.delete(key);
     }
 
@@ -177,23 +222,42 @@ export function StorefrontCart({
     setQuery(defaultStorefrontCatalogFilters.query);
     setCategory(defaultStorefrontCatalogFilters.category);
     setAvailability(defaultStorefrontCatalogFilters.availability);
+    setMinPrice(defaultStorefrontCatalogFilters.minPrice);
+    setMaxPrice(defaultStorefrontCatalogFilters.maxPrice);
+    setSaleOnly(defaultStorefrontCatalogFilters.saleOnly);
     setSort(defaultStorefrontCatalogFilters.sort);
   }
 
-  function addProduct(product: Product) {
+  function updateSelectedVariant(productId: string, variantId: string) {
+    setSelectedVariantIds((current) => ({
+      ...current,
+      [productId]: variantId,
+    }));
+  }
+
+  function addProduct(product: Product, variantId?: string) {
     const activeVariants = product.variants.filter(
       (variant) => variant.status === "active",
     );
     const defaultVariant =
       activeVariants.find((variant) => variant.inventoryCount > 0) ||
       activeVariants[0];
+    const selectedVariant =
+      activeVariants.find((variant) => variant.id === variantId) ||
+      defaultVariant;
+    const inventoryCount = selectedVariant?.inventoryCount ?? product.inventoryCount;
+
+    if (inventoryCount <= 0) {
+      return;
+    }
+
     const current = cart.find(
       (line) =>
         line.productId === product.id &&
-        (line.variantId || "") === (defaultVariant?.id || ""),
+        (line.variantId || "") === (selectedVariant?.id || ""),
     );
 
-    updateQuantity(product.id, (current?.quantity || 0) + 1, defaultVariant?.id);
+    updateQuantity(product.id, (current?.quantity || 0) + 1, selectedVariant?.id);
   }
 
   return (
@@ -215,7 +279,7 @@ export function StorefrontCart({
               </button>
             ) : null}
           </div>
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_180px]">
             <label className="relative">
               <span className="sr-only">Search products</span>
               <Search
@@ -282,6 +346,41 @@ export function StorefrontCart({
               </select>
             </label>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[180px_180px_1fr]">
+            <label>
+              <span className="sr-only">Minimum price</span>
+              <input
+                className="field"
+                inputMode="decimal"
+                onChange={(event) => setMinPrice(event.target.value)}
+                placeholder="Min price"
+                value={minPrice}
+              />
+            </label>
+
+            <label>
+              <span className="sr-only">Maximum price</span>
+              <input
+                className="field"
+                inputMode="decimal"
+                onChange={(event) => setMaxPrice(event.target.value)}
+                placeholder="Max price"
+                value={maxPrice}
+              />
+            </label>
+
+            <label className="field flex min-h-12 items-center gap-3">
+              <input
+                checked={saleOnly}
+                className="h-4 w-4 accent-slate-950"
+                onChange={(event) => setSaleOnly(event.target.checked)}
+                type="checkbox"
+              />
+              <span className="text-sm font-semibold text-slate-700">
+                On sale
+              </span>
+            </label>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -289,17 +388,27 @@ export function StorefrontCart({
             const activeVariants = product.variants.filter(
               (variant) => variant.status === "active",
             );
-            const defaultVariant =
-              activeVariants.find((variant) => variant.inventoryCount > 0) ||
-              activeVariants[0];
+            const defaultVariant = getDefaultProductVariant(product);
+            const selectedVariantId =
+              selectedVariantIds[product.id] || defaultVariant?.id || "";
+            const selectedVariant =
+              activeVariants.find((variant) => variant.id === selectedVariantId) ||
+              defaultVariant;
             const cartLine = cart.find(
               (line) =>
                 line.productId === product.id &&
-                (line.variantId || "") === (defaultVariant?.id || ""),
+                (line.variantId || "") === (selectedVariant?.id || ""),
             );
             const selectedQuantity = cartLine?.quantity || 0;
             const inventoryCount =
-              defaultVariant?.inventoryCount ?? product.inventoryCount;
+              selectedVariant?.inventoryCount ?? product.inventoryCount;
+            const productCardPriceCents =
+              selectedVariant?.priceCents ?? product.priceCents;
+            const productCardCompareAtCents =
+              selectedVariant?.compareAtCents ?? product.compareAtCents;
+            const hasProductCardSale =
+              typeof productCardCompareAtCents === "number" &&
+              productCardCompareAtCents > productCardPriceCents;
             const availableInventory = getAvailableInventory(product);
             const isSoldOut = inventoryCount === 0;
             const compareHref = getProductCardCompareHref({
@@ -331,15 +440,55 @@ export function StorefrontCart({
                     >
                       {product.name}
                     </Link>
-                    <span className="text-sm font-semibold text-slate-950">
-                      {activeVariants.length > 0 ? "From " : ""}
-                      {formatCurrency(product.priceCents, product.currency)}
-                    </span>
+                    <div className="text-right">
+                      <span
+                        className={
+                          hasProductCardSale
+                            ? "text-sm font-semibold text-rose-700"
+                            : "text-sm font-semibold text-slate-950"
+                        }
+                      >
+                        {formatCurrency(productCardPriceCents, product.currency)}
+                      </span>
+                      {hasProductCardSale ? (
+                        <span className="block text-xs font-semibold text-slate-400 line-through">
+                          {formatCurrency(
+                            productCardCompareAtCents,
+                            product.currency,
+                          )}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
+                  {hasProductCardSale ? (
+                    <span className="status-pill mt-3 w-fit">Sale</span>
+                  ) : null}
                   <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500">
                     {product.description}
                   </p>
                   <div className="mt-4 grid gap-2">
+                    {activeVariants.length > 0 ? (
+                      <label className="grid gap-1">
+                        <span className="sr-only">
+                          Select {activeVariants[0]?.optionName || "variant"} for{" "}
+                          {product.name}
+                        </span>
+                        <select
+                          className="field text-sm"
+                          onChange={(event) =>
+                            updateSelectedVariant(product.id, event.target.value)
+                          }
+                          value={selectedVariant?.id || ""}
+                        >
+                          {activeVariants.map((variant) => (
+                            <option key={variant.id} value={variant.id}>
+                              {variant.optionName}: {variant.optionValue}
+                              {variant.inventoryCount <= 0 ? " / Sold out" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     {selectedQuantity > 0 ? (
                       <div className="grid grid-cols-[44px_1fr_44px] overflow-hidden rounded-[8px] border border-slate-200 bg-white/70">
                         <button
@@ -349,7 +498,7 @@ export function StorefrontCart({
                             updateQuantity(
                               product.id,
                               selectedQuantity - 1,
-                              defaultVariant?.id,
+                              selectedVariant?.id,
                             )
                           }
                           type="button"
@@ -367,7 +516,7 @@ export function StorefrontCart({
                             updateQuantity(
                               product.id,
                               selectedQuantity + 1,
-                              defaultVariant?.id,
+                              selectedVariant?.id,
                             )
                           }
                           type="button"
@@ -379,7 +528,7 @@ export function StorefrontCart({
                       <button
                         className="primary-button w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-55"
                         disabled={isSoldOut}
-                        onClick={() => addProduct(product)}
+                        onClick={() => addProduct(product, selectedVariant?.id)}
                         type="button"
                       >
                         <ShoppingBag aria-hidden="true" size={16} />

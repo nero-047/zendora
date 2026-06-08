@@ -138,6 +138,12 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
     products,
     storeSlug: store.slug,
   });
+  const invoiceHref = `/stores/${store.slug}/orders/${
+    order.id
+  }/invoice?token=${encodeURIComponent(token)}`;
+  const trackingHref = `/stores/${store.slug}/orders/${
+    order.id
+  }/tracking?token=${encodeURIComponent(token)}`;
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -215,18 +221,28 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                 </>
               ) : null}
             </div>
-            {reorderLines.length > 0 ? (
-              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-                <Link className="primary-button px-4" href={reorderHref}>
-                  Buy again
-                  <ArrowRight aria-hidden="true" size={16} />
-                </Link>
-                <p className="text-sm font-medium text-slate-500">
-                  Rebuild checkout with {reorderLines.length} available item
-                  {reorderLines.length === 1 ? "" : "s"} from this order.
-                </p>
-              </div>
-            ) : null}
+            <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
+              {reorderLines.length > 0 ? (
+                <>
+                  <Link className="primary-button px-4" href={reorderHref}>
+                    Buy again
+                    <ArrowRight aria-hidden="true" size={16} />
+                  </Link>
+                  <p className="text-sm font-medium text-slate-500">
+                    Rebuild checkout with {reorderLines.length} available item
+                    {reorderLines.length === 1 ? "" : "s"} from this order.
+                  </p>
+                </>
+              ) : null}
+              <Link className="secondary-button px-4" href={invoiceHref}>
+                <FileText aria-hidden="true" size={16} />
+                Print invoice
+              </Link>
+              <Link className="secondary-button px-4" href={trackingHref}>
+                <Truck aria-hidden="true" size={16} />
+                Track order
+              </Link>
+            </div>
           </section>
 
           <section className="soft-panel overflow-hidden">

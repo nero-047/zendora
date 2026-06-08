@@ -97,6 +97,23 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
         </label>
 
         <label className="grid gap-2">
+          <span className="label">Compare-at price</span>
+          <input
+            className="field"
+            inputMode="decimal"
+            name="compareAtPrice"
+            placeholder="159.00"
+          />
+          {state.errors?.compareAtPrice ? (
+            <span className="text-xs font-medium text-red-600">
+              {state.errors.compareAtPrice[0]}
+            </span>
+          ) : null}
+        </label>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="grid gap-2">
           <span className="label">Inventory</span>
           <input className="field" name="inventory" defaultValue="24" inputMode="numeric" />
           {state.errors?.inventory ? (
@@ -123,7 +140,7 @@ export function CreateProductForm({ storeId }: { storeId: string }) {
           <textarea
             className="field min-h-28 resize-none"
             name="variantRows"
-            placeholder="Forest | NLS-BAG-001-FOR | 129.00 | 14 | active"
+            placeholder="Forest | NLS-BAG-001-FOR | 129.00 | 159.00 | 14 | active"
           />
           {state.errors?.variantRows ? (
             <span className="text-xs font-medium text-red-600">

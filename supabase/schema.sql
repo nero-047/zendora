@@ -210,6 +210,7 @@ create table if not exists public.products (
   category text,
   description text,
   price_cents integer not null check (price_cents >= 0),
+  compare_at_cents integer check (compare_at_cents is null or compare_at_cents >= 0),
   currency text not null default 'USD',
   inventory_count integer not null default 0 check (inventory_count >= 0),
   image_url text,
@@ -222,6 +223,7 @@ create table if not exists public.products (
 
 alter table public.products add column if not exists sku text;
 alter table public.products add column if not exists category text;
+alter table public.products add column if not exists compare_at_cents integer check (compare_at_cents is null or compare_at_cents >= 0);
 
 create table if not exists public.collections (
   id uuid primary key default gen_random_uuid(),
@@ -261,6 +263,7 @@ create table if not exists public.product_variants (
   option_value text not null,
   sku text,
   price_cents integer not null check (price_cents >= 0),
+  compare_at_cents integer check (compare_at_cents is null or compare_at_cents >= 0),
   currency text not null default 'USD',
   inventory_count integer not null default 0 check (inventory_count >= 0),
   status text not null default 'active' check (status in ('active', 'paused')),
@@ -276,6 +279,7 @@ alter table public.product_variants add column if not exists option_name text no
 alter table public.product_variants add column if not exists option_value text;
 alter table public.product_variants add column if not exists sku text;
 alter table public.product_variants add column if not exists price_cents integer not null default 0 check (price_cents >= 0);
+alter table public.product_variants add column if not exists compare_at_cents integer check (compare_at_cents is null or compare_at_cents >= 0);
 alter table public.product_variants add column if not exists currency text not null default 'USD';
 alter table public.product_variants add column if not exists inventory_count integer not null default 0 check (inventory_count >= 0);
 alter table public.product_variants add column if not exists status text not null default 'active' check (status in ('active', 'paused'));
@@ -284,6 +288,11 @@ alter table public.product_variants add column if not exists sort_order integer 
 update public.products
 set price_cents = 0
 where price_cents < 0;
+
+update public.products
+set compare_at_cents = null
+where compare_at_cents is not null
+and (compare_at_cents < 0 or compare_at_cents <= price_cents);
 
 update public.products
 set inventory_count = 0
@@ -300,6 +309,11 @@ where sort_order < 0;
 update public.product_variants
 set price_cents = 0
 where price_cents < 0;
+
+update public.product_variants
+set compare_at_cents = null
+where compare_at_cents is not null
+and (compare_at_cents < 0 or compare_at_cents <= price_cents);
 
 update public.product_variants
 set inventory_count = 0
@@ -319,6 +333,16 @@ begin
     alter table public.products
     add constraint products_price_nonnegative_check
     check (price_cents >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'products_compare_at_price_check'
+  ) then
+    alter table public.products
+    add constraint products_compare_at_price_check
+    check (compare_at_cents is null or compare_at_cents > price_cents);
   end if;
 
   if not exists (
@@ -359,6 +383,16 @@ begin
     alter table public.product_variants
     add constraint product_variants_price_nonnegative_check
     check (price_cents >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'product_variants_compare_at_price_check'
+  ) then
+    alter table public.product_variants
+    add constraint product_variants_compare_at_price_check
+    check (compare_at_cents is null or compare_at_cents > price_cents);
   end if;
 
   if not exists (

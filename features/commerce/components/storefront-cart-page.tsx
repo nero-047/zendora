@@ -168,7 +168,6 @@ export function StorefrontCartPage({
 
   useEffect(() => {
     if (!hasCheckoutCodes) {
-      setPreview({ status: "idle" });
       return;
     }
 

@@ -1,5 +1,8 @@
 import type { Product } from "@/features/commerce/types";
-import type { StorefrontCatalogFilters } from "@/features/commerce/catalog-filters";
+import {
+  parseStorefrontFilterPriceCents,
+  type StorefrontCatalogFilters,
+} from "@/features/commerce/catalog-filters";
 
 export function getStorefrontProductCategories(products: Product[]) {
   return [
@@ -21,6 +24,25 @@ export function getStorefrontProductInventory(product: Product) {
     : product.inventoryCount;
 }
 
+export function isStorefrontProductOnSale(product: Product) {
+  const activeVariants = product.variants.filter(
+    (variant) => variant.status === "active",
+  );
+
+  if (activeVariants.length > 0) {
+    return activeVariants.some(
+      (variant) =>
+        typeof variant.compareAtCents === "number" &&
+        variant.compareAtCents > variant.priceCents,
+    );
+  }
+
+  return (
+    typeof product.compareAtCents === "number" &&
+    product.compareAtCents > product.priceCents
+  );
+}
+
 function getStorefrontProductSearchText(product: Product) {
   return [
     product.name,
@@ -40,6 +62,12 @@ export function filterStorefrontProducts(input: {
   products: Product[];
 }) {
   const normalizedQuery = input.filters.query.trim().toLowerCase();
+  const minPriceCents = input.filters.minPrice
+    ? parseStorefrontFilterPriceCents(input.filters.minPrice)
+    : null;
+  const maxPriceCents = input.filters.maxPrice
+    ? parseStorefrontFilterPriceCents(input.filters.maxPrice)
+    : null;
 
   const filtered = input.products.filter((product) => {
     const inventory = getStorefrontProductInventory(product);
@@ -50,10 +78,17 @@ export function filterStorefrontProducts(input: {
       input.filters.availability === "all" ||
       (input.filters.availability === "available" && inventory > 0) ||
       (input.filters.availability === "sold-out" && inventory === 0);
+    const matchesPrice =
+      (minPriceCents === null || product.priceCents >= minPriceCents) &&
+      (maxPriceCents === null || product.priceCents <= maxPriceCents);
+    const matchesSale =
+      !input.filters.saleOnly || isStorefrontProductOnSale(product);
 
     return (
       matchesCategory &&
       matchesAvailability &&
+      matchesPrice &&
+      matchesSale &&
       getStorefrontProductSearchText(product).includes(normalizedQuery)
     );
   });

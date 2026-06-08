@@ -14,7 +14,10 @@ import {
 } from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
 import { getRelatedProducts } from "@/features/commerce/product-recommendations";
-import { getProductReviewSummary } from "@/features/commerce/reviews";
+import {
+  getProductReviewDistribution,
+  getProductReviewSummary,
+} from "@/features/commerce/reviews";
 import {
   getProductCanonicalUrl,
   getProductJsonLd,
@@ -26,7 +29,12 @@ import { formatCurrency } from "@/lib/utils";
 
 type ProductPageProps = {
   params: Promise<{ slug: string; productSlug: string }>;
+  searchParams?: Promise<{ variant?: string | string[] }>;
 };
+
+function readFirstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 async function getStoreProduct(slug: string, productSlug: string) {
   const workspace = await getPublicStorefront(slug);
@@ -77,8 +85,12 @@ export async function generateMetadata({
   };
 }
 
-export default async function PublicProductPage({ params }: ProductPageProps) {
+export default async function PublicProductPage({
+  params,
+  searchParams,
+}: ProductPageProps) {
   const { slug, productSlug } = await params;
+  const query = searchParams ? await searchParams : {};
   const data = await getStoreProduct(slug, productSlug);
 
   if (!data) {
@@ -94,9 +106,12 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
     navigationMenus,
   } = data;
   const reviews = productReviews.filter((review) => review.productId === product.id);
+  const approvedReviews = reviews.filter((review) => review.status === "approved");
   const reviewSummary = getProductReviewSummary(reviews);
+  const reviewDistribution = getProductReviewDistribution(reviews);
   const productJsonLd = getProductJsonLd({ store, product, reviewSummary });
   const relatedProducts = getRelatedProducts({ collections, product, products });
+  const initialVariantId = readFirstSearchParam(query.variant);
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -148,6 +163,7 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
           </p>
           <div className="mt-6">
             <ProductDetailActions
+              initialVariantId={initialVariantId}
               product={product}
               products={products}
               storeSlug={store.slug}
@@ -179,50 +195,94 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
             </span>
           ) : null}
         </div>
-        {reviews.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {reviews.slice(0, 6).map((review) => (
-              <article className="soft-panel p-4" key={review.id}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-1 text-slate-950">
-                    {Array.from({ length: 5 }, (_, index) => (
-                      <Star
-                        aria-hidden="true"
-                        className={
-                          index < review.rating
-                            ? "fill-slate-950 text-slate-950"
-                            : "text-slate-300"
-                        }
-                        key={index}
-                        size={15}
-                      />
-                    ))}
-                  </div>
-                  <time
-                    className="text-xs font-semibold text-slate-500"
-                    dateTime={review.reviewedAt}
-                  >
-                    {new Date(review.reviewedAt).toLocaleDateString("en-US")}
-                  </time>
-                </div>
-                {review.title ? (
-                  <h3 className="mt-3 text-sm font-semibold text-slate-950">
-                    {review.title}
-                  </h3>
-                ) : null}
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {review.body}
-                </p>
-                <p className="mt-3 text-xs font-semibold text-slate-500">
-                  {review.customerName}
-                </p>
-                {review.merchantReply ? (
-                  <p className="mt-3 rounded-[8px] bg-white/75 p-3 text-sm leading-6 text-slate-600">
-                    {review.merchantReply}
+        {approvedReviews.length > 0 ? (
+          <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+            <div className="soft-panel p-4">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">
+                    Rating breakdown
                   </p>
-                ) : null}
-              </article>
-            ))}
+                  <p className="mt-1 text-3xl font-semibold text-slate-950">
+                    {reviewSummary.averageRating}
+                  </p>
+                </div>
+                <span className="status-pill">
+                  {reviewSummary.reviewCount} verified
+                </span>
+              </div>
+              <div className="mt-4 grid gap-2">
+                {reviewDistribution.map((bucket) => (
+                  <div
+                    className="grid grid-cols-[64px_1fr_36px] items-center gap-3 text-sm"
+                    key={bucket.rating}
+                  >
+                    <span className="font-semibold text-slate-600">
+                      {bucket.rating} stars
+                    </span>
+                    <span className="h-2 overflow-hidden rounded-full bg-slate-200">
+                      <span
+                        className="block h-full rounded-full bg-slate-950"
+                        style={{ width: `${bucket.percentage}%` }}
+                      />
+                    </span>
+                    <span className="text-right font-semibold text-slate-500">
+                      {bucket.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {approvedReviews.slice(0, 6).map((review) => (
+                <article className="soft-panel p-4" key={review.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1 text-slate-950">
+                      {Array.from({ length: 5 }, (_, index) => (
+                        <Star
+                          aria-hidden="true"
+                          className={
+                            index < review.rating
+                              ? "fill-slate-950 text-slate-950"
+                              : "text-slate-300"
+                          }
+                          key={index}
+                          size={15}
+                        />
+                      ))}
+                    </div>
+                    <time
+                      className="text-xs font-semibold text-slate-500"
+                      dateTime={review.reviewedAt}
+                    >
+                      {new Date(review.reviewedAt).toLocaleDateString("en-US")}
+                    </time>
+                  </div>
+                  <span className="status-pill mt-3 w-fit">
+                    Verified purchase
+                  </span>
+                  {review.title ? (
+                    <h3 className="mt-3 text-sm font-semibold text-slate-950">
+                      {review.title}
+                    </h3>
+                  ) : null}
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {review.body}
+                  </p>
+                  <p className="mt-3 text-xs font-semibold text-slate-500">
+                    {review.customerName}
+                  </p>
+                  {review.merchantReply ? (
+                    <div className="mt-3 rounded-[8px] bg-white/75 p-3 text-sm leading-6 text-slate-600">
+                      <p className="font-semibold text-slate-950">
+                        Merchant reply
+                      </p>
+                      <p className="mt-1">{review.merchantReply}</p>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
         ) : (
           <p className="soft-panel p-4 text-sm text-slate-500">

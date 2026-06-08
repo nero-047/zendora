@@ -21,6 +21,7 @@ export function EditProductForm({
         variant.optionValue,
         variant.sku || "",
         (variant.priceCents / 100).toFixed(2),
+        variant.compareAtCents ? (variant.compareAtCents / 100).toFixed(2) : "",
         String(variant.inventoryCount),
         variant.status,
       ].join(" | "),
@@ -117,6 +118,27 @@ export function EditProductForm({
         </label>
 
         <label className="grid gap-2">
+          <span className="label">Compare-at price</span>
+          <input
+            className="field"
+            defaultValue={
+              product.compareAtCents
+                ? (product.compareAtCents / 100).toFixed(2)
+                : ""
+            }
+            inputMode="decimal"
+            name="compareAtPrice"
+          />
+          {state.errors?.compareAtPrice ? (
+            <span className="text-xs font-medium text-red-600">
+              {state.errors.compareAtPrice[0]}
+            </span>
+          ) : null}
+        </label>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="grid gap-2">
           <span className="label">Inventory</span>
           <input
             className="field"
@@ -154,7 +176,7 @@ export function EditProductForm({
             className="field min-h-28 resize-none"
             defaultValue={variantRows}
             name="variantRows"
-            placeholder="Forest | NLS-BAG-001-FOR | 129.00 | 14 | active"
+            placeholder="Forest | NLS-BAG-001-FOR | 129.00 | 159.00 | 14 | active"
           />
           {state.errors?.variantRows ? (
             <span className="text-xs font-medium text-red-600">

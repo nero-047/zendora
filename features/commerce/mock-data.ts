@@ -353,6 +353,7 @@ export const mockProductVariants: ProductVariant[] = [
     optionValue: "Brushed steel",
     sku: "NLS-BOT-003-STL",
     priceCents: 4200,
+    compareAtCents: 5000,
     currency: "USD",
     inventoryCount: 4,
     status: "active",
@@ -367,6 +368,7 @@ export const mockProductVariants: ProductVariant[] = [
     optionValue: "Onyx",
     sku: "NLS-BOT-003-ONX",
     priceCents: 4600,
+    compareAtCents: 5200,
     currency: "USD",
     inventoryCount: 2,
     status: "active",
@@ -466,6 +468,7 @@ export const mockProducts: Product[] = [
     description:
       "Insulated stainless bottle with a soft-touch finish and leakproof carry loop.",
     priceCents: 4200,
+    compareAtCents: 5000,
     currency: "USD",
     inventoryCount: 6,
     imageUrl:

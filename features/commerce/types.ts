@@ -269,6 +269,7 @@ export type Product = {
   category?: string;
   description: string;
   priceCents: number;
+  compareAtCents?: number;
   currency: string;
   inventoryCount: number;
   imageUrl: string;
@@ -286,6 +287,7 @@ export type ProductVariant = {
   optionValue: string;
   sku?: string;
   priceCents: number;
+  compareAtCents?: number;
   currency: string;
   inventoryCount: number;
   status: ProductVariantStatus;

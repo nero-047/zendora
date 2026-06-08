@@ -35,6 +35,23 @@ export function getProductReviewSummary(
   };
 }
 
+export function getProductReviewDistribution(
+  reviews: Pick<ProductReview, "rating" | "status">[],
+) {
+  const approvedReviews = reviews.filter((review) => review.status === "approved");
+  const reviewCount = approvedReviews.length;
+
+  return [5, 4, 3, 2, 1].map((rating) => {
+    const count = approvedReviews.filter((review) => review.rating === rating).length;
+
+    return {
+      count,
+      percentage: reviewCount > 0 ? Math.round((count / reviewCount) * 100) : 0,
+      rating,
+    };
+  });
+}
+
 export function canCustomerReviewOrderItem(input: {
   orderStatus: OrderStatus;
   paymentStatus: PaymentStatus;
