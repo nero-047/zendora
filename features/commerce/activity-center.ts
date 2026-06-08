@@ -96,6 +96,7 @@ export const notificationTypeLabels: Record<NotificationType, string> = {
   payment_receipt: "Payment receipt",
   fulfillment_update: "Fulfillment update",
   checkout_recovery: "Checkout recovery",
+  customer_message: "Customer message",
   product_review_received: "Product review received",
   product_review_updated: "Product review update",
   gift_card_created: "Gift card created",
@@ -155,6 +156,11 @@ const resourceLabels: Record<string, string> = {
   abandoned_checkout: "Abandoned checkout",
   collection: "Collection",
   customer_profile: "Customer",
+  customer_message: "Customer message",
+  customer_cancellation_request: "Cancellation request",
+  customer_delivery_request: "Delivery request",
+  customer_product_question: "Product question",
+  customer_privacy_request: "Privacy request",
   discount_code: "Discount",
   gift_card: "Gift card",
   order: "Order",
@@ -199,10 +205,16 @@ function getResourceHref(input: {
 }) {
   const { storeId, resourceType, resourceId, metadata } = input;
   const orderId = getStringMetadataValue(metadata, "orderId");
+  const productId = getStringMetadataValue(metadata, "productId");
   const customerEmail = getStringMetadataValue(metadata, "customerEmail");
 
-  if (resourceType === "order" && resourceId) {
-    return `/dashboard/stores/${storeId}/orders/${resourceId}`;
+  if (
+    (resourceType === "order" ||
+      resourceType === "customer_cancellation_request" ||
+      resourceType === "customer_delivery_request") &&
+    (resourceId || orderId)
+  ) {
+    return `/dashboard/stores/${storeId}/orders/${resourceId || orderId}`;
   }
 
   if (
@@ -217,7 +229,17 @@ function getResourceHref(input: {
     return `/dashboard/stores/${storeId}/products/${resourceId}/edit`;
   }
 
-  if (resourceType === "customer_profile" && customerEmail) {
+  if (resourceType === "customer_product_question" && (resourceId || productId)) {
+    return `/dashboard/stores/${storeId}/products/${
+      resourceId || productId
+    }/edit`;
+  }
+
+  if (
+    (resourceType === "customer_profile" ||
+      resourceType === "customer_privacy_request") &&
+    customerEmail
+  ) {
     return `/dashboard/stores/${storeId}/customers/${encodeURIComponent(
       customerEmail,
     )}`;

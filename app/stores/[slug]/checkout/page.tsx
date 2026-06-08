@@ -19,9 +19,22 @@ type CheckoutPageProps = {
   params: Promise<{ slug: string }>;
   searchParams?: Promise<{
     cart?: string | string[];
+    discountCode?: string | string[];
+    giftCardCode?: string | string[];
     recovery?: string | string[];
   }>;
 };
+
+function readFirstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeCheckoutCodeParam(
+  value: string | string[] | undefined,
+  maxLength: number,
+) {
+  return readFirstSearchParam(value)?.trim().slice(0, maxLength) || undefined;
+}
 
 export async function generateMetadata({
   params,
@@ -60,10 +73,10 @@ export default async function StoreCheckoutPage({
 }: CheckoutPageProps) {
   const { slug } = await params;
   const query = searchParams ? await searchParams : {};
-  const recoveryToken = Array.isArray(query.recovery)
-    ? query.recovery[0]
-    : query.recovery;
-  const cartParam = Array.isArray(query.cart) ? query.cart[0] : query.cart;
+  const recoveryToken = readFirstSearchParam(query.recovery);
+  const cartParam = readFirstSearchParam(query.cart);
+  const initialDiscountCode = normalizeCheckoutCodeParam(query.discountCode, 32);
+  const initialGiftCardCode = normalizeCheckoutCodeParam(query.giftCardCode, 40);
   const workspace = await getPublicStorefront(slug);
 
   if (!workspace) {
@@ -99,6 +112,8 @@ export default async function StoreCheckoutPage({
         initialCartKey={initialCartKey}
         initialCustomerEmail={recoveredCheckout?.checkout.customerEmail}
         initialCustomerName={recoveredCheckout?.checkout.customerName}
+        initialDiscountCode={initialDiscountCode}
+        initialGiftCardCode={initialGiftCardCode}
         initialRecoveryToken={recoveredCheckout?.checkout.recoveryToken}
         products={products}
         shippingZones={shippingZones}

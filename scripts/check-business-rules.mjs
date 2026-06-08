@@ -84,6 +84,11 @@ const businessRules = loadTsModule("features/commerce/business-rules.ts");
 const analytics = loadTsModule("features/commerce/analytics.ts");
 const orderStatus = loadTsModule("features/commerce/order-status.ts");
 const orderHelpers = loadTsModule("features/commerce/orders.ts");
+const orderCancellation = loadTsModule("features/commerce/order-cancellation.ts");
+const orderDeliveryRequest = loadTsModule(
+  "features/commerce/order-delivery-request.ts",
+);
+const orderReorder = loadTsModule("features/commerce/order-reorder.ts");
 const policies = loadTsModule("features/commerce/policies.ts");
 const storePages = loadTsModule("features/commerce/store-pages.ts");
 const seo = loadTsModule("features/commerce/seo.ts");
@@ -101,6 +106,14 @@ const navigation = loadTsModule("features/commerce/navigation.ts");
 const cartPermalinks = loadTsModule("features/commerce/cart-permalinks.ts");
 const catalogFilters = loadTsModule("features/commerce/catalog-filters.ts");
 const pagination = loadTsModule("features/commerce/pagination.ts");
+const productCardActions = loadTsModule("features/commerce/product-card-actions.ts");
+const productCompare = loadTsModule("features/commerce/product-compare.ts");
+const productQuestions = loadTsModule("features/commerce/product-questions.ts");
+const productRecommendations = loadTsModule(
+  "features/commerce/product-recommendations.ts",
+);
+const recentlyViewed = loadTsModule("features/commerce/recently-viewed.ts");
+const wishlist = loadTsModule("features/commerce/wishlist.ts");
 const launchReadiness = loadTsModule("features/commerce/launch-readiness.ts");
 const storeInsights = loadTsModule("features/commerce/store-insights.ts");
 const activityCenter = loadTsModule("features/commerce/activity-center.ts");
@@ -237,6 +250,354 @@ const tests = [
         productHealth.getProductHealth(makeProduct({ status: "draft" })).status,
         "not_listed",
         "draft products should be classified as not listed",
+      );
+    },
+  ],
+  [
+    "product recommendations prefer shared collections before fallback add-ons",
+    () => {
+      const product = mockData.mockProducts.find(
+        (item) => item.id === "demo-product-carry-pack",
+      );
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+      const collections = mockData.mockCollections.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+
+      assertTrue(Boolean(product), "demo carry pack should exist");
+
+      const relatedProducts = productRecommendations.getRelatedProducts({
+        collections,
+        product,
+        products,
+      });
+
+      assertDeepEqual(
+        relatedProducts.map((item) => item.product.id),
+        [
+          "demo-product-hydra-bottle",
+          "demo-product-trail-watch",
+          "demo-product-sprint-shoe",
+        ],
+        "related products should rank shared collection items before in-stock fallbacks",
+      );
+      assertEqual(
+        relatedProducts[0].reason,
+        "Pairs from Everyday Carry",
+        "shared collection recommendations should explain the merchandising reason",
+      );
+      assertEqual(
+        relatedProducts[2].reason,
+        "Recommended add-on",
+        "fallback recommendations should use an add-on reason",
+      );
+    },
+  ],
+  [
+    "product question helpers create merchant triage subjects and previews",
+    () => {
+      assertDeepEqual(
+        productQuestions.productQuestionTopics,
+        ["sizing", "compatibility", "materials", "shipping", "other"],
+        "product question topics should preserve storefront triage order",
+      );
+      assertEqual(
+        productQuestions.createProductQuestionSubject({
+          productName: "Field Carry Pack",
+          storeName: "Northline Supply",
+          topic: "compatibility",
+        }),
+        "Northline Supply product question: Field Carry Pack / Compatibility",
+        "product question subjects should include store, product, and topic",
+      );
+      assertEqual(
+        productQuestions.createProductQuestionPreview({
+          message: "  Does this fit a 15 inch laptop?  ",
+          productName: "Field Carry Pack",
+          topic: "sizing",
+        }),
+        "Does this fit a 15 inch laptop?",
+        "product question previews should normalize customer text",
+      );
+      assertEqual(
+        productQuestions.createProductQuestionPreview({
+          message: "",
+          productName: "Field Carry Pack",
+          topic: "materials",
+        }),
+        "Customer asked about Field Carry Pack: Materials or care.",
+        "product question previews should fall back to product and topic details",
+      );
+      assertEqual(
+        productQuestions.createProductQuestionPreview({
+          maxLength: 18,
+          message: "This customer question is intentionally long.",
+          productName: "Field Carry Pack",
+          topic: "other",
+        }),
+        "This customer q...",
+        "product question previews should truncate long messages",
+      );
+    },
+  ],
+  [
+    "product comparison parses selected products and builds storefront metrics",
+    () => {
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+      const keys = productCompare.parseCompareProductKeys([
+        " field-carry-pack,hydra-bottle ",
+        "field-carry-pack,trail-watch,sprint-shoe,extra",
+      ]);
+      const compareProducts = productCompare.getCompareProducts({
+        keys,
+        products,
+      });
+      const metrics = productCompare.getProductCompareMetrics(compareProducts);
+      const priceMetric = metrics.find((metric) => metric.id === "price");
+      const inventoryMetric = metrics.find((metric) => metric.id === "inventory");
+
+      assertDeepEqual(
+        keys,
+        ["field-carry-pack", "hydra-bottle", "trail-watch", "sprint-shoe"],
+        "compare query parsing should trim, split, dedupe, and cap product keys",
+      );
+      assertDeepEqual(
+        compareProducts.map((product) => product.slug),
+        ["field-carry-pack", "hydra-bottle", "trail-watch"],
+        "compare products should follow selected slug order and cap displayed products",
+      );
+      assertEqual(
+        priceMetric?.values["demo-product-hydra-bottle"],
+        "4200",
+        "compare metrics should expose product prices",
+      );
+      assertEqual(
+        inventoryMetric?.values["demo-product-carry-pack"],
+        "32",
+        "compare metrics should use sellable variant inventory when present",
+      );
+    },
+  ],
+  [
+    "wishlist normalization preserves known products and browser storage keys",
+    () => {
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+
+      assertEqual(
+        wishlist.getWishlistStorageKey("northline-supply"),
+        "zendora-wishlist:northline-supply",
+        "wishlist storage should be scoped to the storefront slug",
+      );
+      assertDeepEqual(
+        wishlist.normalizeWishlistProductIds(
+          [
+            "demo-product-hydra-bottle",
+            "missing-product",
+            "demo-product-hydra-bottle",
+            "demo-product-carry-pack",
+            "demo-product-trail-watch",
+          ],
+          products,
+          2,
+        ),
+        ["demo-product-hydra-bottle", "demo-product-carry-pack"],
+        "wishlist normalization should dedupe, reject unknown products, and cap length",
+      );
+    },
+  ],
+  [
+    "recently viewed history records newest known products first",
+    () => {
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+
+      assertEqual(
+        recentlyViewed.getRecentlyViewedStorageKey("northline-supply"),
+        "zendora-recently-viewed:northline-supply",
+        "recently viewed storage should be scoped to the storefront slug",
+      );
+      assertDeepEqual(
+        recentlyViewed.normalizeRecentlyViewedProductIds(
+          [
+            "demo-product-trail-watch",
+            "missing-product",
+            "demo-product-trail-watch",
+            "demo-product-hydra-bottle",
+          ],
+          products,
+        ),
+        ["demo-product-trail-watch", "demo-product-hydra-bottle"],
+        "recently viewed normalization should dedupe and reject unknown products",
+      );
+      assertDeepEqual(
+        recentlyViewed.recordRecentlyViewedProductId({
+          currentProductIds: [
+            "demo-product-hydra-bottle",
+            "demo-product-carry-pack",
+          ],
+          productId: "demo-product-carry-pack",
+          products,
+          limit: 2,
+        }),
+        ["demo-product-carry-pack", "demo-product-hydra-bottle"],
+        "recording a product view should move it to the front and enforce the limit",
+      );
+    },
+  ],
+  [
+    "product grid compare links include the selected product first",
+    () => {
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor" && item.status === "active",
+      );
+      const product = products.find(
+        (item) => item.id === "demo-product-hydra-bottle",
+      );
+
+      assertTrue(Boolean(product), "demo hydra bottle should exist");
+      assertEqual(
+        productCardActions.getProductCardCompareHref({
+          product,
+          products,
+          storeSlug: "northline-supply",
+        }),
+        "/stores/northline-supply/compare?products=hydra-bottle,field-carry-pack,trail-watch",
+        "product-card compare links should keep the selected product first and use nearby products",
+      );
+    },
+  ],
+  [
+    "order receipts rebuild checkout permalinks for buy-again",
+    () => {
+      const order = mockData.mockOrders.find(
+        (item) => item.id === "demo-order-1001",
+      );
+      const products = mockData.mockProducts.filter(
+        (item) => item.storeId === "demo-store-outdoor",
+      );
+
+      assertTrue(Boolean(order), "demo receipt order should exist");
+
+      const reorderLines = orderReorder.getReorderCartLines(order, products);
+
+      assertDeepEqual(
+        reorderLines,
+        [
+          {
+            productId: "demo-product-trail-watch",
+            quantity: 1,
+            variantId: undefined,
+          },
+          {
+            productId: "demo-product-carry-pack",
+            quantity: 1,
+            variantId: "demo-variant-carry-pack-forest",
+          },
+        ],
+        "buy-again lines should preserve active products and variants from the receipt",
+      );
+      assertTrue(
+        orderReorder
+          .getReorderCheckoutHref({
+            order,
+            products,
+            storeSlug: "northline-supply",
+          })
+          .startsWith("/stores/northline-supply/checkout?cart="),
+        "buy-again links should point to checkout with an encoded cart",
+      );
+    },
+  ],
+  [
+    "order cancellation requests only queue eligible unfulfilled orders",
+    () => {
+      const order = mockData.mockOrders.find(
+        (item) => item.id === "demo-order-1001",
+      );
+
+      assertTrue(Boolean(order), "demo cancellation order should exist");
+      assertTrue(
+        orderCancellation.getOrderCancellationEligibility(order).eligible,
+        "unfulfilled paid demo orders should allow cancellation review requests",
+      );
+      assertFalse(
+        orderCancellation.getOrderCancellationEligibility({
+          ...order,
+          status: "fulfilled",
+          fulfilledAt: "2026-06-01T10:00:00.000Z",
+        }).eligible,
+        "fulfilled orders should not allow cancellation review requests",
+      );
+      assertEqual(
+        orderCancellation.createCancellationSubject({
+          reason: "changed_mind",
+          storeName: "Northline Supply",
+        }),
+        "Northline Supply cancellation request: Changed mind",
+        "cancellation subjects should include the store and reason",
+      );
+      assertEqual(
+        orderCancellation.createCancellationPreview({
+          message: "",
+          orderId: "demo-order-1001",
+          reason: "shipping_timeline",
+        }),
+        "Customer requested cancellation for demo-order-1001: Shipping timeline.",
+        "cancellation previews should fall back to order and reason details",
+      );
+    },
+  ],
+  [
+    "order delivery requests only queue before fulfillment starts",
+    () => {
+      const order = mockData.mockOrders.find(
+        (item) => item.id === "demo-order-1001",
+      );
+
+      assertTrue(Boolean(order), "demo delivery request order should exist");
+      assertTrue(
+        orderDeliveryRequest.getOrderDeliveryRequestEligibility(order).eligible,
+        "unfulfilled demo orders should allow delivery update requests",
+      );
+      assertFalse(
+        orderDeliveryRequest.getOrderDeliveryRequestEligibility({
+          ...order,
+          fulfillments: [
+            {
+              id: "fulfillment_started",
+              storeId: order.storeId,
+              orderId: order.id,
+              clerkUserId: "demo_user_zendora",
+              status: "created",
+              createdAt: "2026-06-01T10:00:00.000Z",
+            },
+          ],
+        }).eligible,
+        "orders with active fulfillment should not allow delivery update requests",
+      );
+      assertEqual(
+        orderDeliveryRequest.createDeliveryRequestSubject({
+          requestType: "delivery_instructions",
+          storeName: "Northline Supply",
+        }),
+        "Northline Supply delivery request: Delivery instructions",
+        "delivery request subjects should include the store and request type",
+      );
+      assertEqual(
+        orderDeliveryRequest.createDeliveryRequestPreview({
+          message: "",
+          orderId: "demo-order-1001",
+          requestType: "hold_for_pickup",
+        }),
+        "Customer requested hold for pickup for demo-order-1001.",
+        "delivery request previews should fall back to order and request type details",
       );
     },
   ],
@@ -1199,6 +1560,11 @@ const tests = [
         "all",
         "invalid payment filters should fall back to all",
       );
+      assertEqual(
+        orderHelpers.parseOrderFinancialStatusFilter("broken"),
+        "all",
+        "invalid financial filters should fall back to all",
+      );
       assertDeepEqual(
         orderHelpers
           .filterOrders({
@@ -1251,6 +1617,18 @@ const tests = [
         orderHelpers
           .filterOrders({
             orders: orderRows,
+            query: "",
+            status: "all",
+            financialStatus: "open_balance",
+          })
+          .map((order) => order.id),
+        ["order_pending_high"],
+        "financial filters should isolate orders with open balances",
+      );
+      assertDeepEqual(
+        orderHelpers
+          .filterOrders({
+            orders: orderRows,
             query: "packing slip",
             status: "all",
           })
@@ -1262,6 +1640,11 @@ const tests = [
         orderHelpers.getOrderStats(orderRows).highRiskOrders,
         1,
         "order stats should count high-risk orders",
+      );
+      assertEqual(
+        orderHelpers.getOrderStats(orderRows).openBalanceOrders,
+        1,
+        "order stats should count open-balance orders",
       );
     },
   ],

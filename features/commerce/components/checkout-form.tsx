@@ -30,8 +30,50 @@ type CheckoutFormProps = {
   initialCartKey?: string;
   initialCustomerEmail?: string;
   initialCustomerName?: string;
+  initialDiscountCode?: string;
+  initialGiftCardCode?: string;
   initialRecoveryToken?: string;
 };
+
+type CheckoutPreviewTotals = ReturnType<typeof calculateCheckoutTotals>;
+
+type CheckoutPreviewState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { error: string; status: "error" }
+  | {
+      discountCode: string | null;
+      giftCardCode: string | null;
+      status: "success";
+      totals: CheckoutPreviewTotals;
+    };
+
+function getShippingCountryOptions(shippingZones: ShippingZone[]) {
+  const countries = new Map<string, string>();
+
+  countries.set("united states", "United States");
+
+  for (const zone of shippingZones) {
+    const displayCountries = zone.countries.filter((country) => {
+      const trimmed = country.trim();
+
+      return trimmed.length > 2 && !/^[A-Z]{2,3}$/.test(trimmed);
+    });
+    const zoneCountries = displayCountries.length > 0
+      ? displayCountries
+      : zone.countries;
+
+    for (const country of zoneCountries) {
+      const trimmed = country.trim();
+
+      if (trimmed) {
+        countries.set(trimmed.toLowerCase(), trimmed);
+      }
+    }
+  }
+
+  return [...countries.values()];
+}
 
 export function CheckoutForm({
   checkoutSessionId,
@@ -46,14 +88,20 @@ export function CheckoutForm({
   initialCartKey,
   initialCustomerEmail,
   initialCustomerName,
+  initialDiscountCode,
+  initialGiftCardCode,
   initialRecoveryToken,
 }: CheckoutFormProps) {
   const router = useRouter();
   const [customerName, setCustomerName] = useState(initialCustomerName || "");
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail || "");
+  const [discountCode, setDiscountCode] = useState(initialDiscountCode || "");
+  const [giftCardCode, setGiftCardCode] = useState(initialGiftCardCode || "");
+  const [preview, setPreview] = useState<CheckoutPreviewState>({ status: "idle" });
   const [recoveryToken, setRecoveryToken] = useState(initialRecoveryToken || "");
   const restoredInitialCartKeyRef = useRef("");
   const [shippingCountry, setShippingCountry] = useState("United States");
+  const shippingCountryOptions = getShippingCountryOptions(shippingZones);
   const { cartItems, clearCart, replaceCart, updateQuantity } = useStoreCart(
     storeSlug,
     products,
@@ -126,6 +174,12 @@ export function CheckoutForm({
   }));
   const checkoutPayloadJson = JSON.stringify(checkoutPayload);
   const isEmpty = cartItems.length === 0;
+  const hasCheckoutCodes = Boolean(
+    discountCode.trim() || giftCardCode.trim(),
+  );
+  const activePreview = hasCheckoutCodes && !isEmpty ? preview : null;
+  const previewTotals =
+    activePreview?.status === "success" ? activePreview.totals : checkoutTotals;
 
   useEffect(() => {
     const email = customerEmail.trim();
@@ -180,6 +234,86 @@ export function CheckoutForm({
     customerName,
     isEmpty,
     recoveryToken,
+    storeSlug,
+  ]);
+
+  useEffect(() => {
+    if (!hasCheckoutCodes || isEmpty) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setPreview({ status: "loading" });
+
+      try {
+        const response = await fetch(
+          `/api/stores/${encodeURIComponent(storeSlug)}/checkout-preview`,
+          {
+            body: JSON.stringify({
+              cart: JSON.parse(checkoutPayloadJson),
+              discountCode: discountCode || undefined,
+              giftCardCode: giftCardCode || undefined,
+              shippingCountry,
+            }),
+            headers: {
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+            signal: controller.signal,
+          },
+        );
+        const payload = await response.json().catch(() => null);
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (!response.ok || !payload?.ok) {
+          setPreview({
+            error:
+              typeof payload?.error === "string"
+                ? payload.error
+                : "Checkout code preview is unavailable.",
+            status: "error",
+          });
+          return;
+        }
+
+        setPreview({
+          discountCode:
+            typeof payload.discountCode === "string"
+              ? payload.discountCode
+              : null,
+          giftCardCode:
+            typeof payload.giftCardCode === "string"
+              ? payload.giftCardCode
+              : null,
+          status: "success",
+          totals: payload.totals as CheckoutPreviewTotals,
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn("Checkout code preview failed", error);
+          setPreview({
+            error: "Checkout code preview is unavailable.",
+            status: "error",
+          });
+        }
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    checkoutPayloadJson,
+    discountCode,
+    giftCardCode,
+    hasCheckoutCodes,
+    isEmpty,
+    shippingCountry,
     storeSlug,
   ]);
 
@@ -343,14 +477,20 @@ export function CheckoutForm({
           </label>
 
           <label className="grid gap-2">
-            <span className="label">Country</span>
-            <input
+            <span className="label">Country / region</span>
+            <select
               autoComplete="shipping country-name"
               className="field"
               name="shippingCountry"
               onChange={(event) => setShippingCountry(event.target.value)}
               value={shippingCountry}
-            />
+            >
+              {shippingCountryOptions.map((country) => (
+                <option key={country} value={country}>
+                  {country}
+                </option>
+              ))}
+            </select>
             {state.errors?.shippingCountry ? (
               <span className="text-xs font-medium text-red-600">
                 {state.errors.shippingCountry[0]}
@@ -392,7 +532,9 @@ export function CheckoutForm({
           <input
             className="field uppercase"
             name="discountCode"
+            onChange={(event) => setDiscountCode(event.target.value.toUpperCase())}
             placeholder="WELCOME10"
+            value={discountCode}
           />
           {state.errors?.discountCode ? (
             <span className="text-xs font-medium text-red-600">
@@ -406,7 +548,9 @@ export function CheckoutForm({
           <input
             className="field uppercase"
             name="giftCardCode"
+            onChange={(event) => setGiftCardCode(event.target.value.toUpperCase())}
             placeholder="SUMMER-5000"
+            value={giftCardCode}
           />
           {state.errors?.giftCardCode ? (
             <span className="text-xs font-medium text-red-600">
@@ -547,9 +691,25 @@ export function CheckoutForm({
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold text-slate-500">Subtotal</span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(checkoutTotals.subtotalCents, currency)}
+                {formatCurrency(previewTotals.subtotalCents, currency)}
               </span>
             </div>
+            {activePreview?.status === "success" &&
+            previewTotals.discountCents > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-emerald-700">
+                  Discount
+                  {activePreview.discountCode ? (
+                    <span className="block text-xs font-medium text-emerald-600">
+                      {activePreview.discountCode}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-sm font-semibold text-emerald-700">
+                  -{formatCurrency(previewTotals.discountCents, currency)}
+                </span>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold text-slate-500">
                 Shipping
@@ -560,21 +720,57 @@ export function CheckoutForm({
                 ) : null}
               </span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(checkoutTotals.shippingCents, currency)}
+                {formatCurrency(previewTotals.shippingCents, currency)}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold text-slate-500">Tax</span>
               <span className="text-sm font-semibold text-slate-950">
-                {formatCurrency(checkoutTotals.taxCents, currency)}
+                {formatCurrency(previewTotals.taxCents, currency)}
               </span>
             </div>
+            {activePreview?.status === "success" &&
+            previewTotals.giftCardCents > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-emerald-700">
+                  Gift card
+                  {activePreview.giftCardCode ? (
+                    <span className="block text-xs font-medium text-emerald-600">
+                      {activePreview.giftCardCode}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-sm font-semibold text-emerald-700">
+                  -{formatCurrency(previewTotals.giftCardCents, currency)}
+                </span>
+              </div>
+            ) : null}
+            {activePreview?.status === "loading" ? (
+              <p className="text-xs font-semibold text-slate-500">
+                Checking promo and gift card codes...
+              </p>
+            ) : null}
+            {activePreview?.status === "error" ? (
+              <p className="text-xs font-semibold text-red-600">
+                {activePreview.error}
+              </p>
+            ) : null}
             <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
               <span className="text-sm font-semibold text-slate-500">Estimated total</span>
               <span className="text-xl font-semibold text-slate-950">
-                {formatCurrency(checkoutTotals.totalCents, currency)}
+                {formatCurrency(previewTotals.totalCents, currency)}
               </span>
             </div>
+            {activePreview?.status === "success" && hasCheckoutCodes ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-slate-500">
+                  Amount due
+                </span>
+                <span className="text-xl font-semibold text-slate-950">
+                  {formatCurrency(previewTotals.amountDueCents, currency)}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
       </aside>

@@ -92,6 +92,8 @@ export default async function ActivityPage({
     basePath: `${activityBasePath}/export`,
     params: query,
   });
+  const outboxExportHref = `${activityBasePath}/outbox/export`;
+  const supportExportHref = `${activityBasePath}/support/export`;
   const criticalCount = activityItems.filter(
     (item) => item.priority === "critical",
   ).length;
@@ -153,6 +155,20 @@ export default async function ActivityPage({
             >
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={outboxExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Outbox CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={supportExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Support CSV
             </Link>
             <span className="status-pill">
               {filteredItems.length} matching events

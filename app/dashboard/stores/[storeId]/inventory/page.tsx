@@ -122,6 +122,25 @@ export default async function InventoryPage({
     basePath: `${inventoryBasePath}/export`,
     params: query,
   });
+  const reorderExportHref = buildDashboardExportHref({
+    basePath: `${inventoryBasePath}/reorder/export`,
+    params: {
+      ...query,
+      inventory:
+        selectedUrgency === "all" ? "action_required" : selectedUrgency,
+      sort: selectedSort === "urgency" ? "reorder_desc" : selectedSort,
+    },
+  });
+  const purchaseOrderExportHref = buildDashboardExportHref({
+    basePath: `${inventoryBasePath}/purchase-order/export`,
+    params: {
+      ...query,
+      sort: selectedSort === "urgency" ? "reorder_desc" : selectedSort,
+    },
+  });
+  const restockAlertsExportHref = `${inventoryBasePath}/restock-alerts/export`;
+  const valuationExportHref = `${inventoryBasePath}/valuation/export`;
+  const adjustmentExportHref = `${inventoryBasePath}/adjustments/export`;
   const adjustmentHistory = [...inventoryAdjustments].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
@@ -190,6 +209,34 @@ export default async function InventoryPage({
             >
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={reorderExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Reorder CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={purchaseOrderExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              PO CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={restockAlertsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Alerts CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={valuationExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Value CSV
             </Link>
             <Link
               className="secondary-button px-4 text-sm"
@@ -417,14 +464,20 @@ export default async function InventoryPage({
       ) : null}
 
       <section className="soft-panel overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-            <History aria-hidden="true" size={18} />
-            Inventory history
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Recent restocks, counts, returns, damage removals, and manual edits.
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <History aria-hidden="true" size={18} />
+              Inventory history
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Recent restocks, counts, returns, damage removals, and manual edits.
+            </p>
+          </div>
+          <Link className="secondary-button min-h-10 px-3 text-sm" href={adjustmentExportHref}>
+            <Download aria-hidden="true" size={16} />
+            History CSV
+          </Link>
         </div>
         {adjustmentHistory.length > 0 ? (
           adjustmentHistory.slice(0, 12).map((adjustment) => {

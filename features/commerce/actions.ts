@@ -45,6 +45,7 @@ import {
   getAvailableStorePageSlug,
   getAvailableStoreSlug,
   getLivePublicStorefront,
+  getPublicOrderLookup,
   getPublicOrderReceipt,
   getStoreWorkspace,
   upsertProfileForUser,
@@ -317,6 +318,15 @@ const checkoutSchema = z.object({
     .max(96, "Checkout session is invalid.")
     .optional(),
   cart: z.array(checkoutLineSchema).min(1, "Add at least one item."),
+});
+
+const orderLookupSchema = z.object({
+  orderId: z
+    .string()
+    .trim()
+    .min(4, "Add the order ID.")
+    .max(96, "Order ID is too long."),
+  customerEmail: z.string().trim().email("Add the email used for the order."),
 });
 
 const discountSchema = z.object({
@@ -4954,6 +4964,51 @@ export async function createCheckoutOrderAction(
       orderStatusUrl,
     },
   };
+}
+
+export async function lookupCustomerOrderAction(
+  storeSlug: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = orderLookupSchema.safeParse({
+    orderId: formData.get("orderId"),
+    customerEmail: formData.get("customerEmail"),
+  });
+
+  if (!parsed.success) {
+    return formError("Check the order lookup details.", parsed.error.flatten().fieldErrors);
+  }
+
+  const normalizedEmail = parsed.data.customerEmail.trim().toLowerCase();
+  const rateLimitError = await consumePublicServerActionRateLimit(
+    `order-lookup:${storeSlug}:${normalizedEmail}`,
+    publicCustomerActionRateLimit,
+  );
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  const lookup = await getPublicOrderLookup({
+    slug: storeSlug,
+    orderId: parsed.data.orderId,
+    customerEmail: parsed.data.customerEmail,
+  });
+
+  if (!lookup) {
+    return formError("We could not find an order matching those details.", {
+      orderId: ["Check the order ID and email address."],
+    });
+  }
+
+  redirect(
+    getCustomerOrderStatusHref({
+      storeSlug: lookup.storeSlug,
+      orderId: lookup.orderId,
+      token: lookup.token,
+    }),
+  );
 }
 
 export async function queueAbandonedCheckoutRecoveryAction(

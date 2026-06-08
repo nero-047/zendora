@@ -15,11 +15,16 @@ import {
 import {
   filterOrders,
   parseOrderFulfillmentStageFilter,
+  parseOrderFinancialStatusFilter,
   parseOrderPaymentStatusFilter,
   parseOrderRiskLevelFilter,
   parseOrderSourceFilter,
   parseOrderStatusFilter,
 } from "@/features/commerce/orders";
+import {
+  getOrderFinancialReconciliation,
+  orderFinancialReconciliationStatusLabels,
+} from "@/features/commerce/payments";
 import type { Order } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -55,6 +60,9 @@ export async function GET(request: Request, context: ExportRouteContext) {
       readParam(searchParams, "fulfillment"),
     ),
     risk: parseOrderRiskLevelFilter(readParam(searchParams, "risk")),
+    financialStatus: parseOrderFinancialStatusFilter(
+      readParam(searchParams, "financial"),
+    ),
   });
 
   return csvResponse<Order>({
@@ -87,6 +95,29 @@ export async function GET(request: Request, context: ExportRouteContext) {
           orderRiskLevelLabels[
             getOrderRiskAssessment(order, { orders: workspace.orders }).level
           ],
+      },
+      {
+        header: "financial_status",
+        value: (order) =>
+          orderFinancialReconciliationStatusLabels[
+            getOrderFinancialReconciliation(order).status
+          ],
+      },
+      {
+        header: "balance_due",
+        value: (order) =>
+          formatCurrency(
+            getOrderFinancialReconciliation(order).balanceDueCents,
+            order.currency,
+          ),
+      },
+      {
+        header: "ledger_delta",
+        value: (order) =>
+          formatCurrency(
+            getOrderFinancialReconciliation(order).ledgerDeltaCents,
+            order.currency,
+          ),
       },
       {
         header: "total",

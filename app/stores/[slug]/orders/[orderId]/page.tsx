@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  ArrowRight,
   CheckCircle,
   CreditCard,
   FileText,
@@ -9,8 +11,11 @@ import {
   RotateCcw,
   Star,
   Truck,
+  XCircle,
 } from "lucide-react";
 
+import { OrderCancellationRequestForm } from "@/features/commerce/components/order-cancellation-request-form";
+import { OrderDeliveryRequestForm } from "@/features/commerce/components/order-delivery-request-form";
 import { ProductReviewForm } from "@/features/commerce/components/product-review-form";
 import { ReturnRequestForm } from "@/features/commerce/components/return-request-form";
 import {
@@ -25,6 +30,10 @@ import {
   paymentStatusLabels,
 } from "@/features/commerce/order-status";
 import {
+  getReorderCartLines,
+  getReorderCheckoutHref,
+} from "@/features/commerce/order-reorder";
+import {
   paymentTransactionStatusLabels,
   paymentTransactionTypeLabels,
   summarizePaymentTransactions,
@@ -34,6 +43,8 @@ import {
   sortFulfillments,
 } from "@/features/commerce/fulfillments";
 import { maskGiftCardCode } from "@/features/commerce/gift-cards";
+import { getOrderCancellationEligibility } from "@/features/commerce/order-cancellation";
+import { getOrderDeliveryRequestEligibility } from "@/features/commerce/order-delivery-request";
 import {
   getCustomerReturnRequestEligibility,
   returnRequestReasonLabels,
@@ -102,7 +113,7 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
     notFound();
   }
 
-  const { store, order, navigationMenus, productReviews } = data;
+  const { store, order, products, navigationMenus, productReviews } = data;
   const token = readToken(searchParams.token) || "";
   const shipping = order.shippingAddress;
   const lifecycleEvents = getOrderLifecycleEvents(order);
@@ -114,9 +125,19 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
   );
   const returnEligibility = getCustomerReturnRequestEligibility(order);
   const canRequestReturn = returnEligibility.eligible;
+  const cancellationEligibility = getOrderCancellationEligibility(order);
+  const canRequestCancellation = cancellationEligibility.eligible;
+  const deliveryRequestEligibility = getOrderDeliveryRequestEligibility(order);
+  const canRequestDeliveryUpdate = deliveryRequestEligibility.eligible;
   const fulfillments = sortFulfillments(order.fulfillments).filter(
     (fulfillment) => fulfillment.status !== "cancelled",
   );
+  const reorderLines = getReorderCartLines(order, products);
+  const reorderHref = getReorderCheckoutHref({
+    order,
+    products,
+    storeSlug: store.slug,
+  });
 
   return (
     <main className="liquid-bg min-h-screen">
@@ -194,6 +215,18 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                 </>
               ) : null}
             </div>
+            {reorderLines.length > 0 ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
+                <Link className="primary-button px-4" href={reorderHref}>
+                  Buy again
+                  <ArrowRight aria-hidden="true" size={16} />
+                </Link>
+                <p className="text-sm font-medium text-slate-500">
+                  Rebuild checkout with {reorderLines.length} available item
+                  {reorderLines.length === 1 ? "" : "s"} from this order.
+                </p>
+              </div>
+            ) : null}
           </section>
 
           <section className="soft-panel overflow-hidden">
@@ -432,6 +465,30 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
 
           <section className="soft-panel p-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <XCircle aria-hidden="true" size={18} />
+              Cancellation request
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-500">
+              Ask the merchant to review this order before fulfillment. Captured
+              payments may still require refund handling.
+            </p>
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <OrderCancellationRequestForm
+                canRequest={canRequestCancellation}
+                orderId={order.id}
+                storeSlug={store.slug}
+                token={token}
+              />
+              {!canRequestCancellation ? (
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  {cancellationEligibility.message}
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="soft-panel p-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
               <Truck aria-hidden="true" size={18} />
               Delivery
             </h2>
@@ -495,6 +552,22 @@ export default async function OrderReceiptPage(props: OrderReceiptPageProps) {
                 ))}
               </div>
             ) : null}
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <h3 className="mb-3 text-sm font-semibold text-slate-950">
+                Delivery update request
+              </h3>
+              <OrderDeliveryRequestForm
+                canRequest={canRequestDeliveryUpdate}
+                orderId={order.id}
+                storeSlug={store.slug}
+                token={token}
+              />
+              {!canRequestDeliveryUpdate ? (
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  {deliveryRequestEligibility.message}
+                </p>
+              ) : null}
+            </div>
           </section>
 
           <section className="soft-panel p-4">

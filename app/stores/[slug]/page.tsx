@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Layers3, Sparkles } from "lucide-react";
 
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
+import { NewsletterSignupForm } from "@/features/commerce/components/newsletter-signup-form";
 import { parseStorefrontCatalogFilters } from "@/features/commerce/catalog-filters";
 import {
   StorefrontFooter,
@@ -145,6 +146,10 @@ export default async function PublicStorePage({
         products={products}
         storeSlug={store.slug}
       />
+
+      <section className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
+        <NewsletterSignupForm storeName={store.name} storeSlug={store.slug} />
+      </section>
 
       <StorefrontFooter menus={navigationMenus} />
     </main>

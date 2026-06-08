@@ -56,6 +56,17 @@ export type OrderFinancialReconciliation = {
   refundableCents: number;
 };
 
+export const orderFinancialReconciliationStatusLabels: Record<
+  OrderFinancialReconciliationStatus,
+  string
+> = {
+  settled: "Settled",
+  open_balance: "Open balance",
+  over_refunded: "Over-refunded",
+  ledger_mismatch: "Ledger mismatch",
+  voided: "Voided",
+};
+
 export function summarizePaymentTransactions(
   transactions: OrderPaymentTransaction[],
 ) {

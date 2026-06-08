@@ -34,15 +34,30 @@ function NavigationLink({
   );
 }
 
+function getUniqueLinks(links: StoreNavigationLink[]) {
+  const seen = new Set<string>();
+
+  return links.filter((link) => {
+    const key = `${link.label.toLowerCase()}:${link.href.toLowerCase()}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 export function StorefrontHeader({
-  action = "checkout",
+  action = "cart",
   backHref,
   backLabel,
   maxWidthClassName = "max-w-7xl",
   menus,
   store,
 }: {
-  action?: "checkout" | "continue";
+  action?: "cart" | "checkout" | "continue";
   backHref?: string;
   backLabel?: string;
   maxWidthClassName?: string;
@@ -50,27 +65,67 @@ export function StorefrontHeader({
   store: Store;
 }) {
   const headerLinks = getNavigationLinks(menus, "header");
+  const utilityLinks: StoreNavigationLink[] = [
+    {
+      label: "Collections",
+      href: `/stores/${store.slug}/collections`,
+    },
+    {
+      label: "Search",
+      href: `/stores/${store.slug}/search`,
+    },
+    {
+      label: "Orders",
+      href: `/stores/${store.slug}/orders`,
+    },
+    {
+      label: "Gift cards",
+      href: `/stores/${store.slug}/gift-cards`,
+    },
+    {
+      label: "Wishlist",
+      href: `/stores/${store.slug}/wishlist`,
+    },
+    {
+      label: "Recently viewed",
+      href: `/stores/${store.slug}/recently-viewed`,
+    },
+    {
+      label: "Policies",
+      href: `/stores/${store.slug}/policies`,
+    },
+    {
+      label: "Contact",
+      href: `/stores/${store.slug}/contact`,
+    },
+  ];
+  const desktopLinks = getUniqueLinks([...headerLinks.slice(0, 6), ...utilityLinks]);
+  const mobileLinks = getUniqueLinks([...headerLinks.slice(0, 4), ...utilityLinks]);
   const actionHref =
     action === "continue"
       ? `/stores/${store.slug}`
+      : action === "cart"
+        ? `/stores/${store.slug}/cart`
       : `/stores/${store.slug}/checkout`;
-  const actionLabel = action === "continue" ? "Continue shopping" : "Checkout";
+  const actionLabel =
+    action === "continue" ? "Continue shopping" : action === "cart" ? "Cart" : "Checkout";
 
   return (
-    <nav
-      className={`mx-auto flex ${maxWidthClassName} items-center justify-between gap-3 px-4 py-5 sm:px-6 lg:px-8`}
-    >
-      <Link
-        className="secondary-button max-w-[52vw] px-3 text-sm"
-        href={backHref || `/stores/${store.slug}`}
+    <header className="mx-auto grid gap-0">
+      <nav
+        aria-label="Storefront navigation"
+        className={`mx-auto flex w-full ${maxWidthClassName} items-center justify-between gap-3 px-4 py-5 sm:px-6 lg:px-8`}
       >
-        {backHref ? <ArrowLeft aria-hidden="true" size={16} /> : null}
-        <span className="truncate">{backLabel || store.name}</span>
-      </Link>
+        <Link
+          className="secondary-button max-w-[52vw] px-3 text-sm"
+          href={backHref || `/stores/${store.slug}`}
+        >
+          {backHref ? <ArrowLeft aria-hidden="true" size={16} /> : null}
+          <span className="truncate">{backLabel || store.name}</span>
+        </Link>
 
-      {headerLinks.length > 0 ? (
         <div className="hidden min-w-0 flex-1 items-center justify-center gap-4 md:flex">
-          {headerLinks.slice(0, 6).map((link) => (
+          {desktopLinks.map((link) => (
             <NavigationLink
               className="truncate text-sm font-semibold text-slate-600 hover:text-slate-950"
               key={`${link.label}:${link.href}`}
@@ -78,13 +133,26 @@ export function StorefrontHeader({
             />
           ))}
         </div>
-      ) : null}
 
-      <Link className="primary-button px-3 text-sm" href={actionHref}>
-        <ShoppingBag aria-hidden="true" size={16} />
-        {actionLabel}
-      </Link>
-    </nav>
+        <Link className="primary-button px-3 text-sm" href={actionHref}>
+          <ShoppingBag aria-hidden="true" size={16} />
+          {actionLabel}
+        </Link>
+      </nav>
+
+      <nav
+        aria-label="Mobile storefront navigation"
+        className={`mx-auto flex w-full ${maxWidthClassName} gap-2 overflow-x-auto px-4 pb-4 sm:px-6 md:hidden`}
+      >
+        {mobileLinks.map((link) => (
+          <NavigationLink
+            className="secondary-button min-h-10 shrink-0 px-3 text-sm"
+            key={`${link.label}:${link.href}`}
+            link={link}
+          />
+        ))}
+      </nav>
+    </header>
   );
 }
 

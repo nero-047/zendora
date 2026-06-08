@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import { getCheckoutPermalink } from "@/features/commerce/cart-permalinks";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
+import { WishlistButton } from "@/features/commerce/components/wishlist-button";
 import type { Product } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -41,6 +42,14 @@ export function ProductDetailActions({
   const inventoryCount = selectedVariant?.inventoryCount ?? product.inventoryCount;
   const priceCents = selectedVariant?.priceCents ?? product.priceCents;
   const isSoldOut = inventoryCount === 0;
+  const buyNowQuantity = Math.min(Math.max(selectedQuantity || 1, 1), inventoryCount || 1);
+  const buyNowHref = getCheckoutPermalink(storeSlug, [
+    {
+      productId: product.id,
+      quantity: buyNowQuantity,
+      variantId: selectedVariant?.id,
+    },
+  ]);
 
   function addProduct() {
     updateQuantity(product.id, selectedQuantity + 1, selectedVariant?.id);
@@ -117,10 +126,25 @@ export function ProductDetailActions({
         </button>
       )}
 
-      <Link className="secondary-button w-full px-4" href={checkoutHref}>
-        Checkout
-        <ArrowRight aria-hidden="true" size={16} />
-      </Link>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Link
+          aria-disabled={isSoldOut}
+          className={
+            isSoldOut
+              ? "secondary-button pointer-events-none w-full px-4 opacity-55"
+              : "secondary-button w-full px-4"
+          }
+          href={isSoldOut ? "#" : buyNowHref}
+        >
+          Buy now
+          <ArrowRight aria-hidden="true" size={16} />
+        </Link>
+        <Link className="secondary-button w-full px-4" href={checkoutHref}>
+          Checkout cart
+          <ArrowRight aria-hidden="true" size={16} />
+        </Link>
+        <WishlistButton product={product} products={products} storeSlug={storeSlug} />
+      </div>
     </div>
   );
 }

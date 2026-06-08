@@ -52,6 +52,11 @@ export default async function StoreAnalyticsPage({
 
   const { store, orders, products, abandonedCheckouts } = workspace;
   const analyticsExportHref = `/dashboard/stores/${store.id}/analytics/export`;
+  const funnelExportHref = `/dashboard/stores/${store.id}/analytics/funnel/export`;
+  const paymentsExportHref = `/dashboard/stores/${store.id}/analytics/payments/export`;
+  const payoutsExportHref = `/dashboard/stores/${store.id}/analytics/payouts/export`;
+  const productSalesExportHref = `/dashboard/stores/${store.id}/analytics/products/export`;
+  const taxExportHref = `/dashboard/stores/${store.id}/analytics/taxes/export`;
   const analytics = getStoreAnalytics({
     orders,
     products,
@@ -170,6 +175,41 @@ export default async function StoreAnalyticsPage({
             >
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={funnelExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Funnel CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={paymentsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Payments CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={payoutsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Payouts CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={productSalesExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Product Sales CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={taxExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Tax CSV
             </Link>
             <Link
               className="secondary-button px-4 text-sm"

@@ -2,14 +2,18 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Package, Star } from "lucide-react";
+import { ArrowRight, Package, Star } from "lucide-react";
 
 import { ProductDetailActions } from "@/features/commerce/components/product-detail-actions";
+import { ProductQuestionForm } from "@/features/commerce/components/product-question-form";
+import { RecentlyViewedTracker } from "@/features/commerce/components/recently-viewed-store";
+import { RestockAlertForm } from "@/features/commerce/components/restock-alert-form";
 import {
   StorefrontFooter,
   StorefrontHeader,
 } from "@/features/commerce/components/storefront-navigation";
 import { getPublicStorefront } from "@/features/commerce/data";
+import { getRelatedProducts } from "@/features/commerce/product-recommendations";
 import { getProductReviewSummary } from "@/features/commerce/reviews";
 import {
   getProductCanonicalUrl,
@@ -81,21 +85,26 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const { store, product, products, productReviews, navigationMenus } = data;
+  const {
+    store,
+    collections,
+    product,
+    products,
+    productReviews,
+    navigationMenus,
+  } = data;
   const reviews = productReviews.filter((review) => review.productId === product.id);
   const reviewSummary = getProductReviewSummary(reviews);
   const productJsonLd = getProductJsonLd({ store, product, reviewSummary });
-  const relatedProducts = products
-    .filter(
-      (item) =>
-        item.id !== product.id &&
-        product.category &&
-        item.category === product.category,
-    )
-    .slice(0, 3);
+  const relatedProducts = getRelatedProducts({ collections, product, products });
 
   return (
     <main className="liquid-bg min-h-screen">
+      <RecentlyViewedTracker
+        productId={product.id}
+        products={products}
+        storeSlug={store.slug}
+      />
       <script
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(productJsonLd) }}
         type="application/ld+json"
@@ -143,6 +152,12 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
               products={products}
               storeSlug={store.slug}
             />
+            <ProductQuestionForm
+              productId={product.id}
+              productName={product.name}
+              storeSlug={store.slug}
+            />
+            <RestockAlertForm product={product} storeSlug={store.slug} />
           </div>
         </div>
       </section>
@@ -218,11 +233,22 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
 
       {relatedProducts.length > 0 ? (
         <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
-          <h2 className="mb-4 text-lg font-semibold text-slate-950">Related products</h2>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">
+                Related products
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Complete the set with products from the same collection or
+                in-stock add-ons.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-4 md:grid-cols-3">
-            {relatedProducts.map((item) => (
+            {relatedProducts.map(({ product: item, reason }) => (
               <Link
-                className="soft-panel grid gap-3 overflow-hidden"
+                aria-label={`View related product ${item.name}`}
+                className="soft-panel grid gap-3 overflow-hidden transition hover:-translate-y-0.5 hover:border-sky-200"
                 href={`/stores/${store.slug}/products/${item.slug}`}
                 key={item.id}
               >
@@ -235,6 +261,7 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
                   width={900}
                 />
                 <div className="p-4 pt-0">
+                  <span className="status-pill mb-3 w-fit">{reason}</span>
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
                     <Package aria-hidden="true" size={16} />
                     {item.name}
@@ -242,6 +269,10 @@ export default async function PublicProductPage({ params }: ProductPageProps) {
                   <p className="mt-2 text-sm font-semibold text-slate-700">
                     {formatCurrency(item.priceCents, item.currency)}
                   </p>
+                  <span className="mt-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+                    View product
+                    <ArrowRight aria-hidden="true" size={14} />
+                  </span>
                 </div>
               </Link>
             ))}

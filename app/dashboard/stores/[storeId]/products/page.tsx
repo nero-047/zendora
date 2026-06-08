@@ -115,6 +115,15 @@ export default async function ProductsPage({
     basePath: `${productsBasePath}/export`,
     params: query,
   });
+  const variantsExportHref = buildDashboardExportHref({
+    basePath: `${productsBasePath}/variants/export`,
+    params: query,
+  });
+  const productFeedExportHref = buildDashboardExportHref({
+    basePath: `${productsBasePath}/feed/export`,
+    params: query,
+  });
+  const productImportTemplateHref = `/dashboard/stores/${store.id}/products/import-template/export`;
   const reorderNowCount = inventorySignals.filter(
     (signal) =>
       signal.urgency === "out_of_stock" || signal.urgency === "reorder_now",
@@ -186,6 +195,18 @@ export default async function ProductsPage({
             <Link className="secondary-button px-4 text-sm" href={productsExportHref}>
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={variantsExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Variants CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={productFeedExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Product Feed CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={productImportTemplateHref}>
+              <Download aria-hidden="true" size={17} />
+              Import Template
             </Link>
             <Link
               className="primary-button px-4 text-sm"

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FileText } from "lucide-react";
+import { ArrowRight, FileText } from "lucide-react";
 
 import {
   StorefrontFooter,
@@ -127,6 +128,15 @@ export default async function StorePolicyPage({ params }: PolicyPageProps) {
           <p className="mt-8 text-xs font-semibold uppercase text-slate-400">
             Updated {new Date(policy.updatedAt).toLocaleDateString("en-US")}
           </p>
+          {policy.type === "privacy" ? (
+            <Link
+              className="secondary-button mt-6 w-fit px-4 text-sm"
+              href={`/stores/${store.slug}/privacy-requests`}
+            >
+              Privacy requests
+              <ArrowRight aria-hidden="true" size={16} />
+            </Link>
+          ) : null}
         </div>
       </article>
       <StorefrontFooter maxWidthClassName="max-w-5xl" menus={navigationMenus} />

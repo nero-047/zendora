@@ -9,6 +9,7 @@ import {
   Search,
   ShoppingBag,
   SlidersHorizontal,
+  Scale,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -21,6 +22,8 @@ import {
 } from "@/features/commerce/catalog-filters";
 import { getCheckoutPermalink } from "@/features/commerce/cart-permalinks";
 import { useStoreCart } from "@/features/commerce/components/cart-store";
+import { WishlistButton } from "@/features/commerce/components/wishlist-button";
+import { getProductCardCompareHref } from "@/features/commerce/product-card-actions";
 import type { Product } from "@/features/commerce/types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -283,116 +286,132 @@ export function StorefrontCart({
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredProducts.map((product) => {
-          const activeVariants = product.variants.filter(
-            (variant) => variant.status === "active",
-          );
-          const defaultVariant =
-            activeVariants.find((variant) => variant.inventoryCount > 0) ||
-            activeVariants[0];
-          const cartLine = cart.find(
-            (line) =>
-              line.productId === product.id &&
-              (line.variantId || "") === (defaultVariant?.id || ""),
-          );
-          const selectedQuantity = cartLine?.quantity || 0;
-          const inventoryCount =
-            defaultVariant?.inventoryCount ?? product.inventoryCount;
-          const availableInventory = getAvailableInventory(product);
-          const isSoldOut = inventoryCount === 0;
+            const activeVariants = product.variants.filter(
+              (variant) => variant.status === "active",
+            );
+            const defaultVariant =
+              activeVariants.find((variant) => variant.inventoryCount > 0) ||
+              activeVariants[0];
+            const cartLine = cart.find(
+              (line) =>
+                line.productId === product.id &&
+                (line.variantId || "") === (defaultVariant?.id || ""),
+            );
+            const selectedQuantity = cartLine?.quantity || 0;
+            const inventoryCount =
+              defaultVariant?.inventoryCount ?? product.inventoryCount;
+            const availableInventory = getAvailableInventory(product);
+            const isSoldOut = inventoryCount === 0;
+            const compareHref = getProductCardCompareHref({
+              product,
+              products: filteredProducts,
+              storeSlug,
+            });
 
-          return (
-            <article className="soft-panel overflow-hidden" key={product.id}>
-              <Link href={`/stores/${storeSlug}/products/${product.slug}`}>
-                <Image
-                  alt={product.name}
-                  className="product-image"
-                  height={675}
-                  sizes="(max-width: 768px) 100vw, 33vw"
-                  src={product.imageUrl}
-                  width={900}
-                />
-              </Link>
-              <div className="p-4">
-                {product.category ? (
-                  <span className="status-pill mb-3">{product.category}</span>
-                ) : null}
-                <div className="flex items-start justify-between gap-3">
-                  <Link
-                    className="font-semibold text-slate-950 hover:text-sky-700"
-                    href={`/stores/${storeSlug}/products/${product.slug}`}
-                  >
-                    {product.name}
-                  </Link>
-                  <span className="text-sm font-semibold text-slate-950">
-                    {activeVariants.length > 0 ? "From " : ""}
-                    {formatCurrency(product.priceCents, product.currency)}
-                  </span>
-                </div>
-                <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500">
-                  {product.description}
-                </p>
-                <div className="mt-4 flex items-center gap-2">
-                  {selectedQuantity > 0 ? (
-                    <div className="grid flex-1 grid-cols-[44px_1fr_44px] overflow-hidden rounded-[8px] border border-slate-200 bg-white/70">
-                      <button
-                        aria-label={`Remove one ${product.name}`}
-                        className="grid h-11 place-items-center text-slate-700"
-                        onClick={() =>
-                          updateQuantity(
-                            product.id,
-                            selectedQuantity - 1,
-                            defaultVariant?.id,
-                          )
-                        }
-                        type="button"
-                      >
-                        <Minus aria-hidden="true" size={16} />
-                      </button>
-                      <span className="grid h-11 place-items-center text-sm font-semibold text-slate-950">
-                        {selectedQuantity}
-                      </span>
-                      <button
-                        aria-label={`Add one ${product.name}`}
-                        className="grid h-11 place-items-center text-slate-700 disabled:text-slate-300"
-                        disabled={selectedQuantity >= inventoryCount}
-                        onClick={() =>
-                          updateQuantity(
-                            product.id,
-                            selectedQuantity + 1,
-                            defaultVariant?.id,
-                          )
-                        }
-                        type="button"
-                      >
-                        <Plus aria-hidden="true" size={16} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="primary-button flex-1 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-55"
-                      disabled={isSoldOut}
-                      onClick={() => addProduct(product)}
-                      type="button"
+            return (
+              <article className="soft-panel overflow-hidden" key={product.id}>
+                <Link href={`/stores/${storeSlug}/products/${product.slug}`}>
+                  <Image
+                    alt={product.name}
+                    className="product-image"
+                    height={675}
+                    sizes="(max-width: 768px) 100vw, 33vw"
+                    src={product.imageUrl}
+                    width={900}
+                  />
+                </Link>
+                <div className="p-4">
+                  {product.category ? (
+                    <span className="status-pill mb-3">{product.category}</span>
+                  ) : null}
+                  <div className="flex items-start justify-between gap-3">
+                    <Link
+                      className="font-semibold text-slate-950 hover:text-sky-700"
+                      href={`/stores/${storeSlug}/products/${product.slug}`}
                     >
-                      <ShoppingBag aria-hidden="true" size={16} />
-                      {isSoldOut ? "Sold out" : "Add to cart"}
-                    </button>
-                  )}
+                      {product.name}
+                    </Link>
+                    <span className="text-sm font-semibold text-slate-950">
+                      {activeVariants.length > 0 ? "From " : ""}
+                      {formatCurrency(product.priceCents, product.currency)}
+                    </span>
+                  </div>
+                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500">
+                    {product.description}
+                  </p>
+                  <div className="mt-4 grid gap-2">
+                    {selectedQuantity > 0 ? (
+                      <div className="grid grid-cols-[44px_1fr_44px] overflow-hidden rounded-[8px] border border-slate-200 bg-white/70">
+                        <button
+                          aria-label={`Remove one ${product.name}`}
+                          className="grid h-11 place-items-center text-slate-700"
+                          onClick={() =>
+                            updateQuantity(
+                              product.id,
+                              selectedQuantity - 1,
+                              defaultVariant?.id,
+                            )
+                          }
+                          type="button"
+                        >
+                          <Minus aria-hidden="true" size={16} />
+                        </button>
+                        <span className="grid h-11 place-items-center text-sm font-semibold text-slate-950">
+                          {selectedQuantity}
+                        </span>
+                        <button
+                          aria-label={`Add one ${product.name}`}
+                          className="grid h-11 place-items-center text-slate-700 disabled:text-slate-300"
+                          disabled={selectedQuantity >= inventoryCount}
+                          onClick={() =>
+                            updateQuantity(
+                              product.id,
+                              selectedQuantity + 1,
+                              defaultVariant?.id,
+                            )
+                          }
+                          type="button"
+                        >
+                          <Plus aria-hidden="true" size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="primary-button w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-55"
+                        disabled={isSoldOut}
+                        onClick={() => addProduct(product)}
+                        type="button"
+                      >
+                        <ShoppingBag aria-hidden="true" size={16} />
+                        {isSoldOut ? "Sold out" : "Add to cart"}
+                      </button>
+                    )}
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <WishlistButton
+                        product={product}
+                        products={products}
+                        storeSlug={storeSlug}
+                      />
+                      <Link className="secondary-button w-full px-3 text-sm" href={compareHref}>
+                        <Scale aria-hidden="true" size={15} />
+                        Compare
+                      </Link>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs font-medium text-slate-500">
+                    {[
+                      `${availableInventory} in stock`,
+                      activeVariants.length > 0
+                        ? `${activeVariants.length} variants`
+                        : product.sku,
+                    ]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </p>
                 </div>
-                <p className="mt-3 text-xs font-medium text-slate-500">
-                  {[
-                    `${availableInventory} in stock`,
-                    activeVariants.length > 0
-                      ? `${activeVariants.length} variants`
-                      : product.sku,
-                  ]
-                    .filter(Boolean)
-                    .join(" / ")}
-                </p>
-              </div>
-            </article>
-          );
-        })}
+              </article>
+            );
+          })}
         </div>
         {filteredProducts.length === 0 ? (
           <div className="soft-panel p-5 text-sm text-slate-500">

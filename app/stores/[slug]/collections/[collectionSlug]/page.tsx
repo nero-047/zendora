@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Layers3 } from "lucide-react";
+import { Layers3, Scale } from "lucide-react";
 
 import { parseStorefrontCatalogFilters } from "@/features/commerce/catalog-filters";
 import { StorefrontCart } from "@/features/commerce/components/storefront-cart";
@@ -18,7 +19,7 @@ import {
   getStoreSocialImages,
   serializeJsonLd,
 } from "@/features/commerce/seo";
-import type { Product } from "@/features/commerce/types";
+import type { Product, ProductCollection } from "@/features/commerce/types";
 
 type CollectionPageProps = {
   params: Promise<{ slug: string; collectionSlug: string }>;
@@ -30,6 +31,28 @@ async function getStoreCollection(slug: string, collectionSlug: string) {
 
   if (!workspace) {
     return null;
+  }
+
+  if (collectionSlug === "all") {
+    const collection: ProductCollection = {
+      id: `${workspace.store.id}-all-products`,
+      storeId: workspace.store.id,
+      title: "All products",
+      slug: "all",
+      description: `Browse every active product from ${workspace.store.name}.`,
+      imageUrl: workspace.products[0]?.imageUrl,
+      status: "active",
+      sortOrder: 0,
+      productIds: workspace.products.map((product) => product.id),
+      productCount: workspace.products.length,
+      createdAt: workspace.store.createdAt,
+    };
+
+    return {
+      ...workspace,
+      collection,
+      products: workspace.products,
+    };
   }
 
   const collection = workspace.collections.find(
@@ -103,6 +126,10 @@ export default async function PublicCollectionPage({
   const { store, collection, products, navigationMenus } = data;
   const heroImage = collection.imageUrl || products[0]?.imageUrl;
   const catalogFilters = parseStorefrontCatalogFilters(query);
+  const compareHref = `/stores/${store.slug}/compare?products=${products
+    .slice(0, 4)
+    .map((product) => encodeURIComponent(product.slug))
+    .join(",")}`;
   const collectionJsonLd = getCollectionJsonLd({
     store,
     collection,
@@ -135,6 +162,12 @@ export default async function PublicCollectionPage({
             <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
               {collection.description}
             </p>
+          ) : null}
+          {products.length > 1 ? (
+            <Link className="secondary-button mt-5 w-fit px-4" href={compareHref}>
+              <Scale aria-hidden="true" size={16} />
+              Compare products
+            </Link>
           ) : null}
         </div>
         {heroImage ? (

@@ -13,6 +13,14 @@ function publicUrl(path: string) {
   return `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+function getLatestDate(values: string[]) {
+  return values.reduce(
+    (latest, value) =>
+      new Date(value).getTime() > new Date(latest).getTime() ? value : latest,
+    values[0],
+  );
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const storefrontEntries = await listPublicStorefrontSitemapEntries();
   const now = new Date();
@@ -33,6 +41,38 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 1,
       images: entry.products[0]?.imageUrl ? [entry.products[0].imageUrl] : undefined,
     });
+
+    urls.push({
+      url: publicUrl(`/stores/${entry.store.slug}/contact`),
+      lastModified: entry.store.createdAt,
+      changeFrequency: "monthly",
+      priority: 0.5,
+    });
+
+    if (entry.products.length > 0) {
+      const latestCatalogDate = getLatestDate([
+        entry.store.createdAt,
+        ...entry.products.map((product) => product.createdAt),
+        ...entry.collections.map((collection) => collection.createdAt),
+      ]);
+
+      urls.push(
+        {
+          url: publicUrl(`/stores/${entry.store.slug}/collections`),
+          lastModified: latestCatalogDate,
+          changeFrequency: "daily",
+          priority: 0.82,
+          images: entry.products[0]?.imageUrl ? [entry.products[0].imageUrl] : undefined,
+        },
+        {
+          url: publicUrl(`/stores/${entry.store.slug}/collections/all`),
+          lastModified: latestCatalogDate,
+          changeFrequency: "daily",
+          priority: 0.78,
+          images: entry.products[0]?.imageUrl ? [entry.products[0].imageUrl] : undefined,
+        },
+      );
+    }
 
     for (const product of entry.products) {
       urls.push({
@@ -62,6 +102,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         lastModified: page.updatedAt,
         changeFrequency: "monthly",
         priority: 0.55,
+      });
+    }
+
+    if (entry.policies.length > 0) {
+      urls.push({
+        url: publicUrl(`/stores/${entry.store.slug}/policies`),
+        lastModified: entry.policies.reduce(
+          (latest, policy) =>
+            new Date(policy.updatedAt).getTime() > new Date(latest).getTime()
+              ? policy.updatedAt
+              : latest,
+          entry.policies[0].updatedAt,
+        ),
+        changeFrequency: "monthly",
+        priority: 0.45,
       });
     }
 

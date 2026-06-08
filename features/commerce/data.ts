@@ -2831,6 +2831,7 @@ export async function getPublicOrderReceipt(input: {
 }): Promise<{
   store: Store;
   order: Order;
+  products: Product[];
   policies: StorePolicy[];
   navigationMenus: StoreNavigationMenu[];
   productReviews: ProductReview[];
@@ -2868,6 +2869,7 @@ export async function getPublicOrderReceipt(input: {
     return {
       store: mapDemoStoreForUser(store, store.ownerId),
       order,
+      products: mockProducts.filter((product) => product.storeId === store.id),
       policies: mockStorePolicies.filter((policy) => policy.storeId === store.id),
       navigationMenus: mockStoreNavigationMenus.filter(
         (menu) => menu.storeId === store.id,
@@ -2932,6 +2934,7 @@ export async function getPublicOrderReceipt(input: {
     StorePolicy[],
     StoreNavigationMenu[],
     ProductReview[],
+    Product[],
   ];
 
   try {
@@ -2944,6 +2947,7 @@ export async function getPublicOrderReceipt(input: {
       loadStorePolicies([store.id]),
       loadStoreNavigationMenus([store.id]),
       loadProductReviewsByOrder(input.orderId),
+      loadProducts([store.id]),
     ]);
   } catch (error) {
     if (isCommerceSchemaUnavailableError(error)) {
@@ -2962,6 +2966,7 @@ export async function getPublicOrderReceipt(input: {
     policies,
     navigationMenus,
     productReviews,
+    products,
   ] = receiptData;
   const order = mapOrder(
     orderRow as OrderRow,
@@ -2973,11 +2978,122 @@ export async function getPublicOrderReceipt(input: {
   );
 
   return {
-    store: mapStore(store, [], [order]),
+    store: mapStore(store, products, [order]),
     order,
+    products,
     policies,
     navigationMenus,
     productReviews,
+  };
+}
+
+export async function getPublicOrderLookup(input: {
+  slug: string;
+  orderId: string;
+  customerEmail: string;
+}): Promise<{
+  orderId: string;
+  storeSlug: string;
+  token: string;
+} | null> {
+  const orderId = input.orderId.trim();
+  const customerEmail = input.customerEmail.trim().toLowerCase();
+
+  if (!orderId || !customerEmail) {
+    return null;
+  }
+
+  if (!isSupabaseConfigured()) {
+    if (!isDemoDataEnabled()) {
+      return null;
+    }
+
+    const store = mockStores.find(
+      (item) => item.slug === input.slug && item.status === "active",
+    );
+
+    if (!store) {
+      return null;
+    }
+
+    const order = mockOrders.find(
+      (item) =>
+        item.storeId === store.id &&
+        item.id === orderId &&
+        item.customerEmail.trim().toLowerCase() === customerEmail &&
+        item.customerAccessToken,
+    );
+
+    return order?.customerAccessToken
+      ? {
+          orderId: order.id,
+          storeSlug: store.slug,
+          token: order.customerAccessToken,
+        }
+      : null;
+  }
+
+  if (!isUuid(orderId)) {
+    return null;
+  }
+
+  const db = getSupabaseAdmin();
+  const { data: storeRow, error: storeError } = await db
+    .from("stores")
+    .select("id, slug")
+    .eq("slug", input.slug)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (storeError) {
+    if (isCommerceSchemaUnavailableError(storeError)) {
+      return null;
+    }
+
+    throw storeError;
+  }
+
+  if (!storeRow) {
+    return null;
+  }
+
+  const store = storeRow as { id: string; slug: string };
+  const { data: orderRow, error: orderError } = await db
+    .from("orders")
+    .select("id, customer_email, customer_access_token")
+    .eq("id", orderId)
+    .eq("store_id", store.id)
+    .maybeSingle();
+
+  if (orderError) {
+    if (isCommerceSchemaUnavailableError(orderError)) {
+      return null;
+    }
+
+    throw orderError;
+  }
+
+  if (!orderRow) {
+    return null;
+  }
+
+  const order = orderRow as {
+    id: string;
+    customer_access_token: string | null;
+    customer_email: string;
+  };
+
+  if (
+    order.customer_email.trim().toLowerCase() !== customerEmail ||
+    !order.customer_access_token
+  ) {
+    return null;
+  }
+
+  return {
+    orderId: order.id,
+    storeSlug: store.slug,
+    token: order.customer_access_token,
   };
 }
 

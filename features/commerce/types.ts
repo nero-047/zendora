@@ -62,6 +62,7 @@ export type NotificationType =
   | "payment_receipt"
   | "fulfillment_update"
   | "checkout_recovery"
+  | "customer_message"
   | "product_review_received"
   | "product_review_updated"
   | "gift_card_created"

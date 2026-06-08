@@ -107,6 +107,22 @@ export default async function CustomersPage({
     basePath: `${customersBasePath}/export`,
     params: query,
   });
+  const customerSegmentsExportHref = buildDashboardExportHref({
+    basePath: `${customersBasePath}/segments/export`,
+    params: query,
+  });
+  const customerLifetimeExportHref = buildDashboardExportHref({
+    basePath: `${customersBasePath}/lifetime/export`,
+    params: query,
+  });
+  const customerRetentionExportHref = buildDashboardExportHref({
+    basePath: `${customersBasePath}/retention/export`,
+    params: query,
+  });
+  const customerPrivacyExportHref = buildDashboardExportHref({
+    basePath: `${customersBasePath}/privacy/export`,
+    params: query,
+  });
   const stats = getCustomerStats(customers);
   const metricCards = [
     {
@@ -170,6 +186,34 @@ export default async function CustomersPage({
             <Link className="secondary-button px-4 text-sm" href={customersExportHref}>
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={customerSegmentsExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Segments CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={customerLifetimeExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              LTV CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={customerRetentionExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Retention CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={customerPrivacyExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Privacy CSV
             </Link>
             <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ShoppingBag aria-hidden="true" size={17} />

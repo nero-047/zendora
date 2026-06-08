@@ -40,11 +40,17 @@ import {
   orderSourceFilters,
   orderStatusFilters,
   parseOrderFulfillmentStageFilter,
+  parseOrderFinancialStatusFilter,
   parseOrderPaymentStatusFilter,
   parseOrderRiskLevelFilter,
   parseOrderSourceFilter,
   parseOrderStatusFilter,
+  orderFinancialStatusFilters,
 } from "@/features/commerce/orders";
+import {
+  getOrderFinancialReconciliation,
+  orderFinancialReconciliationStatusLabels,
+} from "@/features/commerce/payments";
 import {
   buildDashboardPageHref,
   buildDashboardExportHref,
@@ -71,6 +77,7 @@ export default async function OrdersPage({
     source?: string | string[];
     fulfillment?: string | string[];
     risk?: string | string[];
+    financial?: string | string[];
     page?: string | string[];
     pageSize?: string | string[];
   }>;
@@ -93,6 +100,7 @@ export default async function OrdersPage({
     query.fulfillment,
   );
   const selectedRisk = parseOrderRiskLevelFilter(query.risk);
+  const selectedFinancial = parseOrderFinancialStatusFilter(query.financial);
   const selectedPage = parseDashboardPage(query.page);
   const selectedPageSize = parseDashboardPageSize(query.pageSize);
   const filteredOrders = filterOrders({
@@ -103,6 +111,7 @@ export default async function OrdersPage({
     source: selectedSource,
     fulfillmentStage: selectedFulfillment,
     risk: selectedRisk,
+    financialStatus: selectedFinancial,
   });
   const paginatedOrders = paginateItems({
     items: filteredOrders,
@@ -113,6 +122,61 @@ export default async function OrdersPage({
   const ordersExportHref = buildDashboardExportHref({
     basePath: `${ordersBasePath}/export`,
     params: query,
+  });
+  const paymentsDueExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/payments-due/export`,
+    params: {
+      ...query,
+      financial:
+        selectedFinancial === "all" ? "open_balance" : selectedFinancial,
+    },
+  });
+  const fulfillmentExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/fulfillment/export`,
+    params: {
+      ...query,
+      fulfillment:
+        selectedFulfillment === "all" ? "unfulfilled" : selectedFulfillment,
+      payment:
+        selectedPaymentStatus === "all" ? "paid" : selectedPaymentStatus,
+    },
+  });
+  const pickListExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/pick-list/export`,
+    params: {
+      ...query,
+      fulfillment:
+        selectedFulfillment === "all" ? "unfulfilled" : selectedFulfillment,
+      payment:
+        selectedPaymentStatus === "all" ? "paid" : selectedPaymentStatus,
+    },
+  });
+  const shippingManifestExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/shipping-manifest/export`,
+    params: {
+      ...query,
+      fulfillment:
+        selectedFulfillment === "all" ? "unfulfilled" : selectedFulfillment,
+      payment:
+        selectedPaymentStatus === "all" ? "paid" : selectedPaymentStatus,
+    },
+  });
+  const fulfillmentSlaExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/sla/export`,
+    params: {
+      ...query,
+      fulfillment:
+        selectedFulfillment === "all" ? "unfulfilled" : selectedFulfillment,
+      payment:
+        selectedPaymentStatus === "all" ? "paid" : selectedPaymentStatus,
+    },
+  });
+  const riskExportHref = buildDashboardExportHref({
+    basePath: `${ordersBasePath}/risk/export`,
+    params: {
+      ...query,
+      risk: selectedRisk === "all" ? "high" : selectedRisk,
+    },
   });
   const stats = getOrderStats(orders);
   const metricCards = [
@@ -130,6 +194,16 @@ export default async function OrdersPage({
       icon: TriangleAlert,
       label: "High risk",
       value: String(stats.highRiskOrders),
+    },
+    {
+      icon: CircleDollarSign,
+      label: "Open balances",
+      value: formatCurrency(stats.openBalanceCents, store.currency),
+    },
+    {
+      icon: TriangleAlert,
+      label: "Ledger issues",
+      value: String(stats.ledgerIssueOrders),
     },
     {
       icon: CircleDollarSign,
@@ -172,6 +246,36 @@ export default async function OrdersPage({
               <Download aria-hidden="true" size={17} />
               Export CSV
             </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={paymentsDueExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Payments Due CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={fulfillmentExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Fulfillment CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={pickListExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Pick List CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={shippingManifestExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Manifest CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={fulfillmentSlaExportHref}>
+              <Download aria-hidden="true" size={17} />
+              SLA CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={riskExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Risk CSV
+            </Link>
             <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ShoppingBag aria-hidden="true" size={17} />
               Storefront
@@ -197,7 +301,7 @@ export default async function OrdersPage({
       />
 
       <section className="soft-panel p-4">
-        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto]" method="get">
+        <form className="grid gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto_auto]" method="get">
           <input name="page" type="hidden" value="1" />
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Search orders
@@ -280,6 +384,22 @@ export default async function OrdersPage({
             </select>
           </label>
           <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            Financial
+            <select
+              className="field min-w-44"
+              defaultValue={selectedFinancial}
+              name="financial"
+            >
+              {orderFinancialStatusFilters.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all"
+                    ? "All finances"
+                    : orderFinancialReconciliationStatusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-slate-700">
             Page size
             <select
               className="field min-w-32"
@@ -305,11 +425,12 @@ export default async function OrdersPage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-400 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto_auto]">
           <span>Order</span>
           <span className="hidden xl:inline">Source</span>
           <span className="hidden xl:inline">Status</span>
           <span className="hidden xl:inline">Payment</span>
+          <span className="hidden xl:inline">Financial</span>
           <span className="hidden xl:inline">Fulfillment</span>
           <span className="hidden xl:inline">Risk</span>
           <span className="hidden xl:inline">Total</span>
@@ -318,10 +439,12 @@ export default async function OrdersPage({
         {paginatedOrders.items.map((order) => {
           const fulfillmentSummary = getOrderFulfillmentSummary(order);
           const riskAssessment = getOrderRiskAssessment(order, { orders });
+          const financialReconciliation =
+            getOrderFinancialReconciliation(order);
 
           return (
             <div
-              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto]"
+              className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-4 last:border-0 xl:grid-cols-[1.2fr_auto_auto_auto_auto_auto_auto_auto_auto]"
               key={order.id}
             >
               <div className="min-w-0">
@@ -340,6 +463,13 @@ export default async function OrdersPage({
                   </span>
                   <span className="status-pill xl:hidden">
                     {orderRiskLevelLabels[riskAssessment.level]}
+                  </span>
+                  <span className="status-pill xl:hidden">
+                    {
+                      orderFinancialReconciliationStatusLabels[
+                        financialReconciliation.status
+                      ]
+                    }
                   </span>
                 </div>
                 <Link
@@ -373,6 +503,13 @@ export default async function OrdersPage({
               </span>
               <span className="status-pill hidden w-fit xl:inline-flex">
                 {paymentStatusLabels[order.paymentStatus]}
+              </span>
+              <span className="status-pill hidden w-fit xl:inline-flex">
+                {
+                  orderFinancialReconciliationStatusLabels[
+                    financialReconciliation.status
+                  ]
+                }
               </span>
               <span className="hidden text-sm text-slate-600 xl:inline">
                 <span className="inline-flex items-center gap-2">

@@ -142,7 +142,20 @@ export default async function StorePage({
   ).length;
   const launchReadiness = getStoreLaunchReadiness(workspace);
   const operationalInsights = getStoreOperationalInsights(workspace);
+  const configurationExportHref = `/dashboard/stores/${store.id}/configuration/export`;
   const operationsExportHref = `/dashboard/stores/${store.id}/export`;
+  const collectionsExportHref = `/dashboard/stores/${store.id}/collections/export`;
+  const giftCardsExportHref = `/dashboard/stores/${store.id}/gift-cards/export`;
+  const marketingExportHref = `/dashboard/stores/${store.id}/marketing/export`;
+  const promotionPerformanceExportHref = `/dashboard/stores/${store.id}/promotions/performance/export`;
+  const promotionsExportHref = `/dashboard/stores/${store.id}/promotions/export`;
+  const returnsExportHref = `/dashboard/stores/${store.id}/returns/export`;
+  const returnSlaExportHref = `/dashboard/stores/${store.id}/returns/sla/export`;
+  const reviewModerationExportHref = `/dashboard/stores/${store.id}/reviews/moderation/export`;
+  const reviewsExportHref = `/dashboard/stores/${store.id}/reviews/export`;
+  const seoExportHref = `/dashboard/stores/${store.id}/seo/export`;
+  const shippingExportHref = `/dashboard/stores/${store.id}/shipping/export`;
+  const teamExportHref = `/dashboard/stores/${store.id}/team/export`;
 
   return (
     <div className="grid gap-5">
@@ -162,6 +175,18 @@ export default async function StorePage({
             <Link className="secondary-button px-4 text-sm" href={operationsExportHref}>
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={configurationExportHref}>
+              <Download aria-hidden="true" size={17} />
+              Config CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={seoExportHref}>
+              <Download aria-hidden="true" size={17} />
+              SEO CSV
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={marketingExportHref}>
+              <Mail aria-hidden="true" size={17} />
+              Marketing CSV
             </Link>
             <Link className="secondary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ExternalLink aria-hidden="true" size={17} />
@@ -325,11 +350,17 @@ export default async function StorePage({
         )}
 
         <div className="soft-panel overflow-hidden">
-          <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
               <Users aria-hidden="true" size={18} />
               Team
             </h2>
+            {canManageTeam ? (
+              <Link className="secondary-button min-h-10 px-3 text-sm" href={teamExportHref}>
+                <Download aria-hidden="true" size={16} />
+                Team CSV
+              </Link>
+            ) : null}
           </div>
 
           {members.length > 0 ? (
@@ -440,11 +471,15 @@ export default async function StorePage({
         <ShippingZoneForm storeId={store.id} />
 
         <div className="soft-panel overflow-hidden">
-          <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
               <Truck aria-hidden="true" size={18} />
               Shipping rates
             </h2>
+            <Link className="secondary-button min-h-10 px-3 text-sm" href={shippingExportHref}>
+              <Download aria-hidden="true" size={16} />
+              Shipping CSV
+            </Link>
           </div>
           {shippingZones.length > 0 ? (
             shippingZones.map((zone) => (
@@ -465,11 +500,15 @@ export default async function StorePage({
         <CollectionForm products={products} storeId={store.id} />
 
         <div className="soft-panel overflow-hidden">
-          <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
               <Layers3 aria-hidden="true" size={18} />
               Collections
             </h2>
+            <Link className="secondary-button min-h-10 px-3 text-sm" href={collectionsExportHref}>
+              <Download aria-hidden="true" size={16} />
+              Collections CSV
+            </Link>
           </div>
           {collections.length > 0 ? (
             collections.map((collection) => (
@@ -491,8 +530,18 @@ export default async function StorePage({
         <DiscountForm storeId={store.id} />
 
         <div className="soft-panel overflow-hidden">
-          <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <h2 className="text-lg font-semibold text-slate-950">Discount codes</h2>
+            <div className="flex flex-wrap gap-2">
+              <Link className="secondary-button min-h-10 px-3 text-sm" href={promotionPerformanceExportHref}>
+                <Download aria-hidden="true" size={16} />
+                Discount Performance CSV
+              </Link>
+              <Link className="secondary-button min-h-10 px-3 text-sm" href={giftCardsExportHref}>
+                <Download aria-hidden="true" size={16} />
+                Gift Cards CSV
+              </Link>
+            </div>
           </div>
           {discounts.length > 0 ? (
             discounts.map((discount) => (
@@ -513,11 +562,15 @@ export default async function StorePage({
         <GiftCardForm storeId={store.id} />
 
         <div className="soft-panel overflow-hidden">
-          <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
               <Gift aria-hidden="true" size={18} />
               Gift cards
             </h2>
+            <Link className="secondary-button min-h-10 px-3 text-sm" href={promotionsExportHref}>
+              <Download aria-hidden="true" size={16} />
+              Promotion CSV
+            </Link>
           </div>
           {giftCards.length > 0 ? (
             giftCards.map((giftCard) => (
@@ -670,13 +723,29 @@ export default async function StorePage({
               {returnQueueStats.awaitingResolution} awaiting resolution.
             </p>
           </div>
-          <Link
-            className="secondary-button min-h-10 px-3 text-sm"
-            href={`/dashboard/stores/${store.id}/orders?risk=high`}
-          >
-            <ReceiptText aria-hidden="true" size={16} />
-            Orders
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="secondary-button min-h-10 px-3 text-sm"
+              href={returnsExportHref}
+            >
+              <Download aria-hidden="true" size={16} />
+              Returns CSV
+            </Link>
+            <Link
+              className="secondary-button min-h-10 px-3 text-sm"
+              href={returnSlaExportHref}
+            >
+              <Download aria-hidden="true" size={16} />
+              Return SLA CSV
+            </Link>
+            <Link
+              className="secondary-button min-h-10 px-3 text-sm"
+              href={`/dashboard/stores/${store.id}/orders?risk=high`}
+            >
+              <ReceiptText aria-hidden="true" size={16} />
+              Orders
+            </Link>
+          </div>
         </div>
 
         {returnQueue.length > 0 ? (
@@ -747,11 +816,21 @@ export default async function StorePage({
       </section>
 
       <section className="soft-panel overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
             <Star aria-hidden="true" size={18} />
             Product reviews
           </h2>
+          <div className="flex flex-wrap gap-2">
+            <Link className="secondary-button min-h-10 px-3 text-sm" href={reviewModerationExportHref}>
+              <Download aria-hidden="true" size={16} />
+              Review Queue CSV
+            </Link>
+            <Link className="secondary-button min-h-10 px-3 text-sm" href={reviewsExportHref}>
+              <Download aria-hidden="true" size={16} />
+              Reviews CSV
+            </Link>
+          </div>
         </div>
         {productReviews.length > 0 ? (
           <div className="divide-y divide-slate-100">

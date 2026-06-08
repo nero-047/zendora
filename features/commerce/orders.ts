@@ -7,6 +7,11 @@ import {
   orderFulfillmentStageLabels,
   orderRiskLevelLabels,
 } from "@/features/commerce/order-insights";
+import {
+  type OrderFinancialReconciliationStatus,
+  getOrderFinancialReconciliation,
+  orderFinancialReconciliationStatusLabels,
+} from "@/features/commerce/payments";
 import type {
   Order,
   OrderSource,
@@ -57,6 +62,18 @@ export type OrderFulfillmentStageFilter =
 export const orderRiskLevelFilters = ["all", "low", "medium", "high"] as const;
 
 export type OrderRiskLevelFilter = (typeof orderRiskLevelFilters)[number];
+
+export const orderFinancialStatusFilters = [
+  "all",
+  "settled",
+  "open_balance",
+  "ledger_mismatch",
+  "over_refunded",
+  "voided",
+] as const;
+
+export type OrderFinancialStatusFilter =
+  (typeof orderFinancialStatusFilters)[number];
 
 export function getOrderHref(storeId: string, orderId: string) {
   return `/dashboard/stores/${storeId}/orders/${orderId}`;
@@ -116,6 +133,18 @@ export function parseOrderRiskLevelFilter(value: string | string[] | undefined) 
   return "all";
 }
 
+export function parseOrderFinancialStatusFilter(
+  value: string | string[] | undefined,
+) {
+  const status = Array.isArray(value) ? value[0] : value;
+
+  if (orderFinancialStatusFilters.includes(status as OrderFinancialStatusFilter)) {
+    return status as OrderFinancialStatusFilter;
+  }
+
+  return "all";
+}
+
 export function getOrderStats(orders: Order[]) {
   const paidOrders = orders.filter((order) =>
     isRevenueOrderStatus(order.status),
@@ -130,6 +159,17 @@ export function getOrderStats(orders: Order[]) {
   });
   const highRiskOrders = orders.filter(
     (order) => getOrderRiskAssessment(order, { orders }).level === "high",
+  );
+  const reconciliations = orders.map((order) =>
+    getOrderFinancialReconciliation(order),
+  );
+  const openBalanceReconciliations = reconciliations.filter(
+    (reconciliation) => reconciliation.status === "open_balance",
+  );
+  const ledgerIssueReconciliations = reconciliations.filter(
+    (reconciliation) =>
+      reconciliation.status === "ledger_mismatch" ||
+      reconciliation.status === "over_refunded",
   );
   const totalRevenueCents = paidOrders.reduce(
     (sum, order) => sum + Math.max(0, order.totalCents - order.refundedCents),
@@ -146,6 +186,12 @@ export function getOrderStats(orders: Order[]) {
       .length,
     needsFulfillment: needsFulfillment.length,
     highRiskOrders: highRiskOrders.length,
+    openBalanceOrders: openBalanceReconciliations.length,
+    openBalanceCents: openBalanceReconciliations.reduce(
+      (sum, reconciliation) => sum + reconciliation.balanceDueCents,
+      0,
+    ),
+    ledgerIssueOrders: ledgerIssueReconciliations.length,
     totalRevenueCents,
     averagePaidOrderCents:
       paidOrders.length > 0
@@ -157,6 +203,7 @@ export function getOrderStats(orders: Order[]) {
 function getOrderSearchText(order: Order) {
   const fulfillmentSummary = getOrderFulfillmentSummary(order);
   const riskAssessment = getOrderRiskAssessment(order);
+  const financialReconciliation = getOrderFinancialReconciliation(order);
 
   return [
     order.id,
@@ -177,6 +224,8 @@ function getOrderSearchText(order: Order) {
     orderFulfillmentStageLabels[fulfillmentSummary.stage],
     orderRiskLevelLabels[riskAssessment.level],
     riskAssessment.factors.map((factor) => factor.label).join(" "),
+    orderFinancialReconciliationStatusLabels[financialReconciliation.status],
+    financialReconciliation.detail,
     order.fulfillments
       .flatMap((fulfillment) => [
         fulfillment.status,
@@ -210,18 +259,21 @@ export function filterOrders(input: {
   source?: OrderSourceFilter;
   fulfillmentStage?: OrderFulfillmentStageFilter;
   risk?: OrderRiskLevelFilter;
+  financialStatus?: OrderFinancialStatusFilter;
 }) {
   const normalizedQuery = input.query.trim().toLowerCase();
   const paymentStatus = input.paymentStatus || "all";
   const source = input.source || "all";
   const fulfillmentStage = input.fulfillmentStage || "all";
   const risk = input.risk || "all";
+  const financialStatus = input.financialStatus || "all";
 
   return input.orders.filter((order) => {
     const fulfillmentSummary = getOrderFulfillmentSummary(order);
     const riskAssessment = getOrderRiskAssessment(order, {
       orders: input.orders,
     });
+    const financialReconciliation = getOrderFinancialReconciliation(order);
     const statusMatches =
       input.status === "all" || order.status === (input.status as OrderStatus);
     const paymentMatches =
@@ -234,6 +286,10 @@ export function filterOrders(input: {
       fulfillmentSummary.stage === (fulfillmentStage as OrderFulfillmentStage);
     const riskMatches =
       risk === "all" || riskAssessment.level === (risk as OrderRiskLevel);
+    const financialMatches =
+      financialStatus === "all" ||
+      financialReconciliation.status ===
+        (financialStatus as OrderFinancialReconciliationStatus);
     const queryMatches =
       !normalizedQuery || getOrderSearchText(order).includes(normalizedQuery);
 
@@ -243,6 +299,7 @@ export function filterOrders(input: {
       sourceMatches &&
       fulfillmentMatches &&
       riskMatches &&
+      financialMatches &&
       queryMatches
     );
   });

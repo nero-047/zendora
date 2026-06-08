@@ -88,6 +88,14 @@ export default async function AbandonedCheckoutsPage({
     basePath: `${checkoutsBasePath}/export`,
     params: query,
   });
+  const recoveryExportHref = buildDashboardExportHref({
+    basePath: `${checkoutsBasePath}/recovery/export`,
+    params: {
+      ...query,
+      status: selectedStatus === "all" ? "open" : selectedStatus,
+      sort: selectedSort,
+    },
+  });
   const stats = getAbandonedCheckoutStats(abandonedCheckouts);
   const metricCards = [
     {
@@ -144,6 +152,13 @@ export default async function AbandonedCheckoutsPage({
             >
               <Download aria-hidden="true" size={17} />
               Export CSV
+            </Link>
+            <Link
+              className="secondary-button px-4 text-sm"
+              href={recoveryExportHref}
+            >
+              <Download aria-hidden="true" size={17} />
+              Recovery CSV
             </Link>
             <Link className="primary-button px-4 text-sm" href={`/stores/${store.slug}`}>
               <ShoppingBag aria-hidden="true" size={17} />
