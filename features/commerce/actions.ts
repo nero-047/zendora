@@ -2673,7 +2673,8 @@ export async function importProductsAction(
       variantCount: importedVariantCount,
       handles: importResult.products
         .slice(0, 12)
-        .map((product: ProductImportProduct) => product.handle),
+        .map((product: ProductImportProduct) => product.handle)
+        .join(", "),
     },
   });
 

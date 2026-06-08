@@ -260,8 +260,8 @@ const tests = [
       const csv = [
         "row_type,handle,title,status,sku,category,description,price,compare_at_price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_compare_at_price,variant_inventory,variant_status",
         "product,field-carry-pack,Field Carry Pack,active,NLS-BAG-001,Bags,Weather-resistant pack,129.00,159.00,24,https://example.com/pack.jpg,,,,,,",
-        "variant,field-carry-pack,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
-        "variant,field-carry-pack,,,,,,,,,Color,Clay,NLS-BAG-001-CLA,139.00,169.00,18,paused",
+        "variant,field-carry-pack,,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
+        "variant,field-carry-pack,,,,,,,,,,Color,Clay,NLS-BAG-001-CLA,139.00,169.00,18,paused",
       ].join("\n");
       const parsed = productImport.parseProductImportCsv(csv);
 
@@ -275,7 +275,7 @@ const tests = [
       const invalid = productImport.parseProductImportCsv(
         [
           "row_type,handle,title,status,sku,category,description,price,compare_at_price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_compare_at_price,variant_inventory,variant_status",
-          "variant,missing-product,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
+          "variant,missing-product,,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
         ].join("\n"),
       );
 

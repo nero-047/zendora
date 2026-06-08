@@ -306,7 +306,11 @@ export function parseProductImportCsv(csv: string): ProductImportResult {
         errors.push(inventoryCount);
       }
 
-      if (errors.length > 0) {
+      if (
+        errors.length > 0 ||
+        typeof compareAtCents === "string" ||
+        typeof inventoryCount === "string"
+      ) {
         continue;
       }
 
@@ -397,7 +401,11 @@ export function parseProductImportCsv(csv: string): ProductImportResult {
       errors.push(`Row ${rowNumber} duplicates variant ${optionValue}.`);
     }
 
-    if (errors.length > 0) {
+    if (
+      errors.length > 0 ||
+      typeof compareAtCents === "string" ||
+      typeof inventoryCount === "string"
+    ) {
       continue;
     }
 

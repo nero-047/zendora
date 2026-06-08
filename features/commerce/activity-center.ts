@@ -118,6 +118,7 @@ const auditActionLabels: Record<AuditEventAction, string> = {
   store_published: "Store published",
   store_paused: "Store paused",
   product_created: "Product created",
+  product_imported: "Product imported",
   product_updated: "Product updated",
   inventory_adjusted: "Inventory adjusted",
   discount_created: "Discount created",
