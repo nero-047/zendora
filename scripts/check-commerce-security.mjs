@@ -39,6 +39,11 @@ const productCardActionsPath = "features/commerce/product-card-actions.ts";
 const productCompareHelperPath = "features/commerce/product-compare.ts";
 const productDetailActionsPath =
   "features/commerce/components/product-detail-actions.tsx";
+const productImportFormPath =
+  "features/commerce/components/product-import-form.tsx";
+const productImportHelperPath = "features/commerce/product-import.ts";
+const productImportPagePath =
+  "app/dashboard/stores/[storeId]/products/import/page.tsx";
 const productPagePath = "app/stores/[slug]/products/[productSlug]/page.tsx";
 const productQuestionFormPath =
   "features/commerce/components/product-question-form.tsx";
@@ -126,6 +131,9 @@ const privacyRequestRouteText = readFileSync(privacyRequestRoutePath, "utf8");
 const productCardActionsText = readFileSync(productCardActionsPath, "utf8");
 const productCompareHelperText = readFileSync(productCompareHelperPath, "utf8");
 const productDetailActionsText = readFileSync(productDetailActionsPath, "utf8");
+const productImportFormText = readFileSync(productImportFormPath, "utf8");
+const productImportHelperText = readFileSync(productImportHelperPath, "utf8");
+const productImportPageText = readFileSync(productImportPagePath, "utf8");
 const productPageText = readFileSync(productPagePath, "utf8");
 const productQuestionFormText = readFileSync(productQuestionFormPath, "utf8");
 const productQuestionHelperText = readFileSync(
@@ -203,6 +211,7 @@ const errorBoundaryPaths = [
 const expectedGuards = new Map(
   Object.entries({
     createProductAction: "manage_catalog",
+    importProductsAction: "manage_catalog",
     updateProductAction: "manage_catalog",
     createCollectionAction: "manage_catalog",
     updateCollectionAction: "manage_catalog",
@@ -254,6 +263,7 @@ const expectedAuditEvents = new Map(
     publishStoreAction: "store_published",
     pauseStoreAction: "store_paused",
     createProductAction: "product_created",
+    importProductsAction: "product_imported",
     updateProductAction: "product_updated",
     adjustInventoryAction: "inventory_adjusted",
     createDiscountAction: "discount_created",
@@ -512,6 +522,22 @@ if (
   !productCardActionsText.includes("/compare?products=")
 ) {
   failures.push(`${productCardActionsPath} must keep product-card compare links deterministic and URL-safe.`);
+}
+
+if (
+  !productImportHelperText.includes("parseProductImportCsv") ||
+  !productImportHelperText.includes("productImportRequiredHeaders") ||
+  !productImportHelperText.includes("variant_compare_at_price") ||
+  !sourceText.includes("importProductsAction") ||
+  !sourceText.includes("readProductImportCsv") ||
+  !sourceText.includes('action: "product_imported"') ||
+  !sourceText.includes('{ onConflict: "store_id,slug" }') ||
+  !productImportFormText.includes('name="csvFile"') ||
+  !productImportFormText.includes('name="csvText"') ||
+  !productImportPageText.includes("ProductImportForm") ||
+  !productImportPageText.includes("products/import-template/export")
+) {
+  failures.push("Product import must provide CSV parsing, an admin import form, handle-based upsert, and audit coverage.");
 }
 
 if (
@@ -1332,6 +1358,7 @@ const expectedSmokeRoutes = [
   "/dashboard/stores/demo-store-outdoor/reviews/moderation/export",
   "/dashboard/stores/demo-store-outdoor/products/variants/export?q=bottle&sort=inventory_asc",
   "/dashboard/stores/demo-store-outdoor/products/feed/export",
+  "/dashboard/stores/demo-store-outdoor/products/import",
   "/dashboard/stores/demo-store-outdoor/products/import-template/export",
   "/dashboard/stores/demo-store-outdoor/products/demo-product-hydra-bottle/export",
   "/dashboard/stores/demo-store-outdoor/inventory/reorder/export?q=bottle&inventory=all&sort=reorder_desc",

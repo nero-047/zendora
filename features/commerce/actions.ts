@@ -25,6 +25,10 @@ import {
   parseNavigationMenuLines,
   storeNavigationLocations,
 } from "@/features/commerce/navigation";
+import {
+  parseProductImportCsv,
+  type ProductImportProduct,
+} from "@/features/commerce/product-import";
 import { getStoreLaunchReadiness } from "@/features/commerce/launch-readiness";
 import type {
   AuditEventAction,
@@ -235,6 +239,9 @@ const storeNavigationSchema = z.object({
 
 const productUpdateSchema = productSchema.extend({
   status: z.enum(["draft", "active", "archived"]),
+});
+const productImportSchema = z.object({
+  csvText: z.string().max(250000, "Keep imports under 250 KB.").optional(),
 });
 
 const inventoryAdjustmentSchema = z.object({
@@ -1349,6 +1356,43 @@ function parseTaxRateBps(value: string | undefined) {
   }
 
   return Math.round(rate * 100);
+}
+
+async function readProductImportCsv(formData: FormData) {
+  const csvText = typeof formData.get("csvText") === "string"
+    ? String(formData.get("csvText"))
+    : undefined;
+  const parsed = productImportSchema.safeParse({ csvText });
+
+  if (!parsed.success) {
+    return {
+      csv: "",
+      errors: parsed.error.flatten().fieldErrors.csvText || [
+        "Check the product import CSV.",
+      ],
+    };
+  }
+
+  const csvFile = formData.get("csvFile");
+
+  if (csvFile instanceof File && csvFile.size > 0) {
+    if (csvFile.size > 250000) {
+      return {
+        csv: "",
+        errors: ["Keep import files under 250 KB."],
+      };
+    }
+
+    return {
+      csv: await csvFile.text(),
+      errors: [],
+    };
+  }
+
+  return {
+    csv: parsed.data.csvText?.trim() || "",
+    errors: [],
+  };
 }
 
 function parseDateTime(value: string | undefined) {
@@ -2521,6 +2565,129 @@ export async function createProductAction(
   return {
     status: "success",
     message: "Product saved.",
+  };
+}
+
+export async function importProductsAction(
+  storeId: string,
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireAppUser();
+  const csvInput = await readProductImportCsv(formData);
+
+  if (csvInput.errors.length > 0) {
+    return formError("Check the product import CSV.", {
+      csvText: csvInput.errors,
+    });
+  }
+
+  if (!csvInput.csv) {
+    return formError("Add a product import CSV.", {
+      csvText: ["Paste CSV rows or upload a CSV file."],
+    });
+  }
+
+  const importResult = parseProductImportCsv(csvInput.csv);
+
+  if (importResult.status === "error") {
+    return formError("Check the product import CSV.", {
+      csvText: importResult.errors,
+    });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return demoDisabledState();
+  }
+
+  const workspace = await assertStorePermission(
+    user.id,
+    storeId,
+    "manage_catalog",
+  );
+  const db = getSupabaseAdmin();
+  let importedCount = 0;
+  let importedVariantCount = 0;
+
+  for (const product of importResult.products) {
+    const catalogTotals = getVariantCatalogTotals(
+      product.priceCents,
+      product.compareAtCents,
+      product.inventoryCount,
+      product.variants,
+    );
+    const { data: savedProduct, error } = await db
+      .from("products")
+      .upsert(
+        {
+          store_id: storeId,
+          name: product.title,
+          slug: product.slug,
+          sku: product.sku,
+          category: product.category,
+          description: product.description,
+          price_cents: catalogTotals.priceCents,
+          compare_at_cents: catalogTotals.compareAtCents,
+          currency: workspace.store.currency,
+          inventory_count: catalogTotals.inventoryCount,
+          image_url: product.imageUrl,
+          status: product.status,
+        },
+        { onConflict: "store_id,slug" },
+      )
+      .select("id")
+      .single();
+
+    if (error) {
+      return formError(error.message);
+    }
+
+    if (product.variants.length > 0) {
+      const { error: variantError } = await syncProductVariants({
+        db,
+        storeId,
+        productId: savedProduct.id,
+        currency: workspace.store.currency,
+        variants: product.variants,
+      });
+
+      if (variantError) {
+        return formError(variantError.message);
+      }
+    }
+
+    importedCount += 1;
+    importedVariantCount += product.variants.length;
+  }
+
+  await recordAuditEvent({
+    db,
+    storeId,
+    clerkUserId: user.id,
+    action: "product_imported",
+    resourceType: "product_import",
+    resourceId: storeId,
+    summary: `${user.email} imported ${importedCount} products from CSV.`,
+    metadata: {
+      productCount: importedCount,
+      variantCount: importedVariantCount,
+      handles: importResult.products
+        .slice(0, 12)
+        .map((product: ProductImportProduct) => product.handle),
+    },
+  });
+
+  revalidatePath(`/dashboard/stores/${storeId}`);
+  revalidatePath(`/dashboard/stores/${storeId}/products`);
+  revalidatePath(`/stores/${workspace.store.slug}`);
+
+  return {
+    status: "success",
+    message: `Imported ${importedCount} products and ${importedVariantCount} variants.`,
+    data: {
+      productCount: importedCount,
+      variantCount: importedVariantCount,
+    },
   };
 }
 

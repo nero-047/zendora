@@ -17,12 +17,14 @@ type ProductImportTemplateRow = {
   category: string;
   description: string;
   price: string;
+  compareAtPrice: string;
   inventory: string;
   imageUrl: string;
   optionName: string;
   optionValue: string;
   variantSku: string;
   variantPrice: string;
+  variantCompareAtPrice: string;
   variantInventory: string;
   variantStatus: string;
   instructions: string;
@@ -39,12 +41,14 @@ const rows: ProductImportTemplateRow[] = [
     description:
       "Weather-resistant day pack with a structured laptop sleeve and clean travel pockets.",
     price: "129.00",
+    compareAtPrice: "159.00",
     inventory: "24",
     imageUrl: "https://example.com/products/field-carry-pack.jpg",
     optionName: "Color",
     optionValue: "",
     variantSku: "",
     variantPrice: "",
+    variantCompareAtPrice: "",
     variantInventory: "",
     variantStatus: "",
     instructions:
@@ -59,12 +63,14 @@ const rows: ProductImportTemplateRow[] = [
     category: "",
     description: "",
     price: "",
+    compareAtPrice: "",
     inventory: "",
     imageUrl: "",
     optionName: "Color",
     optionValue: "Forest",
     variantSku: "NLS-BAG-001-FOR",
     variantPrice: "129.00",
+    variantCompareAtPrice: "159.00",
     variantInventory: "14",
     variantStatus: "active",
     instructions:
@@ -79,12 +85,14 @@ const rows: ProductImportTemplateRow[] = [
     category: "",
     description: "",
     price: "",
+    compareAtPrice: "",
     inventory: "",
     imageUrl: "",
     optionName: "Color",
     optionValue: "Clay",
     variantSku: "NLS-BAG-001-CLA",
     variantPrice: "139.00",
+    variantCompareAtPrice: "169.00",
     variantInventory: "18",
     variantStatus: "active",
     instructions:
@@ -99,12 +107,14 @@ const rows: ProductImportTemplateRow[] = [
     category: "",
     description: "",
     price: "",
+    compareAtPrice: "",
     inventory: "",
     imageUrl: "",
     optionName: "",
     optionValue: "",
     variantSku: "",
     variantPrice: "",
+    variantCompareAtPrice: "",
     variantInventory: "",
     variantStatus: "",
     instructions:
@@ -133,12 +143,14 @@ export async function GET(_request: Request, context: ExportRouteContext) {
       { header: "category", value: (row) => row.category },
       { header: "description", value: (row) => row.description },
       { header: "price", value: (row) => row.price },
+      { header: "compare_at_price", value: (row) => row.compareAtPrice },
       { header: "inventory", value: (row) => row.inventory },
       { header: "image_url", value: (row) => row.imageUrl },
       { header: "option_name", value: (row) => row.optionName },
       { header: "option_value", value: (row) => row.optionValue },
       { header: "variant_sku", value: (row) => row.variantSku },
       { header: "variant_price", value: (row) => row.variantPrice },
+      { header: "variant_compare_at_price", value: (row) => row.variantCompareAtPrice },
       { header: "variant_inventory", value: (row) => row.variantInventory },
       { header: "variant_status", value: (row) => row.variantStatus },
       { header: "instructions", value: (row) => row.instructions },

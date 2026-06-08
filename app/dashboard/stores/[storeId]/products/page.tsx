@@ -12,6 +12,7 @@ import {
   Filter,
   Package,
   PackagePlus,
+  Upload,
   Search,
   ShieldCheck,
   Store,
@@ -123,6 +124,7 @@ export default async function ProductsPage({
     basePath: `${productsBasePath}/feed/export`,
     params: query,
   });
+  const productImportHref = `/dashboard/stores/${store.id}/products/import`;
   const productImportTemplateHref = `/dashboard/stores/${store.id}/products/import-template/export`;
   const reorderNowCount = inventorySignals.filter(
     (signal) =>
@@ -207,6 +209,10 @@ export default async function ProductsPage({
             <Link className="secondary-button px-4 text-sm" href={productImportTemplateHref}>
               <Download aria-hidden="true" size={17} />
               Import Template
+            </Link>
+            <Link className="secondary-button px-4 text-sm" href={productImportHref}>
+              <Upload aria-hidden="true" size={17} />
+              Import Products
             </Link>
             <Link
               className="primary-button px-4 text-sm"

@@ -95,6 +95,7 @@ const seo = loadTsModule("features/commerce/seo.ts");
 const payments = loadTsModule("features/commerce/payments.ts");
 const orderInsights = loadTsModule("features/commerce/order-insights.ts");
 const productHealth = loadTsModule("features/commerce/product-health.ts");
+const productImport = loadTsModule("features/commerce/product-import.ts");
 const productHelpers = loadTsModule("features/commerce/products.ts");
 const inventoryPlanning = loadTsModule("features/commerce/inventory-planning.ts");
 const returns = loadTsModule("features/commerce/returns.ts");
@@ -250,6 +251,38 @@ const tests = [
         productHealth.getProductHealth(makeProduct({ status: "draft" })).status,
         "not_listed",
         "draft products should be classified as not listed",
+      );
+    },
+  ],
+  [
+    "product import parser groups product handles and validates variant rows",
+    () => {
+      const csv = [
+        "row_type,handle,title,status,sku,category,description,price,compare_at_price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_compare_at_price,variant_inventory,variant_status",
+        "product,field-carry-pack,Field Carry Pack,active,NLS-BAG-001,Bags,Weather-resistant pack,129.00,159.00,24,https://example.com/pack.jpg,,,,,,",
+        "variant,field-carry-pack,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
+        "variant,field-carry-pack,,,,,,,,,Color,Clay,NLS-BAG-001-CLA,139.00,169.00,18,paused",
+      ].join("\n");
+      const parsed = productImport.parseProductImportCsv(csv);
+
+      assertEqual(parsed.status, "success", "valid product CSV should parse");
+      assertEqual(parsed.products.length, 1, "one handle should create one product");
+      assertEqual(parsed.variantCount, 2, "variant rows should be counted");
+      assertEqual(parsed.products[0].slug, "field-carry-pack", "handles should become slugs");
+      assertEqual(parsed.products[0].compareAtCents, 15900, "compare-at price should parse");
+      assertEqual(parsed.products[0].variants[1].status, "paused", "variant status should parse");
+
+      const invalid = productImport.parseProductImportCsv(
+        [
+          "row_type,handle,title,status,sku,category,description,price,compare_at_price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_compare_at_price,variant_inventory,variant_status",
+          "variant,missing-product,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
+        ].join("\n"),
+      );
+
+      assertEqual(invalid.status, "error", "orphan variant rows should fail");
+      assertTrue(
+        invalid.errors[0].includes("needs a product row"),
+        "orphan variant errors should explain the missing product row",
       );
     },
   ],

@@ -82,6 +82,7 @@ export type AuditEventAction =
   | "store_published"
   | "store_paused"
   | "product_created"
+  | "product_imported"
   | "product_updated"
   | "inventory_adjusted"
   | "discount_created"

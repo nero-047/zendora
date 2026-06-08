@@ -1396,6 +1396,17 @@ async function run() {
         "Variants CSV",
         "Product Feed CSV",
         "Import Template",
+        "Import Products",
+      ],
+    },
+    {
+      label: "admin product import content",
+      path: "/dashboard/stores/demo-store-outdoor/products/import",
+      includes: [
+        "Import products",
+        "CSV file",
+        "CSV rows",
+        "Import Template",
       ],
     },
     {
@@ -1956,9 +1967,9 @@ async function run() {
       label: "admin product import template csv export",
       path: "/dashboard/stores/demo-store-outdoor/products/import-template/export",
       includes: [
-        "row_type,handle,title,status,sku,category,description,price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_inventory,variant_status,instructions",
+        "row_type,handle,title,status,sku,category,description,price,compare_at_price,inventory,image_url,option_name,option_value,variant_sku,variant_price,variant_compare_at_price,variant_inventory,variant_status,instructions",
         "product,field-carry-pack,Field Carry Pack,draft,NLS-BAG-001,Bags",
-        "variant,field-carry-pack,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,14,active",
+        "variant,field-carry-pack,,,,,,,,,,Color,Forest,NLS-BAG-001-FOR,129.00,159.00,14,active",
         "Delete note rows before uploading.",
       ],
     },
